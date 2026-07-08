@@ -85,6 +85,7 @@ type activityDay struct {
 	Date    string
 	Minutes int
 	Level   int
+	Empty   bool
 }
 
 type hub struct {
@@ -120,9 +121,10 @@ func main() {
 	mux.HandleFunc("GET /login", a.loginForm)
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
-	mux.HandleFunc("GET /dashboard", a.dashboard)
+	mux.HandleFunc("GET /dashboard", a.home)
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
+	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
 	mux.HandleFunc("POST /todo/", a.requireAuth(a.todoAction))
 	mux.HandleFunc("POST /rooms", a.requireAuth(a.createRoom))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
@@ -155,7 +157,7 @@ func (a *app) migrate(ctx context.Context) error {
 }
 
 func (a *app) home(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	a.dashboard(w, r)
 }
 
 func (a *app) signupForm(w http.ResponseWriter, r *http.Request) {
@@ -165,13 +167,13 @@ func (a *app) signupForm(w http.ResponseWriter, r *http.Request) {
 func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
-	displayName := strings.TrimSpace(r.FormValue("display_name"))
 	password := r.FormValue("password")
 	next := safeNext(r.FormValue("next"))
-	if username == "" || displayName == "" || password == "" {
-		a.render(w, "signup", pageData{Title: "Create account", Next: next, Error: "Use a display name, username, and password."})
+	if username == "" || password == "" {
+		a.render(w, "signup", pageData{Title: "Create account", Next: next, Error: "Username and password are required."})
 		return
 	}
+	displayName := displayNameFromUsername(username)
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, "could not hash password", http.StatusInternalServerError)
@@ -211,7 +213,7 @@ func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token = $1`, cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -243,6 +245,12 @@ func (a *app) startSoloTimer(w http.ResponseWriter, r *http.Request) {
 	focus := clampInt(r.FormValue("focus_minutes"), 5, 180, 50)
 	ends := time.Now().Add(time.Duration(focus) * time.Minute)
 	_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_runs (user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at) VALUES ($1, 'focus', $2, 0, 1, $3)`, u.ID, focus, ends)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (a *app) cancelSoloTimer(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL`, u.ID)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -365,6 +373,11 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 		if timer != nil && timer.Phase == "break" {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, u.ID)
+		}
+	case "timer-leave":
+		timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+		if timer != nil && timer.Participant {
+			_, _ = a.db.Exec(r.Context(), `DELETE FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2`, timer.ID, u.ID)
 		}
 	default:
 		http.NotFound(w, r)
@@ -520,9 +533,16 @@ func (a *app) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func displayNameFromUsername(username string) string {
+	if username == "" {
+		return ""
+	}
+	return strings.ToUpper(username[:1]) + username[1:]
+}
+
 func safeNext(raw string) string {
 	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
-		return "/dashboard"
+		return "/"
 	}
 	return raw
 }
@@ -599,14 +619,34 @@ func (a *app) activity(ctx context.Context, userID string) ([]activityDay, error
 	}
 	defer rows.Close()
 	var days []activityDay
+	var dates []time.Time
 	for rows.Next() {
 		var date time.Time
 		var minutes int
 		if rows.Scan(&date, &minutes) == nil {
+			dates = append(dates, date)
 			days = append(days, activityDay{Date: date.Format("Jan 2"), Minutes: minutes, Level: heatLevel(minutes)})
 		}
 	}
-	return days, nil
+	return arrangeActivityGrid(days, dates), nil
+}
+
+func arrangeActivityGrid(days []activityDay, dates []time.Time) []activityDay {
+	if len(days) == 0 {
+		return days
+	}
+	startWeekday := int(dates[0].Weekday())
+	numWeeks := (len(days) + startWeekday + 6) / 7
+	cells := make([]activityDay, numWeeks*7)
+	for i := range cells {
+		cells[i] = activityDay{Empty: true}
+	}
+	for i, day := range days {
+		offset := startWeekday + i
+		idx := (offset/7)*7 + (offset % 7)
+		cells[idx] = day
+	}
+	return cells
 }
 
 func (a *app) render(w http.ResponseWriter, name string, data pageData) {

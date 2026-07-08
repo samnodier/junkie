@@ -8,6 +8,9 @@
     activity: 'junkie:activity',
   };
 
+  const CIRC = 2 * Math.PI * 88;
+  const clampMinutes = (n) => Math.min(180, Math.max(5, n));
+
   const load = (key, fallback) => {
     try {
       return JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -60,6 +63,88 @@
     return m + ':' + s;
   };
 
+  const setRing = (timer, ratio) => {
+    const ring = timer?.querySelector('.circle-timer-progress');
+    if (!ring) return;
+    const r = Math.max(0, Math.min(1, ratio));
+    ring.style.strokeDashoffset = String(CIRC * (1 - r));
+  };
+
+  const ringSVG = () =>
+    '<svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">' +
+      '<circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>' +
+      '<circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>' +
+    '</svg>';
+
+  const workMapPanelHTML = () =>
+    '<article class="panel work-map-panel">' +
+      '<div class="panel-title"><h2>Work map</h2><span>Focused minutes per day</span></div>' +
+      '<div class="heatmap" aria-label="Activity heat map">' + heatmapHTML() + '</div>' +
+    '</article>';
+
+  const runningTimerHTML = (timer) => {
+    const total = timer.focusMinutes * 60;
+    const left = secondsLeft(timer);
+    return (
+      '<article class="circle-timer-wrap">' +
+        '<div class="circle-timer running" role="timer" aria-label="Focus countdown">' +
+          ringSVG() +
+          '<div class="circle-timer-core">' +
+            '<div class="circle-timer-countdown" id="guest-countdown" data-total="' + total + '">' +
+              formatCountdown(left) +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<button type="button" class="timer-cancel" id="guest-timer-cancel">Cancel focus</button>' +
+      '</article>'
+    );
+  };
+
+  const idleTimerHTML = () =>
+    '<article class="circle-timer-wrap">' +
+      '<form class="circle-timer-form" id="guest-timer-form">' +
+        '<div class="circle-timer idle" role="group" aria-label="Set focus duration">' +
+          ringSVG() +
+          '<div class="circle-timer-core">' +
+            '<button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>' +
+            '<label class="circle-timer-time">' +
+              '<input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">' +
+              '<span class="circle-timer-suffix">min</span>' +
+            '</label>' +
+            '<button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>' +
+          '</div>' +
+          '<span class="circle-timer-hint">Tap to start</span>' +
+        '</div>' +
+      '</form>' +
+    '</article>';
+
+  const wireIdleTimer = (form) => {
+    const timer = form.querySelector('.circle-timer.idle');
+    const input = form.querySelector('input[name="focus_minutes"]');
+    if (!timer || !input) return;
+
+    const syncRing = () => {
+      const minutes = clampMinutes(Number(input.value) || 50);
+      input.value = minutes;
+      setRing(timer, minutes / 180);
+    };
+
+    timer.querySelectorAll('.circle-timer-step').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        input.value = clampMinutes(Number(input.value) + Number(btn.dataset.delta));
+        syncRing();
+      });
+    });
+
+    input.addEventListener('click', (event) => event.stopPropagation());
+    input.addEventListener('input', syncRing);
+    input.addEventListener('change', syncRing);
+    timer.addEventListener('click', () => form.requestSubmit());
+    syncRing();
+  };
+
   const heatmapDays = () => {
     const activity = load(keys.activity, {});
     const days = [];
@@ -97,15 +182,20 @@
 
     if (inFocus) {
       root.innerHTML =
-        '<article class="timer-card focus">' +
-          '<p class="eyebrow">Solo focus · hidden-desk mode</p>' +
-          '<div class="countdown" id="guest-countdown">' + formatCountdown(secondsLeft(timer)) + '</div>' +
-          '<p class="muted">Private todos and rooms are hidden until this block ends.</p>' +
-        '</article>' +
-        '<article class="panel">' +
-          '<div class="panel-title"><h2>Work map</h2><span>Focused minutes per day</span></div>' +
-          '<div class="heatmap" aria-label="Activity heat map">' + heatmapHTML() + '</div>' +
-        '</article>';
+        runningTimerHTML(timer) +
+        '<details class="work-map-collapsible">' +
+          '<summary class="work-map-link">Work map</summary>' +
+          workMapPanelHTML() +
+        '</details>';
+
+      document.getElementById('guest-timer-cancel')?.addEventListener('click', () => {
+        save(keys.timer, null);
+        render();
+      });
+
+      const running = root.querySelector('.circle-timer.running');
+      const total = timer.focusMinutes * 60;
+      setRing(running, secondsLeft(timer) / total);
 
       tickHandle = setInterval(() => {
         const active = finishTimerIfNeeded();
@@ -114,7 +204,11 @@
           return;
         }
         const box = document.getElementById('guest-countdown');
-        if (box) box.textContent = formatCountdown(secondsLeft(active));
+        const left = secondsLeft(active);
+        if (box) {
+          box.textContent = formatCountdown(left);
+          setRing(running, left / total);
+        }
       }, 1000);
       return;
     }
@@ -145,18 +239,8 @@
           '<p><a href="/login">Log in</a> · <a href="/signup">Create account</a></p>' +
         '</article>' +
       '</section>' +
-      '<article class="timer-card idle">' +
-        '<p class="eyebrow">Solo timer</p>' +
-        '<h2>Run a private focus block.</h2>' +
-        '<form class="inline-form" id="guest-timer-form">' +
-          '<input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">' +
-          '<button type="submit">Start solo focus</button>' +
-        '</form>' +
-      '</article>' +
-      '<article class="panel">' +
-        '<div class="panel-title"><h2>Work map</h2><span>Focused minutes per day</span></div>' +
-        '<div class="heatmap" aria-label="Activity heat map">' + heatmapHTML() + '</div>' +
-      '</article>';
+      idleTimerHTML() +
+      workMapPanelHTML();
 
     const todoForm = document.getElementById('guest-todo-form');
     todoForm?.addEventListener('submit', (event) => {
@@ -187,10 +271,12 @@
       render();
     });
 
-    document.getElementById('guest-timer-form')?.addEventListener('submit', (event) => {
+    const timerForm = document.getElementById('guest-timer-form');
+    wireIdleTimer(timerForm);
+    timerForm?.addEventListener('submit', (event) => {
       event.preventDefault();
       const minutes = Number(new FormData(event.target).get('focus_minutes')) || 50;
-      const focusMinutes = Math.min(180, Math.max(5, minutes));
+      const focusMinutes = clampMinutes(minutes);
       const endsAt = new Date(Date.now() + focusMinutes * 60 * 1000).toISOString();
       save(keys.timer, { endsAt, focusMinutes });
       render();

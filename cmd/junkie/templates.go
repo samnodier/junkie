@@ -15,6 +15,7 @@ func parseTemplates() *template.Template {
 			}
 			return seconds
 		},
+		"mul": func(a, b int) int { return a * b },
 		"join": strings.Join,
 	}
 	return template.Must(template.New("junkie").Funcs(funcs).Parse(layoutTemplates))
@@ -33,7 +34,7 @@ const layoutTemplates = `
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/dashboard" aria-label="junkie dashboard">
+    <a class="brand" href="/" aria-label="junkie home">
       <span class="brand-mark">j</span>
       <span>junkie</span>
     </a>
@@ -54,17 +55,64 @@ const layoutTemplates = `
     {{template "content" .}}
   </main>
   <script>
-    document.querySelectorAll('[data-seconds]').forEach((box) => {
-      let left = Number(box.dataset.seconds || 0);
-      const paint = () => {
-        const m = String(Math.floor(left / 60)).padStart(2, '0');
-        const s = String(left % 60).padStart(2, '0');
-        box.textContent = m + ':' + s;
-        if (left > 0) left -= 1;
+    (function () {
+      const CIRC = 2 * Math.PI * 88;
+      const clampMinutes = (n) => Math.min(180, Math.max(5, n));
+
+      const setRing = (timer, ratio) => {
+        const ring = timer?.querySelector('.circle-timer-progress');
+        if (!ring) return;
+        const r = Math.max(0, Math.min(1, ratio));
+        ring.style.strokeDashoffset = String(CIRC * (1 - r));
       };
-      paint();
-      setInterval(paint, 1000);
-    });
+
+      const wireIdleTimer = (form) => {
+        const timer = form.querySelector('.circle-timer.idle');
+        const input = form.querySelector('input[name="focus_minutes"]');
+        if (!timer || !input) return;
+
+        const syncRing = () => {
+          const minutes = clampMinutes(Number(input.value) || 50);
+          input.value = minutes;
+          setRing(timer, minutes / 180);
+        };
+
+        timer.querySelectorAll('.circle-timer-step').forEach((btn) => {
+          btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            input.value = clampMinutes(Number(input.value) + Number(btn.dataset.delta));
+            syncRing();
+          });
+        });
+
+        input.addEventListener('click', (event) => event.stopPropagation());
+        input.addEventListener('input', syncRing);
+        input.addEventListener('change', syncRing);
+
+        timer.addEventListener('click', () => form.requestSubmit());
+        syncRing();
+      };
+
+      document.querySelectorAll('.circle-timer-form').forEach(wireIdleTimer);
+
+      document.querySelectorAll('[data-seconds]').forEach((box) => {
+        let left = Number(box.dataset.seconds || 0);
+        const total = Number(box.dataset.total || left) || 1;
+        const timer = box.closest('.circle-timer');
+        const paint = () => {
+          const m = String(Math.floor(left / 60)).padStart(2, '0');
+          const s = String(left % 60).padStart(2, '0');
+          box.textContent = m + ':' + s;
+          setRing(timer, left / total);
+          if (left > 0) left -= 1;
+        };
+        paint();
+        setInterval(paint, 1000);
+      });
+
+      window.junkieCircleTimer = { CIRC, clampMinutes, setRing, wireIdleTimer };
+    })();
   </script>
 </body>
 </html>
@@ -87,7 +135,7 @@ const layoutTemplates = `
         <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
         <button>Log in</button>
       </form>
-      <p class="muted">New here? <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create an account</a> · <a href="/dashboard">Keep using solo mode</a></p>
+      <p class="muted">New here? <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create an account</a> · <a href="/">Keep using solo mode</a></p>
     </section>
   {{else if eq .Title "Create account"}}
     <section class="auth-card">
@@ -101,36 +149,32 @@ const layoutTemplates = `
         <label>Password <input type="password" name="password" autocomplete="new-password" required></label>
         <button>Create account</button>
       </form>
-      <p class="muted">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a> · <a href="/dashboard">Keep using solo mode</a></p>
+      <p class="muted">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a> · <a href="/">Keep using solo mode</a></p>
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .GuestMode}}
-    <section class="dashboard-hero">
-      <div>
-        <p class="eyebrow">Personal desk</p>
-        <h1>Use junkie solo. No account needed.</h1>
-        <p class="muted">Your private list, timer, and work map stay on this device until you sign up.</p>
-      </div>
-    </section>
     <div id="guest-desk"></div>
     <script src="/assets/guest.js"></script>
     {{else}}
-    <section class="dashboard-hero">
-      <div>
-        <p class="eyebrow">Personal desk</p>
-        <h1>Your work map, rooms, and private list.</h1>
-      </div>
-      <form class="room-create" method="post" action="/rooms">
-        <input name="name" placeholder="Room name, e.g. Study hall">
-        <button>Create room</button>
-      </form>
-    </section>
+    <form class="room-create" method="post" action="/rooms">
+      <input name="name" placeholder="Room name, e.g. Study hall">
+      <button>Create room</button>
+    </form>
 
     {{if .SoloTimer}}
-      <article class="timer-card focus">
-        <p class="eyebrow">Solo focus · hidden-desk mode</p>
-        <div class="countdown" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}">--:--</div>
-        <p class="muted">Private todos and rooms are hidden until this block ends.</p>
+      <article class="circle-timer-wrap">
+        <div class="circle-timer running" role="timer" aria-label="Focus countdown">
+          <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
+            <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
+          </svg>
+          <div class="circle-timer-core">
+            <div class="circle-timer-countdown countdown" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.FocusMinutes 60}}">--:--</div>
+          </div>
+        </div>
+        <form method="post" action="/solo/cancel">
+          <button type="submit" class="timer-cancel">Cancel focus</button>
+        </form>
       </article>
     {{else}}
     <section class="grid two">
@@ -141,7 +185,7 @@ const layoutTemplates = `
         </div>
         <form class="inline-form" method="post" action="/todos">
           <input name="text" placeholder="What do you need to do?" required>
-          <button>Add</button>
+          <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
         </form>
         <ul class="todo-list">
           {{range .PersonalTodos}}
@@ -150,8 +194,6 @@ const layoutTemplates = `
               <span>{{.Text}}</span>
               <form method="post" action="/todo/{{.ID}}/delete"><button class="ghost">Delete</button></form>
             </li>
-          {{else}}
-            <li class="empty">Add a private task before joining a room.</li>
           {{end}}
         </ul>
       </article>
@@ -174,25 +216,55 @@ const layoutTemplates = `
       </article>
     </section>
 
-    <article class="timer-card idle">
-      <p class="eyebrow">Solo timer</p>
-      <h2>Run a private focus block.</h2>
-      <form class="inline-form" method="post" action="/solo/start">
-        <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
-        <button>Start solo focus</button>
+    <article class="circle-timer-wrap">
+      <form class="circle-timer-form" method="post" action="/solo/start">
+        <div class="circle-timer idle" role="group" aria-label="Set focus duration">
+          <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
+            <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
+          </svg>
+          <div class="circle-timer-core">
+            <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
+            <label class="circle-timer-time">
+              <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
+              <span class="circle-timer-suffix">min</span>
+            </label>
+            <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
+          </div>
+          <span class="circle-timer-hint">Tap to start</span>
+        </div>
       </form>
     </article>
     {{end}}
 
-    <article class="panel">
+    {{if .SoloTimer}}
+    <details class="work-map-collapsible">
+      <summary class="work-map-link">Work map</summary>
+      <article class="panel work-map-panel">
+        <div class="panel-title">
+          <h2>Work map</h2>
+          <span>Focused minutes per day</span>
+        </div>
+        <div class="heatmap-wrap">
+          <div class="heatmap" aria-label="Activity heat map">
+            {{range .Activity}}{{if .Empty}}<span class="cell cell-empty"></span>{{else}}<span class="cell l{{.Level}}" title="{{.Date}}: {{.Minutes}} min"></span>{{end}}{{end}}
+          </div>
+        </div>
+      </article>
+    </details>
+    {{else}}
+    <article class="panel work-map-panel">
       <div class="panel-title">
         <h2>Work map</h2>
         <span>Focused minutes per day</span>
       </div>
-      <div class="heatmap" aria-label="Activity heat map">
-        {{range .Activity}}<span class="cell l{{.Level}}" title="{{.Date}}: {{.Minutes}} min"></span>{{end}}
+      <div class="heatmap-wrap">
+        <div class="heatmap" aria-label="Activity heat map">
+          {{range .Activity}}{{if .Empty}}<span class="cell cell-empty"></span>{{else}}<span class="cell l{{.Level}}" title="{{.Date}}: {{.Minutes}} min"></span>{{end}}{{end}}
+        </div>
       </div>
     </article>
+    {{end}}
     {{end}}
   {{else}}
     <section class="{{if .FocusMode}}focus-shell{{else}}room-shell{{end}}">
@@ -220,6 +292,11 @@ const layoutTemplates = `
           {{end}}
           {{if and (eq .Timer.Phase "focus") (not .Timer.Participant)}}
             <p class="notice">A focus block is running. You can watch now and join during the next break.</p>
+          {{end}}
+          {{if and (eq .Timer.Phase "focus") .Timer.Participant}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-leave">
+              <button type="submit" class="timer-cancel">Leave focus block</button>
+            </form>
           {{end}}
         </article>
       {{else if not .FocusMode}}
@@ -250,7 +327,7 @@ const layoutTemplates = `
             </div>
             <form class="inline-form" method="post" action="/r/{{.Room.Code}}/todos">
               <input name="text" placeholder="What are you working on?" required>
-              <button>Add</button>
+              <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
             </form>
             <ul class="todo-list">
               {{range .RoomTodos}}
@@ -259,8 +336,6 @@ const layoutTemplates = `
                   <span><strong>{{.DisplayName}}</strong> — {{.Text}}</span>
                   <form method="post" action="/todo/{{.ID}}/delete"><button class="ghost">Delete</button></form>
                 </li>
-              {{else}}
-                <li class="empty">No public room todos yet.</li>
               {{end}}
             </ul>
           </article>
@@ -481,6 +556,16 @@ h2 {
   background: var(--mint);
   color: var(--deep);
 }
+.todo-add-plus {
+  flex: 0 0 auto;
+  width: 2.6rem;
+  height: 2.6rem;
+  padding: 0;
+  border-radius: 14px;
+  font-size: 1.35rem;
+  line-height: 1;
+  font-weight: 500;
+}
 .room-list { display: grid; gap: .65rem; }
 .room-row {
   display: grid;
@@ -493,21 +578,174 @@ h2 {
   background: #fffaf0;
 }
 .room-row span { color: var(--muted); }
+.heatmap-wrap {
+  overflow-x: auto;
+  padding-bottom: .25rem;
+}
 .heatmap {
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: .35rem;
+  display: inline-grid;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-flow: column;
+  grid-auto-columns: 11px;
+  gap: 3px;
 }
 .cell {
-  aspect-ratio: 1;
-  border-radius: 6px;
-  background: #e8dfc9;
-  border: 1px solid rgba(23,33,27,.05);
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: #ebedf0;
 }
-.cell.l1 { background: #cfe7c8; }
-.cell.l2 { background: #94ca86; }
-.cell.l3 { background: #4e9d5c; }
-.cell.l4 { background: #0e6b43; }
+.cell-empty {
+  visibility: hidden;
+}
+.cell.l1 { background: #9be9a8; }
+.cell.l2 { background: #40c463; }
+.cell.l3 { background: #30a14e; }
+.cell.l4 { background: #216e39; }
+.circle-timer-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  justify-content: center;
+  padding: 1.5rem 0 2.5rem;
+  margin-bottom: 1rem;
+}
+.timer-cancel {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-weight: 600;
+  font-size: .9rem;
+  padding: .55rem 1.1rem;
+}
+.timer-cancel:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, var(--line));
+  filter: none;
+}
+.work-map-collapsible {
+  margin-bottom: 1rem;
+}
+.work-map-collapsible .work-map-panel {
+  margin-top: .75rem;
+}
+.work-map-link {
+  display: inline-block;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: .92rem;
+  list-style: none;
+}
+.work-map-collapsible summary {
+  list-style: none;
+}
+.work-map-collapsible summary::-webkit-details-marker {
+  display: none;
+}
+.work-map-link:hover {
+  color: var(--deep);
+}
+.circle-timer {
+  position: relative;
+  width: min(260px, 70vw);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+.circle-timer.idle:hover .circle-timer-progress { stroke: var(--deep); }
+.circle-timer-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.circle-timer-track {
+  stroke: var(--line);
+}
+.circle-timer-progress {
+  stroke: var(--green);
+  stroke-linecap: round;
+  transition: stroke-dashoffset .35s ease, stroke .2s ease;
+}
+.circle-timer.running .circle-timer-progress { stroke: var(--deep); }
+.circle-timer.running { cursor: default; }
+.circle-timer-core {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  pointer-events: none;
+}
+.circle-timer-time {
+  display: grid;
+  justify-items: center;
+  pointer-events: auto;
+}
+.circle-timer-time input {
+  width: 4rem;
+  text-align: center;
+  font-size: clamp(2rem, 9vw, 2.6rem);
+  font-weight: 950;
+  letter-spacing: -.06em;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+  -moz-appearance: textfield;
+}
+.circle-timer-time input::-webkit-outer-spin-button,
+.circle-timer-time input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.circle-timer-suffix {
+  font-size: .78rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.circle-timer-countdown {
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(2rem, 9vw, 2.6rem);
+  font-weight: 950;
+  letter-spacing: -.06em;
+  line-height: 1;
+}
+.circle-timer-step {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--mint);
+  color: var(--deep);
+  font-size: 1.2rem;
+  line-height: 1;
+  font-weight: 800;
+  pointer-events: auto;
+  flex-shrink: 0;
+}
+.circle-timer-step:hover { filter: brightness(1.04); }
+.circle-timer-hint {
+  position: absolute;
+  bottom: -1.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: .78rem;
+  color: var(--muted);
+  letter-spacing: .02em;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .timer-card {
   padding: clamp(1.25rem, 4vw, 2rem);
   margin-bottom: 1rem;
