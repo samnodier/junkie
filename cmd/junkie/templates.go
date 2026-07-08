@@ -805,29 +805,25 @@ h2 {
   margin: 1rem 0 0;
   padding: 0;
   display: grid;
-  gap: .55rem;
+  gap: 0;
 }
 .todo-list li {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: .7rem;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: .55rem;
-  background: var(--surface);
+  gap: .5rem;
+  padding: .2rem .35rem;
+  border-radius: 6px;
+  background: transparent;
 }
-.todo-list li.done {
-  background: color-mix(in srgb, var(--muted) 14%, var(--surface));
-  border-color: color-mix(in srgb, var(--muted) 40%, var(--line));
+.todo-list li:hover:not(.empty) {
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
 }
 .todo-list li.done span {
   color: var(--muted);
   text-decoration: line-through;
 }
 .todo-list li.removed {
-  background: color-mix(in srgb, var(--muted) 10%, var(--surface));
-  border-color: color-mix(in srgb, var(--muted) 30%, var(--line));
   opacity: .82;
 }
 .todo-list li.removed span {
