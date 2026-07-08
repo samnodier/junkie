@@ -326,6 +326,16 @@ const layoutTemplates = `
   </li>
 {{end}}
 
+{{define "auth-back"}}
+<a class="auth-back" href="{{if .User.ID}}/dashboard{{else}}/{{end}}" aria-label="Back to home">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+</a>
+{{end}}
+
+{{define "auth-brand"}}
+<div class="auth-brand"><span class="brand-mark">j</span></div>
+{{end}}
+
 {{define "login"}}{{template "shell" .}}{{end}}
 {{define "signup"}}{{template "shell" .}}{{end}}
 {{define "dashboard"}}{{template "shell" .}}{{end}}
@@ -377,26 +387,31 @@ const layoutTemplates = `
 {{define "content"}}
   {{if eq .Title "Log in"}}
     <section class="auth-card">
-      <h1>Log in</h1>
-      <form class="stack" method="post" action="/login">
+      <div class="auth-card-top">
+        {{template "auth-back" .}}
+        {{template "auth-brand" .}}
+      </div>
+      <form class="stack auth-form" method="post" action="/login">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
         <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
         <button>Log in</button>
       </form>
-      <p class="muted"><a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a> · <a href="/">Back</a></p>
+      <p class="muted auth-switch">Don't have an account? <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a></p>
     </section>
   {{else if eq .Title "Create account"}}
     <section class="auth-card">
-      <h1>Create account</h1>
-      <form class="stack" method="post" action="/signup">
+      <div class="auth-card-top">
+        {{template "auth-back" .}}
+        {{template "auth-brand" .}}
+      </div>
+      <form class="stack auth-form" method="post" action="/signup">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
-        <label>Display name <input name="display_name" autocomplete="name" required></label>
         <label>Username <input name="username" autocomplete="username" required></label>
         <label>Password <input type="password" name="password" autocomplete="new-password" required></label>
         <button>Create account</button>
       </form>
-      <p class="muted"><a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a> · <a href="/">Back</a></p>
+      <p class="muted auth-switch">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a></p>
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .GuestMode}}
@@ -804,6 +819,57 @@ code {
   max-width: 520px;
   margin: 8vh auto;
   padding: clamp(1.5rem, 5vw, 3rem);
+}
+.auth-card-top {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  margin-bottom: 1.5rem;
+}
+.auth-back {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: var(--radius);
+}
+.auth-back:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+.auth-back svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.auth-brand {
+  display: flex;
+  justify-content: center;
+}
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+.auth-form input {
+  padding: 0.5rem 1rem;
+}
+.auth-switch {
+  margin: 1.25rem 0 0;
+  text-align: center;
+  font-size: 0.92rem;
+}
+.auth-switch a {
+  font-weight: 700;
 }
 h1, h2, p { margin-top: 0; }
 h1 {
