@@ -102,12 +102,6 @@
       '<circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>' +
     '</svg>';
 
-  const workMapPanelHTML = () =>
-    '<article class="panel work-map-panel">' +
-      '<div class="panel-title"><h2>Work map</h2><span>Focused minutes per day</span></div>' +
-      heatmapChartHTML() +
-    '</article>';
-
   const buildYearHeatmap = () => {
     const activity = load(keys.activity, {});
     const today = new Date();
@@ -190,7 +184,7 @@
     return { cells, months, weeks: numWeeks, totalMinutes };
   };
 
-  const heatmapChartHTML = () => {
+  const heatmapChartHTML = (showSummary = true) => {
     const { cells, months, weeks, totalMinutes } = buildYearHeatmap();
     const hours = Math.round(totalMinutes / 60);
     const monthHTML = months
@@ -206,7 +200,7 @@
 
     return (
       '<div class="heatmap-chart">' +
-        '<p class="heatmap-summary">' + hours + ' hours focused in the last year</p>' +
+        (showSummary ? '<p class="heatmap-summary">' + hours + ' hours focused in the last year</p>' : '') +
         '<div class="heatmap-layout">' +
           '<div class="heatmap-dow" aria-hidden="true">' +
             '<span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>' +
@@ -231,6 +225,12 @@
         '</div>' +
       '</div>'
     );
+  };
+
+  const renderGuestProfile = () => {
+    const profileMap = document.getElementById('guest-profile-work-map');
+    if (!profileMap) return;
+    profileMap.innerHTML = heatmapChartHTML(false);
   };
 
   const runningTimerHTML = (timer) => {
@@ -408,6 +408,7 @@
     const timer = finishTimerIfNeeded();
     const todos = load(keys.todos, []);
     const inFocus = Boolean(timer);
+    renderGuestProfile();
 
     if (tickHandle) {
       clearInterval(tickHandle);
@@ -487,11 +488,7 @@
           '</form>' +
           '<ul class="todo-list" id="guest-todos">' + todoItems + '</ul>' +
         '</article>' +
-      '</section>' +
-      '<details class="work-map-collapsible">' +
-        '<summary class="work-map-link">Work map</summary>' +
-        workMapPanelHTML() +
-      '</details>';
+      '</section>';
 
     const todoForm = document.getElementById('guest-todo-form');
     const todoInput = todoForm?.querySelector('input[name="text"]');
@@ -545,4 +542,9 @@
   };
 
   render();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderGuestProfile);
+  } else {
+    renderGuestProfile();
+  }
 })();

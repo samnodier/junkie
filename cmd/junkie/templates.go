@@ -15,7 +15,7 @@ func parseTemplates() *template.Template {
 			}
 			return seconds
 		},
-		"mul": func(a, b int) int { return a * b },
+		"mul":  func(a, b int) int { return a * b },
 		"join": strings.Join,
 		"focusHours": func(minutes int) int {
 			return (minutes + 30) / 60
@@ -320,6 +320,13 @@ const layoutTemplates = `
     <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a>
     <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a>
   </nav>
+  <section class="drawer-profile">
+    <div class="drawer-profile-head">
+      <h3>Profile</h3>
+      <span>Stored on this device</span>
+    </div>
+    <div id="guest-profile-work-map"></div>
+  </section>
 </aside>
 {{end}}
 
@@ -344,6 +351,24 @@ const layoutTemplates = `
       <p class="empty">No rooms yet.</p>
     {{end}}
   </div>
+  <section class="drawer-profile">
+    <div class="drawer-profile-head">
+      <h3>Profile</h3>
+      <span>{{.User.DisplayName}}</span>
+    </div>
+    <div class="drawer-stats">
+      <div>
+        <strong>{{focusHours .ActivityTotalMinutes}}</strong>
+        <span>focus hours</span>
+      </div>
+      <div>
+        <strong>{{len .Rooms}}</strong>
+        <span>rooms joined</span>
+      </div>
+    </div>
+    {{template "heatmap" .}}
+    <p class="muted drawer-follow-stub">Follow friends — coming soon</p>
+  </section>
 </aside>
 {{end}}
 
@@ -448,16 +473,6 @@ const layoutTemplates = `
         </article>
       </section>
 
-      <details class="work-map-collapsible">
-        <summary class="work-map-link">Work map</summary>
-        <article class="panel work-map-panel">
-          <div class="panel-title">
-            <h2>Work map</h2>
-            <span>Focused minutes per day</span>
-          </div>
-          {{template "heatmap" .}}
-        </article>
-      </details>
     </div>
     {{end}}
     {{end}}
@@ -990,6 +1005,58 @@ h2 {
 .menu-drawer .room-create {
   margin-bottom: .5rem;
 }
+.drawer-profile {
+  display: grid;
+  gap: .85rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+.drawer-profile-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: .75rem;
+}
+.drawer-profile-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: -.03em;
+}
+.drawer-profile-head span,
+.drawer-follow-stub {
+  color: var(--muted);
+  font-size: .86rem;
+}
+.drawer-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem;
+}
+.drawer-stats div {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: .75rem;
+  background: var(--surface);
+}
+.drawer-stats strong,
+.drawer-stats span {
+  display: block;
+}
+.drawer-stats strong {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.drawer-stats span {
+  color: var(--muted);
+  font-size: .78rem;
+  margin-top: .25rem;
+}
+.drawer-profile .heatmap-summary {
+  display: none;
+}
+.drawer-profile .heatmap {
+  min-height: 82px;
+}
 body.menu-drawer-open {
   overflow: hidden;
 }
@@ -1104,7 +1171,7 @@ body.menu-drawer-open {
 .desk-todos-panel {
   display: flex;
   flex-direction: column;
-  height: min(22rem, calc(100vh - 14rem));
+  height: min(32rem, calc(100vh - 10rem));
   margin-bottom: 0;
 }
 .desk-todos-panel .panel-title,

@@ -68,22 +68,22 @@ type timerRun struct {
 }
 
 type pageData struct {
-	Title         string
-	User          user
-	Error         string
-	Rooms         []room
-	Room          room
-	PersonalTodos []todo
-	RoomTodos     []todo
-	Timer         *timerRun
-	SoloTimer     *timerRun
+	Title                string
+	User                 user
+	Error                string
+	Rooms                []room
+	Room                 room
+	PersonalTodos        []todo
+	RoomTodos            []todo
+	Timer                *timerRun
+	SoloTimer            *timerRun
 	Activity             []activityDay
 	ActivityMonths       []activityMonth
 	ActivityWeeks        int
 	ActivityTotalMinutes int
 	FocusMode            bool
-	GuestMode     bool
-	Next          string
+	GuestMode            bool
+	Next                 string
 }
 
 type activityDay struct {
