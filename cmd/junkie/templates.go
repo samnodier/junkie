@@ -448,18 +448,7 @@ const layoutTemplates = `
     </section>
     {{end}}
 
-    {{if .SoloTimer}}
-    <details class="work-map-collapsible">
-      <summary class="work-map-link">Work map</summary>
-      <article class="panel work-map-panel">
-        <div class="panel-title">
-          <h2>Work map</h2>
-          <span>Focused minutes per day</span>
-        </div>
-        {{template "heatmap" .}}
-      </article>
-    </details>
-    {{else}}
+    {{if not .SoloTimer}}
     <details class="work-map-collapsible">
       <summary class="work-map-link">Work map</summary>
       <article class="panel work-map-panel">

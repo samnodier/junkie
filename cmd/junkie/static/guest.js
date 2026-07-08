@@ -415,12 +415,7 @@
     }
 
     if (inFocus) {
-      root.innerHTML =
-        focusDeskHTML(runningTimerHTML(timer), todos) +
-        '<details class="work-map-collapsible">' +
-          '<summary class="work-map-link">Work map</summary>' +
-          workMapPanelHTML() +
-        '</details>';
+      root.innerHTML = focusDeskHTML(runningTimerHTML(timer), todos);
 
       document.getElementById('guest-timer-cancel')?.addEventListener('click', () => {
         focusTodosPeekOpen = false;
