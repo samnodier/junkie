@@ -5,14 +5,16 @@ import (
 	"net/http"
 )
 
-//go:embed static/guest.js
-var guestAssets embed.FS
+//go:embed static/*
+var staticAssets embed.FS
 
-func (a *app) guestJS(w http.ResponseWriter, r *http.Request) {
-	data, err := guestAssets.ReadFile("static/guest.js")
-	if err != nil {
-		http.Error(w, "guest script missing", http.StatusInternalServerError)
-		return
+func (a *app) serveStaticAsset(name, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := staticAssets.ReadFile("static/" + name)
+		if err != nil {
+			http.Error(w, "asset missing", http.StatusNotFound)
+			return
+		}
+		serveStatic(w, r, contentType, data)
 	}
-	serveStatic(w, r, "application/javascript; charset=utf-8", data)
 }

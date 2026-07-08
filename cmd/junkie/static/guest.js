@@ -447,8 +447,10 @@
       setRing(running, secondsLeft(timer) / total);
 
       tickHandle = setInterval(() => {
+        const hadTimer = load(keys.timer, null);
         const active = finishTimerIfNeeded();
         if (!active) {
+          if (hadTimer) window.junkieNotify?.onTimerEnd('focus');
           render();
           return;
         }
@@ -533,6 +535,7 @@
     wireIdleTimer(timerForm);
     timerForm?.addEventListener('submit', (event) => {
       event.preventDefault();
+      window.junkieNotify?.requestPermission();
       const minutes = Number(new FormData(event.target).get('focus_minutes')) || 50;
       const focusMinutes = clampMinutes(minutes);
       const endsAt = new Date(Date.now() + focusMinutes * 60 * 1000).toISOString();

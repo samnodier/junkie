@@ -131,7 +131,9 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /assets/app.css", a.css)
-	mux.HandleFunc("GET /assets/guest.js", a.guestJS)
+	mux.HandleFunc("GET /assets/guest.js", a.serveStaticAsset("guest.js", "application/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /assets/notifications.js", a.serveStaticAsset("notifications.js", "application/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /assets/icon.svg", a.serveStaticAsset("icon.svg", "image/svg+xml"))
 	mux.HandleFunc("GET /", a.home)
 	mux.HandleFunc("GET /signup", a.signupForm)
 	mux.HandleFunc("POST /signup", a.signup)

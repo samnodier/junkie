@@ -43,7 +43,9 @@ const layoutTemplates = `
     })();
   </script>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="/assets/notifications.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -135,19 +137,37 @@ const layoutTemplates = `
 
       document.querySelectorAll('.circle-timer-form').forEach(wireIdleTimer);
 
+      const timerPhase = (box) => {
+        const card = box.closest('.timer-card');
+        if (card?.classList.contains('break')) return 'break';
+        if (card?.classList.contains('focus')) return 'focus';
+        if (box.closest('.circle-timer.running')) return 'focus';
+        return 'focus';
+      };
+
       document.querySelectorAll('[data-seconds]').forEach((box) => {
         let left = Number(box.dataset.seconds || 0);
         const total = Number(box.dataset.total || left) || 1;
         const timer = box.closest('.circle-timer');
+        const phase = timerPhase(box);
+        let notified = false;
         const paint = () => {
           const m = String(Math.floor(left / 60)).padStart(2, '0');
           const s = String(left % 60).padStart(2, '0');
           box.textContent = m + ':' + s;
           setRing(timer, left / total);
+          if (left <= 0 && !notified) {
+            notified = true;
+            window.junkieNotify?.onTimerEnd(phase);
+          }
           if (left > 0) left -= 1;
         };
         paint();
         setInterval(paint, 1000);
+      });
+
+      document.querySelectorAll('form[action="/solo/start"], form[action$="/timer-start"]').forEach((form) => {
+        form.addEventListener('submit', () => window.junkieNotify?.requestPermission());
       });
 
       window.junkieCircleTimer = { CIRC, clampMinutes, setRing, wireIdleTimer };
@@ -569,8 +589,21 @@ const layoutTemplates = `
       {{end}}
     </section>
     <script>
-      const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/{{.Room.Code}}');
-      ws.onmessage = () => setTimeout(() => location.reload(), 200);
+      (function () {
+        const code = '{{.Room.Code}}';
+        const phaseKey = 'junkie:roomPhase:' + code;
+        const card = document.querySelector('.timer-card');
+        const phase = card?.classList.contains('break') ? 'break' : card?.classList.contains('focus') ? 'focus' : 'idle';
+        const prev = sessionStorage.getItem(phaseKey);
+        if (prev && prev !== phase) {
+          if (prev === 'focus' && (phase === 'break' || phase === 'idle')) window.junkieNotify?.onTimerEnd('focus');
+          else if (prev === 'break' && phase === 'focus') window.junkieNotify?.onTimerEnd('break');
+        }
+        sessionStorage.setItem(phaseKey, phase);
+
+        const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + code);
+        ws.onmessage = () => setTimeout(() => location.reload(), 200);
+      })();
     </script>
   {{end}}
 {{end}}
