@@ -1077,6 +1077,7 @@ body.menu-drawer-open {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0.4rem;
   width: 100%;
   height: 100%;
   pointer-events: none;
@@ -1126,9 +1127,6 @@ body.menu-drawer-open {
   line-height: 1;
 }
 .circle-timer-step {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
   width: 2.1rem;
   height: 2.1rem;
   padding: 0;
@@ -1141,8 +1139,6 @@ body.menu-drawer-open {
   pointer-events: auto;
   flex-shrink: 0;
 }
-.circle-timer-step[data-delta="-5"] { left: 5%; }
-.circle-timer-step[data-delta="5"] { right: 5%; }
 .circle-timer-step:hover { filter: brightness(1.04); }
 .circle-timer-hint {
   position: absolute;
