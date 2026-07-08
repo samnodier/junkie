@@ -1095,8 +1095,14 @@ body.menu-drawer-open {
 .desk-grid .circle-timer-wrap {
   padding: 1rem 0;
 }
+#guest-desk {
+  display: flex;
+  flex-direction: column;
+}
 .desk-grid {
-  align-items: start;
+  flex: 1;
+  align-items: center;
+  min-height: calc(100vh - 10rem);
 }
 .timer-cancel {
   background: var(--red);
