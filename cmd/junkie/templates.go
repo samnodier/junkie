@@ -121,6 +121,51 @@ const layoutTemplates = `
       });
 
       window.junkieCircleTimer = { CIRC, clampMinutes, setRing, wireIdleTimer };
+
+      const todoFocusKey = 'junkie:todoFocus';
+      if (sessionStorage.getItem(todoFocusKey)) {
+        sessionStorage.removeItem(todoFocusKey);
+        document.querySelector('form.inline-form input[name="text"]')?.focus();
+      }
+
+      document.querySelectorAll('form.inline-form').forEach((form) => {
+        const input = form.querySelector('input[name="text"]');
+        if (!input) return;
+        const action = form.getAttribute('action') || '';
+        if (!action.endsWith('/todos')) return;
+        form.addEventListener('submit', () => {
+          sessionStorage.setItem(todoFocusKey, '1');
+        });
+      });
+
+      const wireRoomsDrawer = () => {
+        const trigger = document.querySelector('.rooms-drawer-trigger');
+        const drawer = document.querySelector('.rooms-drawer');
+        const backdrop = document.querySelector('.rooms-drawer-backdrop');
+        const closeBtn = document.querySelector('.rooms-drawer-close');
+        if (!trigger || !drawer) return;
+
+        const open = () => {
+          drawer.classList.add('open');
+          backdrop?.removeAttribute('hidden');
+          drawer.setAttribute('aria-hidden', 'false');
+          document.body.classList.add('rooms-drawer-open');
+        };
+        const shut = () => {
+          drawer.classList.remove('open');
+          backdrop?.setAttribute('hidden', '');
+          drawer.setAttribute('aria-hidden', 'true');
+          document.body.classList.remove('rooms-drawer-open');
+        };
+
+        trigger.addEventListener('click', open);
+        closeBtn?.addEventListener('click', shut);
+        backdrop?.addEventListener('click', shut);
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') shut();
+        });
+      };
+      wireRoomsDrawer();
     })();
   </script>
 </body>

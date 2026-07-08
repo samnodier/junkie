@@ -278,6 +278,19 @@
 
   let tickHandle = null;
 
+  const focusTodoInput = () => {
+    document.getElementById('guest-todo-form')?.querySelector('input[name="text"]')?.focus();
+  };
+
+  const addGuestTodo = (text) => {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    const next = load(keys.todos, []);
+    next.unshift({ id: uid(), text: trimmed, done: false });
+    save(keys.todos, next);
+    return true;
+  };
+
   const render = () => {
     const timer = finishTimerIfNeeded();
     const todos = load(keys.todos, []);
@@ -332,38 +345,41 @@
       : '<li class="empty">Add a private task for today.</li>';
 
     root.innerHTML =
-      '<section class="grid two">' +
+      '<section class="grid two desk-grid">' +
+        idleTimerHTML() +
         '<article class="panel">' +
           '<div class="panel-title"><h2>Private todos</h2><span>Stored on this device</span></div>' +
           '<form class="inline-form" id="guest-todo-form">' +
             '<input name="text" placeholder="What do you need to do?" required>' +
-            '<button type="submit">Add</button>' +
+            '<button type="submit" class="todo-add-plus" aria-label="Add task">+</button>' +
           '</form>' +
           '<ul class="todo-list" id="guest-todos">' + todoItems + '</ul>' +
         '</article>' +
-        '<article class="panel">' +
-          '<div class="panel-title"><h2>Rooms</h2><span>Accounts only for shared rooms</span></div>' +
-          '<p class="muted">Create or join a room when you want to study with others. Solo mode does not need an account.</p>' +
-          '<p><a href="/login">Log in</a> · <a href="/signup">Create account</a></p>' +
-        '</article>' +
       '</section>' +
-      idleTimerHTML() +
       '<details class="work-map-collapsible">' +
         '<summary class="work-map-link">Work map</summary>' +
         workMapPanelHTML() +
       '</details>';
 
     const todoForm = document.getElementById('guest-todo-form');
+    const todoInput = todoForm?.querySelector('input[name="text"]');
+
+    const submitGuestTodo = () => {
+      if (!todoInput || !addGuestTodo(todoInput.value)) return;
+      todoInput.value = '';
+      render();
+      focusTodoInput();
+    };
+
     todoForm?.addEventListener('submit', (event) => {
       event.preventDefault();
-      const input = todoForm.querySelector('input[name="text"]');
-      const text = input.value.trim();
-      if (!text) return;
-      const next = load(keys.todos, []);
-      next.unshift({ id: uid(), text, done: false });
-      save(keys.todos, next);
-      input.value = '';
-      render();
+      submitGuestTodo();
+    });
+
+    todoInput?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      submitGuestTodo();
     });
 
     document.getElementById('guest-todos')?.addEventListener('click', (event) => {
