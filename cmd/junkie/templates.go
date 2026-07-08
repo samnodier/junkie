@@ -373,7 +373,7 @@ const layoutTemplates = `
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .GuestMode}}
-    <div id="guest-desk"></div>
+    <div id="guest-desk" class="desk-shell"></div>
     <script src="/assets/guest.js"></script>
     {{else}}
     {{if .SoloTimer}}
@@ -409,56 +409,56 @@ const layoutTemplates = `
       </aside>
     </section>
     {{else}}
-    <section class="grid two desk-grid">
-      <article class="circle-timer-wrap">
-        <form class="circle-timer-form" method="post" action="/solo/start">
-          <div class="circle-timer idle" role="group" aria-label="Set focus duration">
-            <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
-              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
-            </svg>
-            <div class="circle-timer-core">
-              <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
-              <label class="circle-timer-time">
-                <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
-                <span class="circle-timer-suffix">min</span>
-              </label>
-              <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
+    <div class="desk-shell">
+      <section class="grid two desk-grid">
+        <article class="circle-timer-wrap">
+          <form class="circle-timer-form" method="post" action="/solo/start">
+            <div class="circle-timer idle" role="group" aria-label="Set focus duration">
+              <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+                <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
+                <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
+              </svg>
+              <div class="circle-timer-core">
+                <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
+                <label class="circle-timer-time">
+                  <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
+                  <span class="circle-timer-suffix">min</span>
+                </label>
+                <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
+              </div>
+              <span class="circle-timer-hint">Tap to start</span>
             </div>
-            <span class="circle-timer-hint">Tap to start</span>
+          </form>
+        </article>
+
+        <article class="panel desk-todos-panel">
+          <div class="panel-title">
+            <h2>Private todos</h2>
+            <span>Only visible here</span>
           </div>
-        </form>
-      </article>
+          <form class="inline-form" method="post" action="/todos">
+            <input name="text" placeholder="What do you need to do?" required>
+            <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
+          </form>
+          <ul class="todo-list">
+            {{range .PersonalTodos}}
+              {{template "todo-row" .}}
+            {{end}}
+          </ul>
+        </article>
+      </section>
 
-      <article class="panel">
-        <div class="panel-title">
-          <h2>Private todos</h2>
-          <span>Only visible here</span>
-        </div>
-        <form class="inline-form" method="post" action="/todos">
-          <input name="text" placeholder="What do you need to do?" required>
-          <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
-        </form>
-        <ul class="todo-list">
-          {{range .PersonalTodos}}
-            {{template "todo-row" .}}
-          {{end}}
-        </ul>
-      </article>
-    </section>
-    {{end}}
-
-    {{if not .SoloTimer}}
-    <details class="work-map-collapsible">
-      <summary class="work-map-link">Work map</summary>
-      <article class="panel work-map-panel">
-        <div class="panel-title">
-          <h2>Work map</h2>
-          <span>Focused minutes per day</span>
-        </div>
-        {{template "heatmap" .}}
-      </article>
-    </details>
+      <details class="work-map-collapsible">
+        <summary class="work-map-link">Work map</summary>
+        <article class="panel work-map-panel">
+          <div class="panel-title">
+            <h2>Work map</h2>
+            <span>Focused minutes per day</span>
+          </div>
+          {{template "heatmap" .}}
+        </article>
+      </details>
+    </div>
     {{end}}
     {{end}}
   {{else}}
@@ -1095,14 +1095,31 @@ body.menu-drawer-open {
 .desk-grid .circle-timer-wrap {
   padding: 1rem 0;
 }
-#guest-desk {
+.desk-shell {
   display: flex;
   flex-direction: column;
+  min-height: calc(100vh - 10rem);
 }
 .desk-grid {
-  flex: 1;
+  flex: 1 1 auto;
   align-items: center;
-  min-height: calc(100vh - 10rem);
+  min-height: 0;
+}
+.desk-todos-panel {
+  display: flex;
+  flex-direction: column;
+  height: min(22rem, calc(100vh - 14rem));
+  margin-bottom: 0;
+}
+.desk-todos-panel .panel-title,
+.desk-todos-panel .inline-form {
+  flex-shrink: 0;
+}
+.desk-todos-panel .todo-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 0;
 }
 .timer-cancel {
   background: var(--red);
@@ -1117,10 +1134,21 @@ body.menu-drawer-open {
   filter: brightness(1.08);
 }
 .work-map-collapsible {
-  margin-bottom: 1rem;
+  position: relative;
+  flex-shrink: 0;
+  margin-top: auto;
+  margin-bottom: 0;
+  z-index: 5;
 }
 .work-map-collapsible .work-map-panel {
-  margin-top: .75rem;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: .75rem;
+  max-height: min(55vh, 28rem);
+  overflow-y: auto;
 }
 .work-map-link {
   display: inline-block;
@@ -1328,15 +1356,26 @@ body.menu-drawer-open {
   max-height: calc(100vh - 2rem);
   width: min(320px, 85vw);
   z-index: 20;
+  display: flex;
+  flex-direction: column;
   background: var(--card);
   border: 1px solid var(--line);
   border-right: none;
   border-radius: 12px 0 0 12px;
   box-shadow: -4px 0 24px var(--shadow);
   padding: 1.25rem;
-  overflow-y: auto;
+  overflow: hidden;
   transform: translateX(100%);
   transition: transform .25s ease;
+}
+.focus-todos-panel .panel-title {
+  flex-shrink: 0;
+}
+.focus-todos-panel .todo-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 0;
 }
 @media (max-height: 520px) {
   .focus-todos-panel {

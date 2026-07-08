@@ -479,7 +479,7 @@
     root.innerHTML =
       '<section class="grid two desk-grid">' +
         idleTimerHTML() +
-        '<article class="panel">' +
+        '<article class="panel desk-todos-panel">' +
           '<div class="panel-title"><h2>Private todos</h2><span>Stored on this device</span></div>' +
           '<form class="inline-form" id="guest-todo-form">' +
             '<input name="text" placeholder="What do you need to do?" required>' +
