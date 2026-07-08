@@ -17,6 +17,9 @@ func parseTemplates() *template.Template {
 		},
 		"mul": func(a, b int) int { return a * b },
 		"join": strings.Join,
+		"focusHours": func(minutes int) int {
+			return (minutes + 30) / 60
+		},
 	}
 	return template.Must(template.New("junkie").Funcs(funcs).Parse(layoutTemplates))
 }
@@ -116,6 +119,36 @@ const layoutTemplates = `
   </script>
 </body>
 </html>
+{{end}}
+
+{{define "heatmap"}}
+<div class="heatmap-chart">
+  <p class="heatmap-summary">{{focusHours .ActivityTotalMinutes}} hours focused in the last year</p>
+  <div class="heatmap-layout">
+    <div class="heatmap-dow" aria-hidden="true">
+      <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
+    </div>
+    <div class="heatmap-main">
+      <div class="heatmap-months" style="--weeks: {{.ActivityWeeks}}">
+        {{range .ActivityMonths}}<span class="heatmap-month" style="--col: {{.Col}}">{{.Label}}</span>{{end}}
+      </div>
+      <div class="heatmap-wrap">
+        <div class="heatmap" style="--weeks: {{.ActivityWeeks}}" aria-label="Focus activity heat map">
+          {{range .Activity}}{{if .Empty}}<span class="cell cell-empty"></span>{{else}}<span class="cell l{{.Level}}" title="{{.Date}}: {{.Minutes}} min"></span>{{end}}{{end}}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="heatmap-legend" aria-hidden="true">
+    <span>Less</span>
+    <span class="cell l0"></span>
+    <span class="cell l1"></span>
+    <span class="cell l2"></span>
+    <span class="cell l3"></span>
+    <span class="cell l4"></span>
+    <span>More</span>
+  </div>
+</div>
 {{end}}
 
 {{define "login"}}{{template "shell" .}}{{end}}
@@ -245,25 +278,20 @@ const layoutTemplates = `
           <h2>Work map</h2>
           <span>Focused minutes per day</span>
         </div>
-        <div class="heatmap-wrap">
-          <div class="heatmap" aria-label="Activity heat map">
-            {{range .Activity}}{{if .Empty}}<span class="cell cell-empty"></span>{{else}}<span class="cell l{{.Level}}" title="{{.Date}}: {{.Minutes}} min"></span>{{end}}{{end}}
-          </div>
-        </div>
+        {{template "heatmap" .}}
       </article>
     </details>
     {{else}}
-    <article class="panel work-map-panel">
-      <div class="panel-title">
-        <h2>Work map</h2>
-        <span>Focused minutes per day</span>
-      </div>
-      <div class="heatmap-wrap">
-        <div class="heatmap" aria-label="Activity heat map">
-          {{range .Activity}}{{if .Empty}}<span class="cell cell-empty"></span>{{else}}<span class="cell l{{.Level}}" title="{{.Date}}: {{.Minutes}} min"></span>{{end}}{{end}}
+    <details class="work-map-collapsible">
+      <summary class="work-map-link">Work map</summary>
+      <article class="panel work-map-panel">
+        <div class="panel-title">
+          <h2>Work map</h2>
+          <span>Focused minutes per day</span>
         </div>
-      </div>
-    </article>
+        {{template "heatmap" .}}
+      </article>
+    </details>
     {{end}}
     {{end}}
   {{else}}
@@ -578,20 +606,81 @@ h2 {
   background: #fffaf0;
 }
 .room-row span { color: var(--muted); }
+.heatmap-chart {
+  width: 100%;
+}
+.heatmap-summary {
+  color: var(--muted);
+  font-size: .88rem;
+  margin: 0 0 .75rem;
+}
+.heatmap-layout {
+  display: flex;
+  gap: .35rem;
+  width: 100%;
+}
+.heatmap-dow {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  gap: 3px;
+  font-size: .65rem;
+  color: var(--muted);
+  padding-top: 1.15rem;
+  width: 1.75rem;
+  flex-shrink: 0;
+}
+.heatmap-dow span {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+.heatmap-main {
+  flex: 1;
+  min-width: 0;
+}
+.heatmap-months {
+  display: grid;
+  grid-template-columns: repeat(var(--weeks), minmax(0, 1fr));
+  gap: 3px;
+  font-size: .68rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+  min-height: 1rem;
+}
+.heatmap-month {
+  grid-column: calc(var(--col) + 1);
+}
 .heatmap-wrap {
   overflow-x: auto;
+  width: 100%;
   padding-bottom: .25rem;
 }
 .heatmap {
-  display: inline-grid;
-  grid-template-rows: repeat(7, 11px);
+  display: grid;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
   grid-auto-flow: column;
-  grid-auto-columns: 11px;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 3px;
+  width: 100%;
+  min-height: 108px;
 }
-.cell {
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  justify-content: flex-end;
+  margin-top: .65rem;
+  font-size: .68rem;
+  color: var(--muted);
+}
+.heatmap-legend .cell {
   width: 11px;
   height: 11px;
+  flex-shrink: 0;
+}
+.cell {
+  aspect-ratio: 1;
+  width: 100%;
   border-radius: 2px;
   background: #ebedf0;
 }

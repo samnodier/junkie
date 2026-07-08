@@ -75,8 +75,11 @@ type pageData struct {
 	RoomTodos     []todo
 	Timer         *timerRun
 	SoloTimer     *timerRun
-	Activity      []activityDay
-	FocusMode     bool
+	Activity             []activityDay
+	ActivityMonths       []activityMonth
+	ActivityWeeks        int
+	ActivityTotalMinutes int
+	FocusMode            bool
 	GuestMode     bool
 	Next          string
 }
@@ -86,6 +89,18 @@ type activityDay struct {
 	Minutes int
 	Level   int
 	Empty   bool
+}
+
+type activityMonth struct {
+	Label string
+	Col   int
+}
+
+type heatmapData struct {
+	Cells        []activityDay
+	Months       []activityMonth
+	Weeks        int
+	TotalMinutes int
 }
 
 type hub struct {
@@ -225,14 +240,17 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 	soloTimer, _ := a.normalizeSoloTimer(r.Context(), u.ID)
 	todos, _ := a.personalTodos(r.Context(), u.ID)
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
-	activity, _ := a.activity(r.Context(), u.ID)
+	heatmap, _ := a.activity(r.Context(), u.ID)
 	a.render(w, "dashboard", pageData{
-		Title:         "Dashboard",
-		User:          u,
-		PersonalTodos: todos,
-		Rooms:         rooms,
-		SoloTimer:     soloTimer,
-		Activity:      activity,
+		Title:                "Dashboard",
+		User:                 u,
+		PersonalTodos:        todos,
+		Rooms:                rooms,
+		SoloTimer:            soloTimer,
+		Activity:             heatmap.Cells,
+		ActivityMonths:       heatmap.Months,
+		ActivityWeeks:        heatmap.Weeks,
+		ActivityTotalMinutes: heatmap.TotalMinutes,
 	})
 }
 
@@ -608,14 +626,14 @@ func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
 	return todos, nil
 }
 
-func (a *app) activity(ctx context.Context, userID string) ([]activityDay, error) {
+func (a *app) activity(ctx context.Context, userID string) (heatmapData, error) {
 	rows, err := a.db.Query(ctx, `
 		SELECT d::date, COALESCE(a.focus_minutes, 0)
-		FROM generate_series(CURRENT_DATE - INTERVAL '83 days', CURRENT_DATE, INTERVAL '1 day') d
+		FROM generate_series(CURRENT_DATE - INTERVAL '364 days', CURRENT_DATE, INTERVAL '1 day') d
 		LEFT JOIN activity a ON a.user_id = $1 AND a.activity_date = d::date
 		ORDER BY d`, userID)
 	if err != nil {
-		return nil, err
+		return heatmapData{}, err
 	}
 	defer rows.Close()
 	var days []activityDay
@@ -628,25 +646,76 @@ func (a *app) activity(ctx context.Context, userID string) ([]activityDay, error
 			days = append(days, activityDay{Date: date.Format("Jan 2"), Minutes: minutes, Level: heatLevel(minutes)})
 		}
 	}
-	return arrangeActivityGrid(days, dates), nil
+	return buildYearHeatmap(days, dates), nil
 }
 
-func arrangeActivityGrid(days []activityDay, dates []time.Time) []activityDay {
-	if len(days) == 0 {
-		return days
+func buildYearHeatmap(days []activityDay, dates []time.Time) heatmapData {
+	if len(dates) == 0 {
+		return heatmapData{}
 	}
-	startWeekday := int(dates[0].Weekday())
-	numWeeks := (len(days) + startWeekday + 6) / 7
+
+	firstDate := dates[0]
+	lastDate := dates[len(dates)-1]
+	gridStart := firstDate.AddDate(0, 0, -int(firstDate.Weekday()))
+
+	totalMinutes := 0
+	for _, day := range days {
+		totalMinutes += day.Minutes
+	}
+
+	dayByKey := make(map[string]activityDay, len(days))
+	for i, day := range days {
+		dayByKey[dates[i].Format("2006-01-02")] = day
+	}
+
+	totalDays := int(lastDate.Sub(gridStart).Hours()/24) + 1
+	numWeeks := (totalDays + 6) / 7
+
 	cells := make([]activityDay, numWeeks*7)
 	for i := range cells {
 		cells[i] = activityDay{Empty: true}
 	}
-	for i, day := range days {
-		offset := startWeekday + i
-		idx := (offset/7)*7 + (offset % 7)
-		cells[idx] = day
+
+	for week := 0; week < numWeeks; week++ {
+		for dow := 0; dow < 7; dow++ {
+			d := gridStart.AddDate(0, 0, week*7+dow)
+			if d.Before(firstDate) || d.After(lastDate) {
+				continue
+			}
+			idx := week*7 + dow
+			if day, ok := dayByKey[d.Format("2006-01-02")]; ok {
+				cells[idx] = day
+			} else {
+				cells[idx] = activityDay{Date: d.Format("Jan 2"), Minutes: 0, Level: 0}
+			}
+		}
 	}
-	return cells
+
+	var months []activityMonth
+	labeled := map[string]bool{}
+	for week := 0; week < numWeeks; week++ {
+		for dow := 0; dow < 7; dow++ {
+			d := gridStart.AddDate(0, 0, week*7+dow)
+			if d.Before(firstDate) || d.After(lastDate) {
+				continue
+			}
+			if d.Day() == 1 {
+				key := d.Format("2006-01")
+				if !labeled[key] {
+					months = append(months, activityMonth{Label: d.Format("Jan"), Col: week})
+					labeled[key] = true
+				}
+				break
+			}
+		}
+	}
+
+	return heatmapData{
+		Cells:        cells,
+		Months:       months,
+		Weeks:        numWeeks,
+		TotalMinutes: totalMinutes,
+	}
 }
 
 func (a *app) render(w http.ResponseWriter, name string, data pageData) {

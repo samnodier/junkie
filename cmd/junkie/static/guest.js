@@ -79,8 +79,133 @@
   const workMapPanelHTML = () =>
     '<article class="panel work-map-panel">' +
       '<div class="panel-title"><h2>Work map</h2><span>Focused minutes per day</span></div>' +
-      '<div class="heatmap" aria-label="Activity heat map">' + heatmapHTML() + '</div>' +
+      heatmapChartHTML() +
     '</article>';
+
+  const buildYearHeatmap = () => {
+    const activity = load(keys.activity, {});
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const days = [];
+    const dates = [];
+    for (let i = 364; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      dates.push(d);
+      const minutes = activity[dateKey(d)] || 0;
+      days.push({
+        date: d,
+        label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        minutes,
+        level: heatLevel(minutes),
+      });
+    }
+
+    const firstDate = dates[0];
+    const lastDate = dates[dates.length - 1];
+    const gridStart = new Date(firstDate);
+    gridStart.setDate(firstDate.getDate() - firstDate.getDay());
+
+    let totalMinutes = 0;
+    for (const day of days) {
+      totalMinutes += day.minutes;
+    }
+
+    const dayByKey = {};
+    for (const day of days) {
+      dayByKey[dateKey(day.date)] = day;
+    }
+
+    const totalDays = Math.floor((lastDate - gridStart) / 86400000) + 1;
+    const numWeeks = Math.ceil(totalDays / 7);
+    const cells = Array.from({ length: numWeeks * 7 }, () => ({ empty: true }));
+
+    for (let week = 0; week < numWeeks; week++) {
+      for (let dow = 0; dow < 7; dow++) {
+        const d = new Date(gridStart);
+        d.setDate(gridStart.getDate() + week * 7 + dow);
+        if (d < firstDate || d > lastDate) continue;
+        const idx = week * 7 + dow;
+        const key = dateKey(d);
+        if (dayByKey[key]) {
+          cells[idx] = dayByKey[key];
+        } else {
+          cells[idx] = {
+            label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+            minutes: 0,
+            level: 0,
+          };
+        }
+      }
+    }
+
+    const months = [];
+    const labeled = {};
+    for (let week = 0; week < numWeeks; week++) {
+      for (let dow = 0; dow < 7; dow++) {
+        const d = new Date(gridStart);
+        d.setDate(gridStart.getDate() + week * 7 + dow);
+        if (d < firstDate || d > lastDate) continue;
+        if (d.getDate() === 1) {
+          const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+          if (!labeled[key]) {
+            months.push({
+              label: d.toLocaleDateString(undefined, { month: 'short' }),
+              col: week,
+            });
+            labeled[key] = true;
+          }
+          break;
+        }
+      }
+    }
+
+    return { cells, months, weeks: numWeeks, totalMinutes };
+  };
+
+  const heatmapChartHTML = () => {
+    const { cells, months, weeks, totalMinutes } = buildYearHeatmap();
+    const hours = Math.round(totalMinutes / 60);
+    const monthHTML = months
+      .map((m) => '<span class="heatmap-month" style="--col: ' + m.col + '">' + m.label + '</span>')
+      .join('');
+    const cellHTML = cells
+      .map((day) =>
+        day.empty
+          ? '<span class="cell cell-empty"></span>'
+          : '<span class="cell l' + day.level + '" title="' + day.label + ': ' + day.minutes + ' min"></span>'
+      )
+      .join('');
+
+    return (
+      '<div class="heatmap-chart">' +
+        '<p class="heatmap-summary">' + hours + ' hours focused in the last year</p>' +
+        '<div class="heatmap-layout">' +
+          '<div class="heatmap-dow" aria-hidden="true">' +
+            '<span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>' +
+          '</div>' +
+          '<div class="heatmap-main">' +
+            '<div class="heatmap-months" style="--weeks: ' + weeks + '">' + monthHTML + '</div>' +
+            '<div class="heatmap-wrap">' +
+              '<div class="heatmap" style="--weeks: ' + weeks + '" aria-label="Focus activity heat map">' +
+                cellHTML +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="heatmap-legend" aria-hidden="true">' +
+          '<span>Less</span>' +
+          '<span class="cell l0"></span>' +
+          '<span class="cell l1"></span>' +
+          '<span class="cell l2"></span>' +
+          '<span class="cell l3"></span>' +
+          '<span class="cell l4"></span>' +
+          '<span>More</span>' +
+        '</div>' +
+      '</div>'
+    );
+  };
 
   const runningTimerHTML = (timer) => {
     const total = timer.focusMinutes * 60;
@@ -144,29 +269,6 @@
     timer.addEventListener('click', () => form.requestSubmit());
     syncRing();
   };
-
-  const heatmapDays = () => {
-    const activity = load(keys.activity, {});
-    const days = [];
-    const today = new Date();
-    for (let i = 83; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const key = dateKey(d);
-      const minutes = activity[key] || 0;
-      days.push({
-        label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        minutes,
-        level: heatLevel(minutes),
-      });
-    }
-    return days;
-  };
-
-  const heatmapHTML = () =>
-    heatmapDays()
-      .map((day) => '<span class="cell l' + day.level + '" title="' + day.label + ': ' + day.minutes + ' min"></span>')
-      .join('');
 
   let tickHandle = null;
 
@@ -240,7 +342,10 @@
         '</article>' +
       '</section>' +
       idleTimerHTML() +
-      workMapPanelHTML();
+      '<details class="work-map-collapsible">' +
+        '<summary class="work-map-link">Work map</summary>' +
+        workMapPanelHTML() +
+      '</details>';
 
     const todoForm = document.getElementById('guest-todo-form');
     todoForm?.addEventListener('submit', (event) => {
