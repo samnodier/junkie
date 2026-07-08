@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -728,9 +729,25 @@ func (a *app) render(w http.ResponseWriter, name string, data pageData) {
 	}
 }
 
-func (a *app) css(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	_, _ = w.Write([]byte(appCSS))
+func (a *app) css(w http.ResponseWriter, r *http.Request) {
+	serveStatic(w, r, "text/css; charset=utf-8", []byte(appCSS))
+}
+
+// serveStatic writes an in-memory asset with a content-derived ETag and a
+// no-cache/must-revalidate policy. Browsers keep the copy but must revalidate
+// on every load, so a changed asset (e.g. updated CSS) is picked up
+// immediately instead of being served stale from the HTTP cache.
+func serveStatic(w http.ResponseWriter, r *http.Request, contentType string, data []byte) {
+	sum := sha256.Sum256(data)
+	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	w.Header().Set("ETag", etag)
+	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	_, _ = w.Write(data)
 }
 
 func (h *hub) join(code string, c *websocket.Conn) {
