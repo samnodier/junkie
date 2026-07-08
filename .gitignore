@@ -1,0 +1,8 @@
+.env
+.gocache/
+.gomodcache/
+.gopath/
+/junkie
+tmp/
+*.db
+*.sqlite
