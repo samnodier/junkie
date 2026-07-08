@@ -461,7 +461,7 @@ const layoutTemplates = `
             <h2>Private todos</h2>
             <span>Only visible here</span>
           </div>
-          <form class="inline-form" method="post" action="/todos">
+          <form class="inline-form todo-add-form" method="post" action="/todos">
             <input name="text" placeholder="What do you need to do?" required>
             <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
           </form>
@@ -535,7 +535,7 @@ const layoutTemplates = `
               <h2>Room todos</h2>
               <span>Everything here is public to the room</span>
             </div>
-            <form class="inline-form" method="post" action="/r/{{.Room.Code}}/todos">
+            <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos">
               <input name="text" placeholder="What are you working on?" required>
               <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
             </form>
@@ -792,6 +792,9 @@ h2 {
   gap: .6rem;
   align-items: stretch;
 }
+.inline-form.todo-add-form {
+  align-items: center;
+}
 .inline-form input {
   flex: 1 1 auto;
   min-width: 0;
@@ -882,17 +885,18 @@ h2 {
 }
 .todo-add-plus {
   flex: 0 0 auto;
-  align-self: stretch;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 3.25rem;
-  padding: .85rem 1rem;
+  width: auto;
+  min-width: 2.5rem;
+  height: 2.375rem;
+  padding: 0 .75rem;
   border: 1px solid transparent;
   border-radius: 14px;
   box-sizing: border-box;
-  font-size: 1.35rem;
-  line-height: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
   font-weight: 500;
 }
 .room-list { display: grid; gap: .65rem; }
@@ -1183,7 +1187,7 @@ body.menu-drawer-open {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  margin-top: 0;
+  margin-top: 0.5rem;
 }
 .timer-cancel {
   background: var(--red);
@@ -1458,11 +1462,20 @@ body.menu-drawer-open {
   .dashboard-hero, .room-header, .grid.two, .settings, .desk-grid {
     grid-template-columns: 1fr;
   }
-  .room-create, .inline-form {
+  .room-create, .inline-form:not(.todo-add-form) {
     flex-direction: column;
   }
   .panel-title {
     display: block;
+  }
+}
+@media (max-width: 480px) {
+  .inline-form.todo-add-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .inline-form.todo-add-form .todo-add-plus {
+    align-self: flex-start;
   }
 }
 @media (prefers-reduced-motion: reduce) {

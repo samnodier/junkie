@@ -482,7 +482,7 @@
         idleTimerHTML() +
         '<article class="panel desk-todos-panel">' +
           '<div class="panel-title"><h2>Private todos</h2><span>Stored on this device</span></div>' +
-          '<form class="inline-form" id="guest-todo-form">' +
+          '<form class="inline-form todo-add-form" id="guest-todo-form">' +
             '<input name="text" placeholder="What do you need to do?" required>' +
             '<button type="submit" class="todo-add-plus" aria-label="Add task">+</button>' +
           '</form>' +
