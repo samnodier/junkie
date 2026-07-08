@@ -248,9 +248,15 @@
     const input = form.querySelector('input[name="focus_minutes"]');
     if (!timer || !input) return;
 
+    const syncDigits = () => {
+      const label = input.closest('.circle-timer-time');
+      label?.classList.toggle('digits-3', String(input.value).length >= 3);
+    };
+
     const syncRing = () => {
       const minutes = clampMinutes(Number(input.value) || 50);
       input.value = minutes;
+      syncDigits();
       setRing(timer, minutes / 180);
     };
 

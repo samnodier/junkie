@@ -74,9 +74,15 @@ const layoutTemplates = `
         const input = form.querySelector('input[name="focus_minutes"]');
         if (!timer || !input) return;
 
+        const syncDigits = () => {
+          const label = input.closest('.circle-timer-time');
+          label?.classList.toggle('digits-3', String(input.value).length >= 3);
+        };
+
         const syncRing = () => {
           const minutes = clampMinutes(Number(input.value) || 50);
           input.value = minutes;
+          syncDigits();
           setRing(timer, minutes / 180);
         };
 
@@ -738,7 +744,7 @@ h2 {
 }
 .circle-timer {
   position: relative;
-  width: min(260px, 70vw);
+  width: min(300px, 82vw);
   aspect-ratio: 1;
   display: grid;
   place-items: center;
@@ -748,6 +754,7 @@ h2 {
   padding: 0;
   font: inherit;
   color: inherit;
+  overflow: visible;
 }
 .circle-timer.idle:hover .circle-timer-progress { stroke: var(--deep); }
 .circle-timer-svg {
@@ -772,25 +779,36 @@ h2 {
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: .45rem;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
+  overflow: visible;
 }
 .circle-timer-time {
   display: grid;
   justify-items: center;
   pointer-events: auto;
+  overflow: visible;
 }
 .circle-timer-time input {
-  width: 4rem;
+  width: 3.5ch;
+  min-width: 3.5ch;
   text-align: center;
-  font-size: clamp(2rem, 9vw, 2.6rem);
+  font-size: clamp(2rem, 8vw, 2.6rem);
   font-weight: 950;
-  letter-spacing: -.06em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.04em;
   border: none;
   background: transparent;
   padding: 0;
   color: var(--ink);
+  overflow: visible;
   -moz-appearance: textfield;
+}
+.circle-timer-time.digits-3 input {
+  font-size: clamp(1.7rem, 6.5vw, 2.1rem);
+  letter-spacing: -.03em;
 }
 .circle-timer-time input::-webkit-outer-spin-button,
 .circle-timer-time input::-webkit-inner-spin-button {
@@ -811,8 +829,11 @@ h2 {
   line-height: 1;
 }
 .circle-timer-step {
-  width: 2rem;
-  height: 2rem;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2.1rem;
+  height: 2.1rem;
   padding: 0;
   border-radius: 50%;
   background: var(--mint);
@@ -823,6 +844,8 @@ h2 {
   pointer-events: auto;
   flex-shrink: 0;
 }
+.circle-timer-step[data-delta="-5"] { left: 5%; }
+.circle-timer-step[data-delta="5"] { right: 5%; }
 .circle-timer-step:hover { filter: brightness(1.04); }
 .circle-timer-hint {
   position: absolute;
