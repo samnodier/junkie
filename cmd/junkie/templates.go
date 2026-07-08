@@ -52,9 +52,9 @@ const layoutTemplates = `
       <span>junkie</span>
     </a>
     <div class="topbar-actions">
-      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
-        <span class="theme-icon theme-icon-light" aria-hidden="true">Light</span>
-        <span class="theme-icon theme-icon-dark" aria-hidden="true">Dark</span>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Switch to dark mode">
+        <span class="theme-icon theme-icon-dark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
+        <span class="theme-icon theme-icon-light" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
       </button>
       {{if eq .Title "Dashboard"}}
         {{if .User.ID}}
@@ -203,7 +203,9 @@ const layoutTemplates = `
       const themeToggle = document.getElementById('theme-toggle');
       const syncThemeToggle = () => {
         const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-        themeToggle?.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+        const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+        themeToggle?.setAttribute('aria-label', label);
+        themeToggle?.setAttribute('title', label);
       };
       themeToggle?.addEventListener('click', () => {
         const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -683,20 +685,26 @@ code {
   gap: 1rem;
 }
 .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
   background: transparent;
   color: var(--muted);
-  padding: .35rem .65rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  font-size: .78rem;
-  font-weight: 700;
-  letter-spacing: .02em;
-  line-height: 1;
+  line-height: 0;
 }
 .theme-toggle:hover {
   color: var(--ink);
   filter: none;
   border-color: color-mix(in srgb, var(--green) 45%, var(--line));
+}
+.theme-toggle svg {
+  width: 1rem;
+  height: 1rem;
 }
 [data-theme="light"] .theme-icon-dark,
 [data-theme="dark"] .theme-icon-light {
@@ -795,7 +803,15 @@ h2 {
   align-items: stretch;
 }
 .inline-form.todo-add-form {
-  align-items: center;
+  align-items: stretch;
+}
+.inline-form.todo-add-form input,
+.inline-form.todo-add-form .todo-add-plus {
+  box-sizing: border-box;
+  height: 2.5rem;
+}
+.inline-form.todo-add-form input {
+  padding: 0.5rem 1rem;
 }
 .inline-form input {
   flex: 1 1 auto;
@@ -890,7 +906,6 @@ h2 {
   justify-content: center;
   width: auto;
   min-width: 2.5rem;
-  height: 2.375rem;
   padding: 0.5rem;
   border: 1px solid transparent;
   border-radius: var(--radius);
