@@ -139,6 +139,7 @@ func main() {
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("GET /dashboard", a.home)
+	mux.HandleFunc("GET /profile", a.profilePage)
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
@@ -233,6 +234,25 @@ func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
+	u, ok := a.currentUser(r)
+	if !ok {
+		a.render(w, "profile", pageData{Title: "Profile", GuestMode: true})
+		return
+	}
+	rooms, _ := a.roomsForUser(r.Context(), u.ID)
+	heatmap, _ := a.activity(r.Context(), u.ID)
+	a.render(w, "profile", pageData{
+		Title:                "Profile",
+		User:                 u,
+		Rooms:                rooms,
+		Activity:             heatmap.Cells,
+		ActivityMonths:       heatmap.Months,
+		ActivityWeeks:        heatmap.Weeks,
+		ActivityTotalMinutes: heatmap.TotalMinutes,
+	})
+}
+
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 	u, ok := a.currentUser(r)
 	if !ok {
@@ -242,17 +262,12 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 	soloTimer, _ := a.normalizeSoloTimer(r.Context(), u.ID)
 	todos, _ := a.personalTodos(r.Context(), u.ID)
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
-	heatmap, _ := a.activity(r.Context(), u.ID)
 	a.render(w, "dashboard", pageData{
-		Title:                "Dashboard",
-		User:                 u,
-		PersonalTodos:        todos,
-		Rooms:                rooms,
-		SoloTimer:            soloTimer,
-		Activity:             heatmap.Cells,
-		ActivityMonths:       heatmap.Months,
-		ActivityWeeks:        heatmap.Weeks,
-		ActivityTotalMinutes: heatmap.TotalMinutes,
+		Title:         "Dashboard",
+		User:          u,
+		PersonalTodos: todos,
+		Rooms:         rooms,
+		SoloTimer:     soloTimer,
 	})
 }
 

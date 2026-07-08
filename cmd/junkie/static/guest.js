@@ -1,6 +1,7 @@
 (function () {
-  const root = document.getElementById('guest-desk');
-  if (!root) return;
+  const deskRoot = document.getElementById('guest-desk');
+  const profileMap = document.getElementById('guest-profile-work-map');
+  if (!deskRoot && !profileMap) return;
 
   const keys = {
     todos: 'junkie:todos',
@@ -228,9 +229,8 @@
   };
 
   const renderGuestProfile = () => {
-    const profileMap = document.getElementById('guest-profile-work-map');
     if (!profileMap) return;
-    profileMap.innerHTML = heatmapChartHTML(false);
+    profileMap.innerHTML = heatmapChartHTML(true);
   };
 
   const runningTimerHTML = (timer) => {
@@ -405,10 +405,10 @@
   };
 
   const render = () => {
+    if (!deskRoot) return;
     const timer = finishTimerIfNeeded();
     const todos = load(keys.todos, []);
     const inFocus = Boolean(timer);
-    renderGuestProfile();
 
     if (tickHandle) {
       clearInterval(tickHandle);
@@ -416,7 +416,7 @@
     }
 
     if (inFocus) {
-      root.innerHTML = focusDeskHTML(runningTimerHTML(timer), todos);
+      deskRoot.innerHTML = focusDeskHTML(runningTimerHTML(timer), todos);
 
       document.getElementById('guest-timer-cancel')?.addEventListener('click', () => {
         focusTodosPeekOpen = false;
@@ -442,7 +442,7 @@
 
       wireFocusTodosPeek();
 
-      const running = root.querySelector('.circle-timer.running');
+      const running = deskRoot.querySelector('.circle-timer.running');
       const total = timer.focusMinutes * 60;
       setRing(running, secondsLeft(timer) / total);
 
@@ -477,7 +477,7 @@
         }).join('')
       : '<li class="empty">Add a private task for today.</li>';
 
-    root.innerHTML =
+    deskRoot.innerHTML =
       '<section class="grid two desk-grid">' +
         idleTimerHTML() +
         '<article class="panel desk-todos-panel">' +
@@ -541,10 +541,8 @@
     });
   };
 
-  render();
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', renderGuestProfile);
-  } else {
-    renderGuestProfile();
+  renderGuestProfile();
+  if (deskRoot) {
+    render();
   }
 })();

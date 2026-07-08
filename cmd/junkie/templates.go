@@ -56,7 +56,7 @@ const layoutTemplates = `
         <span class="theme-icon theme-icon-dark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
         <span class="theme-icon theme-icon-light" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
       </button>
-      {{if eq .Title "Dashboard"}}
+      {{if or (eq .Title "Dashboard") (eq .Title "Profile")}}
         {{if .User.ID}}
           <nav class="nav nav-compact">
             <span>{{.User.DisplayName}}</span>
@@ -80,7 +80,7 @@ const layoutTemplates = `
     {{if .Error}}<p class="notice">{{.Error}}</p>{{end}}
     {{template "content" .}}
   </main>
-  {{if eq .Title "Dashboard"}}
+  {{if or (eq .Title "Dashboard") (eq .Title "Profile")}}
     {{if .GuestMode}}
       {{template "menu-drawer-guest" .}}
     {{else}}
@@ -309,26 +309,21 @@ const layoutTemplates = `
 {{define "login"}}{{template "shell" .}}{{end}}
 {{define "signup"}}{{template "shell" .}}{{end}}
 {{define "dashboard"}}{{template "shell" .}}{{end}}
+{{define "profile"}}{{template "shell" .}}{{end}}
 {{define "room"}}{{template "shell" .}}{{end}}
 
 {{define "menu-drawer-guest"}}
 <div class="menu-drawer-backdrop" hidden></div>
 <aside class="menu-drawer" aria-hidden="true">
   <div class="menu-drawer-head">
-    <h2>Rooms</h2>
+    <h2>Menu</h2>
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
   <nav class="menu-drawer-nav">
+    <a href="/profile">Profile</a>
     <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a>
     <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a>
   </nav>
-  <section class="drawer-profile">
-    <div class="drawer-profile-head">
-      <h3>Profile</h3>
-      <span>Stored on this device</span>
-    </div>
-    <div id="guest-profile-work-map"></div>
-  </section>
 </aside>
 {{end}}
 
@@ -336,9 +331,12 @@ const layoutTemplates = `
 <div class="menu-drawer-backdrop" hidden></div>
 <aside class="menu-drawer" aria-hidden="true">
   <div class="menu-drawer-head">
-    <h2>Rooms</h2>
+    <h2>Menu</h2>
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
+  <nav class="menu-drawer-nav">
+    <a href="/profile">Profile</a>
+  </nav>
   <form class="room-create" method="post" action="/rooms">
     <input name="name" placeholder="Room name">
     <button>Create</button>
@@ -353,24 +351,6 @@ const layoutTemplates = `
       <p class="empty">No rooms yet.</p>
     {{end}}
   </div>
-  <section class="drawer-profile">
-    <div class="drawer-profile-head">
-      <h3>Profile</h3>
-      <span>{{.User.DisplayName}}</span>
-    </div>
-    <div class="drawer-stats">
-      <div>
-        <strong>{{focusHours .ActivityTotalMinutes}}</strong>
-        <span>focus hours</span>
-      </div>
-      <div>
-        <strong>{{len .Rooms}}</strong>
-        <span>rooms joined</span>
-      </div>
-    </div>
-    {{template "heatmap" .}}
-    <p class="muted drawer-follow-stub">Follow friends — coming soon</p>
-  </section>
 </aside>
 {{end}}
 
@@ -478,6 +458,34 @@ const layoutTemplates = `
     </div>
     {{end}}
     {{end}}
+  {{else if eq .Title "Profile"}}
+    <section class="panel profile-page">
+      <div class="panel-title">
+        <h1>Profile</h1>
+        {{if .GuestMode}}
+          <span>Stored on this device</span>
+        {{else}}
+          <span>{{.User.DisplayName}}</span>
+        {{end}}
+      </div>
+      {{if .GuestMode}}
+        <div id="guest-profile-work-map"></div>
+        <script src="/assets/guest.js"></script>
+      {{else}}
+        <div class="profile-stats">
+          <div>
+            <strong>{{focusHours .ActivityTotalMinutes}}</strong>
+            <span>focus hours</span>
+          </div>
+          <div>
+            <strong>{{len .Rooms}}</strong>
+            <span>rooms joined</span>
+          </div>
+        </div>
+        {{template "heatmap" .}}
+        <p class="muted profile-follow-stub">Follow friends — coming soon</p>
+      {{end}}
+    </section>
   {{else}}
     <section class="{{if .FocusMode}}focus-shell{{else}}room-shell{{end}}">
       <div class="room-header">
@@ -1024,57 +1032,42 @@ h2 {
 .menu-drawer .room-create {
   margin-bottom: .5rem;
 }
-.drawer-profile {
-  display: grid;
-  gap: .85rem;
-  border-top: 1px solid var(--line);
-  padding-top: 1rem;
+.profile-page {
+  max-width: 720px;
+  margin: 2rem auto 0;
 }
-.drawer-profile-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: .75rem;
-}
-.drawer-profile-head h3 {
+.profile-page h1 {
+  font-size: 1.5rem;
   margin: 0;
-  font-size: 1rem;
-  letter-spacing: -.03em;
 }
-.drawer-profile-head span,
-.drawer-follow-stub {
-  color: var(--muted);
-  font-size: .86rem;
-}
-.drawer-stats {
+.profile-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: .5rem;
+  margin-bottom: 1rem;
 }
-.drawer-stats div {
+.profile-stats div {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: .75rem;
   background: var(--surface);
 }
-.drawer-stats strong,
-.drawer-stats span {
+.profile-stats strong,
+.profile-stats span {
   display: block;
 }
-.drawer-stats strong {
+.profile-stats strong {
   font-size: 1.25rem;
   line-height: 1;
 }
-.drawer-stats span {
+.profile-stats span {
   color: var(--muted);
   font-size: .78rem;
   margin-top: .25rem;
 }
-.drawer-profile .heatmap-summary {
-  display: none;
-}
-.drawer-profile .heatmap {
-  min-height: 82px;
+.profile-follow-stub {
+  margin-top: 1rem;
+  font-size: .86rem;
 }
 body.menu-drawer-open {
   overflow: hidden;
