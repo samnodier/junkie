@@ -721,6 +721,11 @@ h2 {
 .room-create, .inline-form {
   display: flex;
   gap: .6rem;
+  align-items: stretch;
+}
+.inline-form input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .grid.two {
   display: grid;
@@ -771,12 +776,17 @@ h2 {
 }
 .todo-add-plus {
   flex: 0 0 auto;
-  width: 2.6rem;
-  height: 2.6rem;
-  padding: 0;
-  border-radius: 10px;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.25rem;
+  padding: .85rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  box-sizing: border-box;
   font-size: 1.35rem;
-  line-height: 1;
+  line-height: inherit;
   font-weight: 500;
 }
 .room-list { display: grid; gap: .65rem; }
