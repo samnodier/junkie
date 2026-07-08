@@ -597,6 +597,7 @@ const appCSS = `
   --heatmap-2: #40c463;
   --heatmap-3: #30a14e;
   --heatmap-4: #216e39;
+  --radius: 5px;
 }
 [data-theme="dark"] {
   color-scheme: dark;
@@ -628,6 +629,7 @@ const appCSS = `
   --heatmap-2: #006d32;
   --heatmap-3: #26a641;
   --heatmap-4: #39d353;
+  --radius: 5px;
 }
 * { box-sizing: border-box; }
 body {
@@ -647,7 +649,7 @@ button, input {
 }
 button {
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--deep);
   color: var(--btn-text);
   padding: .8rem 1rem;
@@ -658,14 +660,14 @@ button:hover { filter: brightness(1.05); }
 input {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--input-bg);
   padding: .85rem 1rem;
   color: var(--ink);
 }
 code {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: .1rem .35rem;
   background: var(--code-bg);
 }
@@ -685,7 +687,7 @@ code {
   color: var(--muted);
   padding: .35rem .65rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius);
   font-size: .78rem;
   font-weight: 700;
   letter-spacing: .02em;
@@ -731,7 +733,7 @@ code {
 }
 .nav-cta {
   border: 1px solid var(--deep);
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: .45rem .85rem;
 }
 .link-button, .ghost {
@@ -746,7 +748,7 @@ code {
 .auth-card, .panel, .timer-card {
   background: color-mix(in srgb, var(--card) 92%, var(--card-mix));
   border: 1px solid var(--line);
-  border-radius: 30px;
+  border-radius: var(--radius);
   box-shadow: 0 24px 80px var(--shadow);
 }
 .auth-card {
@@ -775,7 +777,7 @@ h2 {
 .muted, .empty { color: var(--muted); }
 .notice {
   border: 1px solid var(--notice-border);
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: var(--notice-bg);
   padding: .9rem 1rem;
 }
@@ -807,7 +809,7 @@ h2 {
 .panel {
   padding: 1.25rem;
   margin-bottom: 1rem;
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 .panel-title {
   display: flex;
@@ -832,7 +834,7 @@ h2 {
   align-items: center;
   gap: .5rem;
   padding: .2rem .35rem;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: transparent;
 }
 .todo-list li:hover:not(.empty) {
@@ -858,7 +860,7 @@ h2 {
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
   flex-shrink: 0;
 }
 .todo-action svg {
@@ -891,9 +893,9 @@ h2 {
   width: auto;
   min-width: 2.5rem;
   height: 2.375rem;
-  padding: 0 .75rem;
+  padding: 0.5rem;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 1.2rem;
   line-height: 1;
@@ -904,7 +906,7 @@ h2 {
   display: grid;
   gap: .25rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 1rem;
   color: var(--ink);
   text-decoration: none;
@@ -924,7 +926,7 @@ h2 {
   background: transparent;
   color: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -998,7 +1000,7 @@ h2 {
   display: block;
   padding: .75rem 1rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   color: var(--ink);
   text-decoration: none;
   font-weight: 700;
@@ -1039,7 +1041,7 @@ h2 {
 }
 .drawer-stats div {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: .75rem;
   background: var(--surface);
 }
@@ -1140,7 +1142,7 @@ body.menu-drawer-open {
 .cell {
   aspect-ratio: 1;
   width: 100%;
-  border-radius: 2px;
+  border-radius: var(--radius);
   background: var(--heatmap-0);
 }
 .cell-empty {
@@ -1326,7 +1328,7 @@ body.menu-drawer-open {
   width: 2.1rem;
   height: 2.1rem;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: var(--mint);
   color: var(--deep);
   font-size: 1.2rem;
@@ -1400,7 +1402,7 @@ body.menu-drawer-open {
   padding: .65rem .45rem;
   border: 1px solid var(--line);
   border-right: 0;
-  border-radius: .5rem 0 0 .5rem;
+  border-radius: var(--radius) 0 0 var(--radius);
   background: var(--card);
   color: var(--muted);
   font-size: .78rem;
@@ -1429,7 +1431,7 @@ body.menu-drawer-open {
   background: var(--card);
   border: 1px solid var(--line);
   border-right: none;
-  border-radius: 12px 0 0 12px;
+  border-radius: var(--radius) 0 0 var(--radius);
   box-shadow: -4px 0 24px var(--shadow);
   padding: 1.25rem;
   overflow: hidden;
