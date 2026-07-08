@@ -1316,19 +1316,27 @@ body.menu-drawer-open {
 }
 .focus-todos-panel {
   position: fixed;
-  top: 0;
+  top: 25vh;
   right: 0;
-  bottom: 0;
+  height: 50vh;
+  max-height: calc(100vh - 2rem);
   width: min(320px, 85vw);
   z-index: 20;
   background: var(--card);
-  border-left: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-right: none;
+  border-radius: 12px 0 0 12px;
   box-shadow: -4px 0 24px var(--shadow);
   padding: 1.25rem;
-  padding-top: 4.5rem;
   overflow-y: auto;
   transform: translateX(100%);
   transition: transform .25s ease;
+}
+@media (max-height: 520px) {
+  .focus-todos-panel {
+    top: 1rem;
+    height: calc(100vh - 2rem);
+  }
 }
 .focus-todos-panel.is-open {
   transform: translateX(0);
