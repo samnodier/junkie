@@ -207,6 +207,43 @@ const layoutTemplates = `
 {{define "dashboard"}}{{template "shell" .}}{{end}}
 {{define "room"}}{{template "shell" .}}{{end}}
 
+{{define "rooms-drawer-guest"}}
+<button type="button" class="rooms-drawer-trigger" aria-label="Open rooms">Rooms</button>
+<div class="rooms-drawer-backdrop" hidden></div>
+<aside class="rooms-drawer" aria-hidden="true">
+  <div class="rooms-drawer-head">
+    <h2>Rooms</h2>
+    <button type="button" class="rooms-drawer-close" aria-label="Close">×</button>
+  </div>
+  <p><a href="/login">Log in</a> · <a href="/signup">Create account</a></p>
+</aside>
+{{end}}
+
+{{define "rooms-drawer-user"}}
+<button type="button" class="rooms-drawer-trigger" aria-label="Open rooms">Rooms</button>
+<div class="rooms-drawer-backdrop" hidden></div>
+<aside class="rooms-drawer" aria-hidden="true">
+  <div class="rooms-drawer-head">
+    <h2>Rooms</h2>
+    <button type="button" class="rooms-drawer-close" aria-label="Close">×</button>
+  </div>
+  <form class="room-create" method="post" action="/rooms">
+    <input name="name" placeholder="Room name">
+    <button>Create</button>
+  </form>
+  <div class="room-list">
+    {{range .Rooms}}
+      <a class="room-row" href="/r/{{.Code}}">
+        <strong>{{.Name}}</strong>
+        <span>/r/{{.Code}} · {{.AutoSessions}}×{{.FocusMinutes}}/{{.BreakMinutes}}</span>
+      </a>
+    {{else}}
+      <p class="empty">No rooms yet.</p>
+    {{end}}
+  </div>
+</aside>
+{{end}}
+
 {{define "content"}}
   {{if eq .Title "Log in"}}
     <section class="auth-card">
@@ -238,12 +275,10 @@ const layoutTemplates = `
   {{else if eq .Title "Dashboard"}}
     {{if .GuestMode}}
     <div id="guest-desk"></div>
+    {{template "rooms-drawer-guest" .}}
     <script src="/assets/guest.js"></script>
     {{else}}
-    <form class="room-create" method="post" action="/rooms">
-      <input name="name" placeholder="Room name, e.g. Study hall">
-      <button>Create room</button>
-    </form>
+    {{template "rooms-drawer-user" .}}
 
     {{if .SoloTimer}}
       <article class="circle-timer-wrap">
@@ -261,7 +296,27 @@ const layoutTemplates = `
         </form>
       </article>
     {{else}}
-    <section class="grid two">
+    <section class="grid two desk-grid">
+      <article class="circle-timer-wrap">
+        <form class="circle-timer-form" method="post" action="/solo/start">
+          <div class="circle-timer idle" role="group" aria-label="Set focus duration">
+            <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
+              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
+            </svg>
+            <div class="circle-timer-core">
+              <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
+              <label class="circle-timer-time">
+                <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
+                <span class="circle-timer-suffix">min</span>
+              </label>
+              <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
+            </div>
+            <span class="circle-timer-hint">Tap to start</span>
+          </div>
+        </form>
+      </article>
+
       <article class="panel">
         <div class="panel-title">
           <h2>Private todos</h2>
@@ -281,44 +336,7 @@ const layoutTemplates = `
           {{end}}
         </ul>
       </article>
-
-      <article class="panel">
-        <div class="panel-title">
-          <h2>Rooms</h2>
-          <span>Links are the invite</span>
-        </div>
-        <div class="room-list">
-          {{range .Rooms}}
-            <a class="room-row" href="/r/{{.Code}}">
-              <strong>{{.Name}}</strong>
-              <span>/r/{{.Code}} · {{.AutoSessions}}×{{.FocusMinutes}}/{{.BreakMinutes}}</span>
-            </a>
-          {{else}}
-            <p class="empty">Create a room, then share its link with your Discord study group.</p>
-          {{end}}
-        </div>
-      </article>
     </section>
-
-    <article class="circle-timer-wrap">
-      <form class="circle-timer-form" method="post" action="/solo/start">
-        <div class="circle-timer idle" role="group" aria-label="Set focus duration">
-          <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-            <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
-            <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
-          </svg>
-          <div class="circle-timer-core">
-            <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
-            <label class="circle-timer-time">
-              <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
-              <span class="circle-timer-suffix">min</span>
-            </label>
-            <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
-          </div>
-          <span class="circle-timer-hint">Tap to start</span>
-        </div>
-      </form>
-    </article>
     {{end}}
 
     {{if .SoloTimer}}
@@ -597,6 +615,7 @@ h2 {
 .panel {
   padding: 1.25rem;
   margin-bottom: 1rem;
+  border-radius: 10px;
 }
 .panel-title {
   display: flex;
@@ -620,7 +639,7 @@ h2 {
   align-items: center;
   gap: .7rem;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 9px;
   padding: .55rem;
   background: #fffaf0;
 }
@@ -640,7 +659,7 @@ h2 {
   width: 2.6rem;
   height: 2.6rem;
   padding: 0;
-  border-radius: 14px;
+  border-radius: 10px;
   font-size: 1.35rem;
   line-height: 1;
   font-weight: 500;
@@ -650,13 +669,80 @@ h2 {
   display: grid;
   gap: .25rem;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 10px;
   padding: 1rem;
   color: var(--ink);
   text-decoration: none;
   background: #fffaf0;
 }
 .room-row span { color: var(--muted); }
+.rooms-drawer-trigger {
+  display: inline-block;
+  margin: 0 0 1rem;
+  background: var(--card);
+  color: var(--deep);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: .55rem 1rem;
+  font-weight: 700;
+}
+.rooms-drawer-trigger:hover {
+  filter: none;
+  border-color: color-mix(in srgb, var(--deep) 40%, var(--line));
+}
+.rooms-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 59, 42, .35);
+  z-index: 40;
+}
+.rooms-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(360px, 88vw);
+  transform: translateX(100%);
+  transition: transform .25s ease;
+  background: var(--card);
+  border-left: 1px solid var(--line);
+  box-shadow: -24px 0 80px rgba(23, 33, 27, .12);
+  padding: 1.5rem;
+  z-index: 50;
+  overflow-y: auto;
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+.rooms-drawer.open {
+  transform: translateX(0);
+}
+.rooms-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rooms-drawer-head h2 {
+  margin: 0;
+}
+.rooms-drawer-close {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.rooms-drawer-close:hover {
+  filter: none;
+  color: var(--red);
+}
+body.rooms-drawer-open {
+  overflow: hidden;
+}
 .heatmap-chart {
   width: 100%;
 }
@@ -749,20 +835,101 @@ h2 {
   gap: 1rem;
   justify-content: center;
   padding: 1.5rem 0 2.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
 }
-.timer-cancel {
+.desk-grid .circle-timer-wrap {
+  padding: 1rem 0;
+}
+.desk-grid {
+  align-items: start;
+}
+.rooms-drawer-trigger {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 80;
+  border-radius: 14px 0 0 14px;
+  padding: .7rem .55rem .7rem .65rem;
+  background: color-mix(in srgb, var(--card) 88%, white);
+  border: 1px solid var(--line);
+  border-right: 0;
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  box-shadow: -6px 0 24px rgba(23,33,27,.08);
+}
+.rooms-drawer-trigger:hover {
+  color: var(--deep);
+  filter: brightness(1.02);
+}
+.rooms-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(23,33,27,.28);
+}
+.rooms-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 100;
+  width: min(380px, 92vw);
+  height: 100vh;
+  padding: 1.25rem;
+  overflow-y: auto;
+  background: var(--card);
+  border-left: 1px solid var(--line);
+  box-shadow: -16px 0 48px rgba(23,33,27,.12);
+  transform: translateX(100%);
+  transition: transform .28s ease;
+}
+.rooms-drawer.open {
+  transform: translateX(0);
+}
+.rooms-drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--line);
+}
+.rooms-drawer-head h2 {
+  margin: 0;
+}
+.rooms-drawer-close {
   background: transparent;
   color: var(--muted);
-  border: 1px solid var(--line);
-  font-weight: 600;
-  font-size: .9rem;
-  padding: .55rem 1.1rem;
+  font-size: 1.6rem;
+  line-height: 1;
+  padding: .15rem .45rem;
+}
+.rooms-drawer-close:hover {
+  color: var(--deep);
+  filter: none;
+}
+.rooms-drawer .room-create {
+  margin-bottom: 1rem;
+}
+body.rooms-drawer-open {
+  overflow: hidden;
+}
+.timer-cancel {
+  background: var(--red);
+  color: #fff;
+  border: 0;
+  font-weight: 700;
+  font-size: .95rem;
+  padding: .65rem 1.25rem;
 }
 .timer-cancel:hover {
-  color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 40%, var(--line));
-  filter: none;
+  color: #fff;
+  filter: brightness(1.08);
 }
 .work-map-collapsible {
   margin-bottom: 1rem;
@@ -940,7 +1107,7 @@ h2 {
   color: var(--muted);
 }
 @media (max-width: 760px) {
-  .dashboard-hero, .room-header, .grid.two, .settings {
+  .dashboard-hero, .room-header, .grid.two, .settings, .desk-grid {
     grid-template-columns: 1fr;
   }
   .room-create, .inline-form {
@@ -952,5 +1119,6 @@ h2 {
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; }
+  .rooms-drawer { transition: none; }
 }
 `
