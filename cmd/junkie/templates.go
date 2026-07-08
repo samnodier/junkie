@@ -938,14 +938,13 @@ h2 {
   padding: .55rem;
   background: transparent;
   color: var(--ink);
-  border: 1px solid var(--line);
+  border: none;
   border-radius: var(--radius);
   cursor: pointer;
   flex-shrink: 0;
 }
 .menu-drawer-trigger:hover {
   filter: none;
-  border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
   background: color-mix(in srgb, var(--card) 70%, var(--surface));
 }
 .menu-bar {
