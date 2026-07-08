@@ -56,15 +56,22 @@ const layoutTemplates = `
         <span class="theme-icon theme-icon-light" aria-hidden="true">Light</span>
         <span class="theme-icon theme-icon-dark" aria-hidden="true">Dark</span>
       </button>
-      {{if .User.ID}}
+      {{if eq .Title "Dashboard"}}
+        {{if .User.ID}}
+          <nav class="nav nav-compact">
+            <span>{{.User.DisplayName}}</span>
+            <form method="post" action="/logout"><button class="link-button">Log out</button></form>
+          </nav>
+        {{end}}
+        <button type="button" class="menu-drawer-trigger" aria-label="Open menu" aria-expanded="false">
+          <span class="menu-bar" aria-hidden="true"></span>
+          <span class="menu-bar" aria-hidden="true"></span>
+          <span class="menu-bar" aria-hidden="true"></span>
+        </button>
+      {{else if .User.ID}}
         <nav class="nav">
           <span>{{.User.DisplayName}}</span>
           <form method="post" action="/logout"><button class="link-button">Log out</button></form>
-        </nav>
-      {{else}}
-        <nav class="nav">
-          <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a>
-          <a class="nav-cta" href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a>
         </nav>
       {{end}}
     </div>
@@ -73,6 +80,13 @@ const layoutTemplates = `
     {{if .Error}}<p class="notice">{{.Error}}</p>{{end}}
     {{template "content" .}}
   </main>
+  {{if eq .Title "Dashboard"}}
+    {{if .GuestMode}}
+      {{template "menu-drawer-guest" .}}
+    {{else}}
+      {{template "menu-drawer-user" .}}
+    {{end}}
+  {{end}}
   <script>
     (function () {
       const CIRC = 2 * Math.PI * 88;
@@ -154,24 +168,26 @@ const layoutTemplates = `
         });
       });
 
-      const wireRoomsDrawer = () => {
-        const trigger = document.querySelector('.rooms-drawer-trigger');
-        const drawer = document.querySelector('.rooms-drawer');
-        const backdrop = document.querySelector('.rooms-drawer-backdrop');
-        const closeBtn = document.querySelector('.rooms-drawer-close');
+      const wireMenuDrawer = () => {
+        const trigger = document.querySelector('.menu-drawer-trigger');
+        const drawer = document.querySelector('.menu-drawer');
+        const backdrop = document.querySelector('.menu-drawer-backdrop');
+        const closeBtn = document.querySelector('.menu-drawer-close');
         if (!trigger || !drawer) return;
 
         const open = () => {
           drawer.classList.add('open');
           backdrop?.removeAttribute('hidden');
           drawer.setAttribute('aria-hidden', 'false');
-          document.body.classList.add('rooms-drawer-open');
+          trigger.setAttribute('aria-expanded', 'true');
+          document.body.classList.add('menu-drawer-open');
         };
         const shut = () => {
           drawer.classList.remove('open');
           backdrop?.setAttribute('hidden', '');
           drawer.setAttribute('aria-hidden', 'true');
-          document.body.classList.remove('rooms-drawer-open');
+          trigger.setAttribute('aria-expanded', 'false');
+          document.body.classList.remove('menu-drawer-open');
         };
 
         trigger.addEventListener('click', open);
@@ -181,7 +197,7 @@ const layoutTemplates = `
           if (event.key === 'Escape') shut();
         });
       };
-      wireRoomsDrawer();
+      wireMenuDrawer();
 
       const themeKey = 'junkie:theme';
       const themeToggle = document.getElementById('theme-toggle');
@@ -237,25 +253,26 @@ const layoutTemplates = `
 {{define "dashboard"}}{{template "shell" .}}{{end}}
 {{define "room"}}{{template "shell" .}}{{end}}
 
-{{define "rooms-drawer-guest"}}
-<button type="button" class="rooms-drawer-trigger" aria-label="Open rooms">Rooms</button>
-<div class="rooms-drawer-backdrop" hidden></div>
-<aside class="rooms-drawer" aria-hidden="true">
-  <div class="rooms-drawer-head">
+{{define "menu-drawer-guest"}}
+<div class="menu-drawer-backdrop" hidden></div>
+<aside class="menu-drawer" aria-hidden="true">
+  <div class="menu-drawer-head">
     <h2>Rooms</h2>
-    <button type="button" class="rooms-drawer-close" aria-label="Close">×</button>
+    <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
-  <p><a href="/login">Log in</a> · <a href="/signup">Create account</a></p>
+  <nav class="menu-drawer-nav">
+    <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a>
+    <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a>
+  </nav>
 </aside>
 {{end}}
 
-{{define "rooms-drawer-user"}}
-<button type="button" class="rooms-drawer-trigger" aria-label="Open rooms">Rooms</button>
-<div class="rooms-drawer-backdrop" hidden></div>
-<aside class="rooms-drawer" aria-hidden="true">
-  <div class="rooms-drawer-head">
+{{define "menu-drawer-user"}}
+<div class="menu-drawer-backdrop" hidden></div>
+<aside class="menu-drawer" aria-hidden="true">
+  <div class="menu-drawer-head">
     <h2>Rooms</h2>
-    <button type="button" class="rooms-drawer-close" aria-label="Close">×</button>
+    <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
   <form class="room-create" method="post" action="/rooms">
     <input name="name" placeholder="Room name">
@@ -277,22 +294,18 @@ const layoutTemplates = `
 {{define "content"}}
   {{if eq .Title "Log in"}}
     <section class="auth-card">
-      <p class="eyebrow">Rooms only</p>
-      <h1>Log in to join or create a room.</h1>
-      <p class="muted">You can use junkie solo without an account. Accounts are only needed for shared rooms.</p>
+      <h1>Log in</h1>
       <form class="stack" method="post" action="/login">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
         <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
         <button>Log in</button>
       </form>
-      <p class="muted">New here? <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create an account</a> · <a href="/">Keep using solo mode</a></p>
+      <p class="muted"><a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a> · <a href="/">Back</a></p>
     </section>
   {{else if eq .Title "Create account"}}
     <section class="auth-card">
-      <p class="eyebrow">Rooms only</p>
-      <h1>Create an account for shared rooms.</h1>
-      <p class="muted">Solo focus, private todos, and your work map work without signing up.</p>
+      <h1>Create account</h1>
       <form class="stack" method="post" action="/signup">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Display name <input name="display_name" autocomplete="name" required></label>
@@ -300,16 +313,13 @@ const layoutTemplates = `
         <label>Password <input type="password" name="password" autocomplete="new-password" required></label>
         <button>Create account</button>
       </form>
-      <p class="muted">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a> · <a href="/">Keep using solo mode</a></p>
+      <p class="muted"><a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a> · <a href="/">Back</a></p>
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .GuestMode}}
     <div id="guest-desk"></div>
-    {{template "rooms-drawer-guest" .}}
     <script src="/assets/guest.js"></script>
     {{else}}
-    {{template "rooms-drawer-user" .}}
-
     {{if .SoloTimer}}
       <article class="circle-timer-wrap">
         <div class="circle-timer running" role="timer" aria-label="Focus countdown">
@@ -665,10 +675,10 @@ code {
   margin: 0 auto 4rem;
 }
 .auth-card, .panel, .timer-card {
-  background: color-mix(in srgb, var(--card) 92%, white);
+  background: color-mix(in srgb, var(--card) 92%, var(--card-mix));
   border: 1px solid var(--line);
   border-radius: 30px;
-  box-shadow: 0 24px 80px rgba(23,33,27,.08);
+  box-shadow: 0 24px 80px var(--shadow);
 }
 .auth-card {
   max-width: 520px;
@@ -695,9 +705,9 @@ h2 {
 }
 .muted, .empty { color: var(--muted); }
 .notice {
-  border: 1px solid #ead39a;
+  border: 1px solid var(--notice-border);
   border-radius: 16px;
-  background: #fff2c7;
+  background: var(--notice-bg);
   padding: .9rem 1rem;
 }
 .stack { display: grid; gap: 1rem; }
@@ -746,7 +756,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: .55rem;
-  background: #fffaf0;
+  background: var(--surface);
 }
 .todo-list li.done span {
   color: var(--muted);
@@ -778,74 +788,109 @@ h2 {
   padding: 1rem;
   color: var(--ink);
   text-decoration: none;
-  background: #fffaf0;
+  background: var(--surface);
 }
 .room-row span { color: var(--muted); }
-.rooms-drawer-trigger {
-  display: inline-block;
-  margin: 0 0 1rem;
-  background: var(--card);
-  color: var(--deep);
+.nav-compact {
+  gap: .65rem;
+  font-size: .9rem;
+}
+.menu-drawer-trigger {
+  display: grid;
+  gap: 5px;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: .55rem;
+  background: transparent;
+  color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: .55rem 1rem;
-  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
 }
-.rooms-drawer-trigger:hover {
+.menu-drawer-trigger:hover {
   filter: none;
-  border-color: color-mix(in srgb, var(--deep) 40%, var(--line));
+  border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
+  background: color-mix(in srgb, var(--card) 70%, var(--surface));
 }
-.rooms-drawer-backdrop {
+.menu-bar {
+  display: block;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+}
+.menu-drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(14, 59, 42, .35);
-  z-index: 40;
+  z-index: 90;
+  background: var(--backdrop);
 }
-.rooms-drawer {
+.menu-drawer {
   position: fixed;
   top: 0;
   right: 0;
+  z-index: 100;
+  width: min(380px, 92vw);
   height: 100vh;
-  width: min(360px, 88vw);
-  transform: translateX(100%);
-  transition: transform .25s ease;
+  padding: 1.25rem;
+  overflow-y: auto;
   background: var(--card);
   border-left: 1px solid var(--line);
-  box-shadow: -24px 0 80px rgba(23, 33, 27, .12);
-  padding: 1.5rem;
-  z-index: 50;
-  overflow-y: auto;
+  box-shadow: -16px 0 48px var(--shadow-strong);
+  transform: translateX(100%);
+  transition: transform .28s ease;
   display: grid;
   gap: 1rem;
   align-content: start;
 }
-.rooms-drawer.open {
+.menu-drawer.open {
   transform: translateX(0);
 }
-.rooms-drawer-head {
+.menu-drawer-head {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: .25rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--line);
 }
-.rooms-drawer-head h2 {
+.menu-drawer-head h2 {
   margin: 0;
 }
-.rooms-drawer-close {
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border-radius: 8px;
+.menu-drawer-close {
   background: transparent;
   color: var(--muted);
-  border: 1px solid var(--line);
-  font-size: 1.1rem;
+  font-size: 1.6rem;
   line-height: 1;
+  padding: .15rem .45rem;
+  border: 0;
 }
-.rooms-drawer-close:hover {
+.menu-drawer-close:hover {
+  color: var(--deep);
   filter: none;
-  color: var(--red);
 }
-body.rooms-drawer-open {
+.menu-drawer-nav {
+  display: grid;
+  gap: .5rem;
+}
+.menu-drawer-nav a {
+  display: block;
+  padding: .75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+  background: var(--surface);
+}
+.menu-drawer-nav a:hover {
+  border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
+}
+.menu-drawer .room-create {
+  margin-bottom: .5rem;
+}
+body.menu-drawer-open {
   overflow: hidden;
 }
 .heatmap-chart {
@@ -924,15 +969,16 @@ body.rooms-drawer-open {
   aspect-ratio: 1;
   width: 100%;
   border-radius: 2px;
-  background: #ebedf0;
+  background: var(--heatmap-0);
 }
 .cell-empty {
   visibility: hidden;
 }
-.cell.l1 { background: #9be9a8; }
-.cell.l2 { background: #40c463; }
-.cell.l3 { background: #30a14e; }
-.cell.l4 { background: #216e39; }
+.cell.l0 { background: var(--heatmap-0); }
+.cell.l1 { background: var(--heatmap-1); }
+.cell.l2 { background: var(--heatmap-2); }
+.cell.l3 { background: var(--heatmap-3); }
+.cell.l4 { background: var(--heatmap-4); }
 .circle-timer-wrap {
   display: flex;
   flex-direction: column;
@@ -948,92 +994,16 @@ body.rooms-drawer-open {
 .desk-grid {
   align-items: start;
 }
-.rooms-drawer-trigger {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 80;
-  border-radius: 14px 0 0 14px;
-  padding: .7rem .55rem .7rem .65rem;
-  background: color-mix(in srgb, var(--card) 88%, white);
-  border: 1px solid var(--line);
-  border-right: 0;
-  color: var(--muted);
-  font-size: .78rem;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  writing-mode: vertical-rl;
-  box-shadow: -6px 0 24px rgba(23,33,27,.08);
-}
-.rooms-drawer-trigger:hover {
-  color: var(--deep);
-  filter: brightness(1.02);
-}
-.rooms-drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  background: rgba(23,33,27,.28);
-}
-.rooms-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  z-index: 100;
-  width: min(380px, 92vw);
-  height: 100vh;
-  padding: 1.25rem;
-  overflow-y: auto;
-  background: var(--card);
-  border-left: 1px solid var(--line);
-  box-shadow: -16px 0 48px rgba(23,33,27,.12);
-  transform: translateX(100%);
-  transition: transform .28s ease;
-}
-.rooms-drawer.open {
-  transform: translateX(0);
-}
-.rooms-drawer-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  padding-bottom: .75rem;
-  border-bottom: 1px solid var(--line);
-}
-.rooms-drawer-head h2 {
-  margin: 0;
-}
-.rooms-drawer-close {
-  background: transparent;
-  color: var(--muted);
-  font-size: 1.6rem;
-  line-height: 1;
-  padding: .15rem .45rem;
-}
-.rooms-drawer-close:hover {
-  color: var(--deep);
-  filter: none;
-}
-.rooms-drawer .room-create {
-  margin-bottom: 1rem;
-}
-body.rooms-drawer-open {
-  overflow: hidden;
-}
 .timer-cancel {
   background: var(--red);
-  color: #fff;
+  color: var(--btn-text);
   border: 0;
   font-weight: 700;
   font-size: .95rem;
   padding: .65rem 1.25rem;
 }
 .timer-cancel:hover {
-  color: #fff;
+  color: var(--btn-text);
   filter: brightness(1.08);
 }
 .work-map-collapsible {
@@ -1182,10 +1152,10 @@ body.rooms-drawer-open {
   overflow: hidden;
 }
 .timer-card.focus {
-  background: radial-gradient(circle at top right, rgba(47,125,74,.25), transparent 36%), var(--card);
+  background: radial-gradient(circle at top right, var(--focus-glow), transparent 36%), var(--card);
 }
 .timer-card.break {
-  background: radial-gradient(circle at top right, rgba(217,149,47,.25), transparent 36%), var(--card);
+  background: radial-gradient(circle at top right, var(--break-glow), transparent 36%), var(--card);
 }
 .countdown {
   font-variant-numeric: tabular-nums;
@@ -1225,5 +1195,6 @@ body.rooms-drawer-open {
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; }
   .rooms-drawer { transition: none; }
+  .menu-drawer { transition: none; }
 }
 `
