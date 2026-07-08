@@ -248,6 +248,21 @@ const layoutTemplates = `
 </div>
 {{end}}
 
+{{define "todo-remove-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>{{end}}
+{{define "todo-delete-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{{end}}
+
+{{define "todo-row"}}
+  <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
+    <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
+    <span>{{if .DisplayName}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
+    {{if .Removed}}
+      <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
+    {{else}}
+      <form method="post" action="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
+    {{end}}
+  </li>
+{{end}}
+
 {{define "login"}}{{template "shell" .}}{{end}}
 {{define "signup"}}{{template "shell" .}}{{end}}
 {{define "dashboard"}}{{template "shell" .}}{{end}}
@@ -368,11 +383,7 @@ const layoutTemplates = `
         </form>
         <ul class="todo-list">
           {{range .PersonalTodos}}
-            <li class="{{if .Done}}done{{end}}">
-              <form method="post" action="/todo/{{.ID}}/toggle"><button class="check">{{if .Done}}✓{{else}}○{{end}}</button></form>
-              <span>{{.Text}}</span>
-              <form method="post" action="/todo/{{.ID}}/delete"><button class="ghost">Delete</button></form>
-            </li>
+            {{template "todo-row" .}}
           {{end}}
         </ul>
       </article>
@@ -468,11 +479,7 @@ const layoutTemplates = `
             </form>
             <ul class="todo-list">
               {{range .RoomTodos}}
-                <li class="{{if .Done}}done{{end}}">
-                  <form method="post" action="/todo/{{.ID}}/toggle"><button class="check">{{if .Done}}✓{{else}}○{{end}}</button></form>
-                  <span><strong>{{.DisplayName}}</strong> — {{.Text}}</span>
-                  <form method="post" action="/todo/{{.ID}}/delete"><button class="ghost">Delete</button></form>
-                </li>
+                {{template "todo-row" .}}
               {{end}}
             </ul>
           </article>
@@ -763,9 +770,49 @@ h2 {
   padding: .55rem;
   background: var(--surface);
 }
+.todo-list li.done {
+  background: color-mix(in srgb, var(--muted) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--muted) 40%, var(--line));
+}
 .todo-list li.done span {
   color: var(--muted);
   text-decoration: line-through;
+}
+.todo-list li.removed {
+  background: color-mix(in srgb, var(--muted) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--muted) 30%, var(--line));
+  opacity: .82;
+}
+.todo-list li.removed span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.todo-action {
+  background: transparent;
+  color: var(--muted);
+  padding: .2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.todo-action svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.todo-action:hover { filter: none; }
+.todo-remove:hover {
+  color: var(--deep);
+  background: color-mix(in srgb, var(--mint) 55%, transparent);
+}
+.todo-delete {
+  color: var(--red);
+}
+.todo-delete:hover {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
 }
 .check {
   width: 2rem;
@@ -1200,7 +1247,6 @@ body.menu-drawer-open {
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; }
-  .rooms-drawer { transition: none; }
   .menu-drawer { transition: none; }
 }
 `

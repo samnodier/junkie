@@ -48,6 +48,7 @@ type todo struct {
 	ID          string
 	Text        string
 	Done        bool
+	Removed     bool
 	DisplayName string
 	CreatedAt   time.Time
 }
@@ -295,6 +296,8 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "toggle":
 		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET done = NOT done, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
+	case "remove":
+		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = true, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
 	case "delete":
 		_, _ = a.db.Exec(r.Context(), `DELETE FROM todos WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
 	default:
@@ -595,7 +598,7 @@ func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
 }
 
 func (a *app) personalTodos(ctx context.Context, userID string) ([]todo, error) {
-	rows, err := a.db.Query(ctx, `SELECT id, text, done, created_at FROM todos WHERE user_id = $1 AND room_id IS NULL ORDER BY done, created_at DESC`, userID)
+	rows, err := a.db.Query(ctx, `SELECT id, text, done, removed, created_at FROM todos WHERE user_id = $1 AND room_id IS NULL ORDER BY removed, done, created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -603,7 +606,7 @@ func (a *app) personalTodos(ctx context.Context, userID string) ([]todo, error) 
 	var todos []todo
 	for rows.Next() {
 		var t todo
-		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.CreatedAt) == nil {
+		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.Removed, &t.CreatedAt) == nil {
 			todos = append(todos, t)
 		}
 	}
@@ -611,7 +614,7 @@ func (a *app) personalTodos(ctx context.Context, userID string) ([]todo, error) 
 }
 
 func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
-	rows, err := a.db.Query(ctx, `SELECT t.id, t.text, t.done, u.display_name, t.created_at FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1 ORDER BY t.done, t.created_at DESC`, roomID)
+	rows, err := a.db.Query(ctx, `SELECT t.id, t.text, t.done, t.removed, u.display_name, t.created_at FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1 ORDER BY t.removed, t.done, t.created_at DESC`, roomID)
 	if err != nil {
 		return nil, err
 	}
@@ -619,7 +622,7 @@ func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
 	var todos []todo
 	for rows.Next() {
 		var t todo
-		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.DisplayName, &t.CreatedAt) == nil {
+		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.Removed, &t.DisplayName, &t.CreatedAt) == nil {
 			todos = append(todos, t)
 		}
 	}

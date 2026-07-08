@@ -23,6 +23,32 @@
 
   const uid = () => Math.random().toString(36).slice(2, 10);
 
+  const removeIconSVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+      '<path d="M18 6 6 18M6 6l12 12"/>' +
+    '</svg>';
+
+  const deleteIconSVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<polyline points="3 6 5 6 21 6"/>' +
+      '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' +
+    '</svg>';
+
+  const sortTodos = (todos) => {
+    const active = [];
+    const removed = [];
+    for (const todo of todos) {
+      (todo.removed ? removed : active).push(todo);
+    }
+    return active.concat(removed);
+  };
+
+  const todoRowClass = (todo) => {
+    if (todo.removed) return 'removed';
+    if (todo.done) return 'done';
+    return '';
+  };
+
   const heatLevel = (minutes) => {
     if (minutes >= 180) return 4;
     if (minutes >= 90) return 3;
@@ -286,7 +312,7 @@
     const trimmed = text.trim();
     if (!trimmed) return false;
     const next = load(keys.todos, []);
-    next.unshift({ id: uid(), text: trimmed, done: false });
+    next.unshift({ id: uid(), text: trimmed, done: false, removed: false });
     save(keys.todos, next);
     return true;
   };
@@ -335,13 +361,18 @@
     }
 
     const todoItems = todos.length
-      ? todos.map((todo) =>
-          '<li class="' + (todo.done ? 'done' : '') + '" data-id="' + todo.id + '">' +
-            '<button type="button" class="check guest-toggle">' + (todo.done ? '✓' : '○') + '</button>' +
-            '<span>' + todo.text + '</span>' +
-            '<button type="button" class="ghost guest-delete">Delete</button>' +
-          '</li>'
-        ).join('')
+      ? sortTodos(todos).map((todo) => {
+          const actionBtn = todo.removed
+            ? '<button type="button" class="todo-action todo-delete guest-delete" aria-label="Delete permanently">' + deleteIconSVG + '</button>'
+            : '<button type="button" class="todo-action todo-remove guest-remove" aria-label="Remove">' + removeIconSVG + '</button>';
+          return (
+            '<li class="' + todoRowClass(todo) + '" data-id="' + todo.id + '">' +
+              '<button type="button" class="check guest-toggle" aria-label="' + (todo.done ? 'Mark incomplete' : 'Mark complete') + '">' + (todo.done ? '✓' : '○') + '</button>' +
+              '<span>' + todo.text + '</span>' +
+              actionBtn +
+            '</li>'
+          );
+        }).join('')
       : '<li class="empty">Add a private task for today.</li>';
 
     root.innerHTML =
@@ -387,9 +418,11 @@
       if (!item) return;
       const id = item.dataset.id;
       let next = load(keys.todos, []);
-      if (event.target.classList.contains('guest-toggle')) {
+      if (event.target.closest('.guest-toggle')) {
         next = next.map((todo) => (todo.id === id ? { ...todo, done: !todo.done } : todo));
-      } else if (event.target.classList.contains('guest-delete')) {
+      } else if (event.target.closest('.guest-remove')) {
+        next = next.map((todo) => (todo.id === id ? { ...todo, removed: true } : todo));
+      } else if (event.target.closest('.guest-delete')) {
         next = next.filter((todo) => todo.id !== id);
       } else {
         return;
