@@ -465,8 +465,8 @@
     const todoItems = todos.length
       ? sortTodos(todos).map((todo) => {
           const actionBtn = todo.removed
-            ? '<button type="button" class="todo-action todo-delete guest-delete" aria-label="Delete permanently">' + deleteIconSVG + '</button>'
-            : '<button type="button" class="todo-action todo-remove guest-remove" aria-label="Remove">' + removeIconSVG + '</button>';
+            ? '<button type="button" class="todo-action todo-delete guest-delete" title="Delete permanently" aria-label="Delete permanently">' + deleteIconSVG + '</button>'
+            : '<button type="button" class="todo-action todo-remove guest-remove" title="Remove" aria-label="Remove">' + removeIconSVG + '</button>';
           return (
             '<li class="' + todoRowClass(todo) + '" data-id="' + todo.id + '">' +
               '<button type="button" class="check guest-toggle" aria-label="' + (todo.done ? 'Mark incomplete' : 'Mark complete') + '">' + (todo.done ? '✓' : '○') + '</button>' +

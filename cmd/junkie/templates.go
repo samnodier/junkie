@@ -290,9 +290,9 @@ const layoutTemplates = `
     <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     <span>{{if .DisplayName}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
     {{if .Removed}}
-      <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
+      <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
     {{else}}
-      <form method="post" action="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
+      <form method="post" action="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
     {{end}}
   </li>
 {{end}}
@@ -844,12 +844,10 @@ h2 {
   color: var(--muted);
   text-decoration: line-through;
 }
-.todo-list li.removed {
-  opacity: .82;
-}
-.todo-list li.removed span {
-  color: var(--muted);
-  text-decoration: line-through;
+.todo-list li.removed span,
+.todo-list li.removed span strong {
+  color: var(--red);
+  text-decoration: none;
 }
 .todo-action {
   background: transparent;
