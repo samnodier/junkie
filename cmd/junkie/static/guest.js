@@ -303,6 +303,93 @@
   };
 
   let tickHandle = null;
+  let focusTodosPeekOpen = false;
+  let focusTodosHideTimer = null;
+
+  const focusTodoPeekItemsHTML = (todos) => {
+    const active = sortTodos(todos).filter((todo) => !todo.removed);
+    if (!active.length) return '<li class="empty">No active tasks.</li>';
+    return active
+      .map(
+        (todo) =>
+          '<li class="' +
+          todoRowClass(todo) +
+          '" data-id="' +
+          todo.id +
+          '">' +
+          '<button type="button" class="check guest-toggle" aria-label="' +
+          (todo.done ? 'Mark incomplete' : 'Mark complete') +
+          '">' +
+          (todo.done ? '✓' : '○') +
+          '</button>' +
+          '<span>' +
+          todo.text +
+          '</span>' +
+          '</li>'
+      )
+      .join('');
+  };
+
+  const focusDeskHTML = (mainHTML, todos) =>
+    '<section class="focus-desk">' +
+      '<div class="focus-desk-main">' +
+        mainHTML +
+      '</div>' +
+      '<button type="button" class="focus-todos-toggle' +
+        (focusTodosPeekOpen ? ' is-open' : '') +
+        '" aria-expanded="' +
+        (focusTodosPeekOpen ? 'true' : 'false') +
+        '" aria-controls="focus-todos-panel">Todos</button>' +
+      '<aside class="focus-todos-panel' +
+        (focusTodosPeekOpen ? ' is-open' : '') +
+        '" id="focus-todos-panel" aria-hidden="' +
+        (focusTodosPeekOpen ? 'false' : 'true') +
+        '">' +
+        '<div class="panel-title"><h2>Todos</h2></div>' +
+        '<ul class="todo-list" id="guest-focus-todos">' +
+          focusTodoPeekItemsHTML(todos) +
+        '</ul>' +
+      '</aside>' +
+    '</section>';
+
+  const wireFocusTodosPeek = () => {
+    const toggle = document.querySelector('.focus-todos-toggle');
+    const panel = document.querySelector('.focus-todos-panel');
+    if (!toggle || !panel) return;
+
+    const hide = () => {
+      focusTodosPeekOpen = false;
+      panel.classList.remove('is-open');
+      toggle.classList.remove('is-open');
+      toggle.setAttribute('aria-expanded', 'false');
+      panel.setAttribute('aria-hidden', 'true');
+      if (focusTodosHideTimer) {
+        clearTimeout(focusTodosHideTimer);
+        focusTodosHideTimer = null;
+      }
+    };
+
+    const scheduleHide = () => {
+      if (focusTodosHideTimer) clearTimeout(focusTodosHideTimer);
+      focusTodosHideTimer = setTimeout(hide, 10000);
+    };
+
+    const show = () => {
+      focusTodosPeekOpen = true;
+      panel.classList.add('is-open');
+      toggle.classList.add('is-open');
+      toggle.setAttribute('aria-expanded', 'true');
+      panel.setAttribute('aria-hidden', 'false');
+      scheduleHide();
+    };
+
+    toggle.addEventListener('click', () => {
+      if (focusTodosPeekOpen) hide();
+      else show();
+    });
+
+    if (focusTodosPeekOpen) scheduleHide();
+  };
 
   const focusTodoInput = () => {
     document.getElementById('guest-todo-form')?.querySelector('input[name="text"]')?.focus();
@@ -329,16 +416,35 @@
 
     if (inFocus) {
       root.innerHTML =
-        runningTimerHTML(timer) +
+        focusDeskHTML(runningTimerHTML(timer), todos) +
         '<details class="work-map-collapsible">' +
           '<summary class="work-map-link">Work map</summary>' +
           workMapPanelHTML() +
         '</details>';
 
       document.getElementById('guest-timer-cancel')?.addEventListener('click', () => {
+        focusTodosPeekOpen = false;
+        if (focusTodosHideTimer) {
+          clearTimeout(focusTodosHideTimer);
+          focusTodosHideTimer = null;
+        }
         save(keys.timer, null);
         render();
       });
+
+      document.getElementById('guest-focus-todos')?.addEventListener('click', (event) => {
+        if (!event.target.closest('.guest-toggle')) return;
+        const item = event.target.closest('[data-id]');
+        if (!item) return;
+        const id = item.dataset.id;
+        const next = load(keys.todos, []).map((todo) =>
+          todo.id === id ? { ...todo, done: !todo.done } : todo
+        );
+        save(keys.todos, next);
+        render();
+      });
+
+      wireFocusTodosPeek();
 
       const running = root.querySelector('.circle-timer.running');
       const total = timer.focusMinutes * 60;

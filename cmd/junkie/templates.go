@@ -212,6 +212,40 @@ const layoutTemplates = `
         syncThemeToggle();
       });
       syncThemeToggle();
+
+      const wireFocusTodosPeek = () => {
+        const toggle = document.querySelector('.focus-todos-toggle');
+        const panel = document.querySelector('.focus-todos-panel');
+        if (!toggle || !panel) return;
+
+        let hideTimer = null;
+
+        const hide = () => {
+          panel.classList.remove('is-open');
+          toggle.classList.remove('is-open');
+          toggle.setAttribute('aria-expanded', 'false');
+          panel.setAttribute('aria-hidden', 'true');
+          if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+          }
+        };
+
+        const show = () => {
+          panel.classList.add('is-open');
+          toggle.classList.add('is-open');
+          toggle.setAttribute('aria-expanded', 'true');
+          panel.setAttribute('aria-hidden', 'false');
+          if (hideTimer) clearTimeout(hideTimer);
+          hideTimer = setTimeout(hide, 10000);
+        };
+
+        toggle.addEventListener('click', () => {
+          if (panel.classList.contains('is-open')) hide();
+          else show();
+        });
+      };
+      wireFocusTodosPeek();
     })();
   </script>
 </body>
@@ -260,6 +294,13 @@ const layoutTemplates = `
     {{else}}
       <form method="post" action="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
     {{end}}
+  </li>
+{{end}}
+
+{{define "todo-row-focus"}}
+  <li class="{{if .Done}}done{{end}}">
+    <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
+    <span>{{.Text}}</span>
   </li>
 {{end}}
 
@@ -336,20 +377,37 @@ const layoutTemplates = `
     <script src="/assets/guest.js"></script>
     {{else}}
     {{if .SoloTimer}}
-      <article class="circle-timer-wrap">
-        <div class="circle-timer running" role="timer" aria-label="Focus countdown">
-          <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-            <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
-            <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
-          </svg>
-          <div class="circle-timer-core">
-            <div class="circle-timer-countdown countdown" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.FocusMinutes 60}}">--:--</div>
+    <section class="focus-desk">
+      <div class="focus-desk-main">
+        <article class="circle-timer-wrap">
+          <div class="circle-timer running" role="timer" aria-label="Focus countdown">
+            <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
+              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
+            </svg>
+            <div class="circle-timer-core">
+              <div class="circle-timer-countdown countdown" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.FocusMinutes 60}}">--:--</div>
+            </div>
           </div>
+          <form method="post" action="/solo/cancel">
+            <button type="submit" class="timer-cancel">Cancel focus</button>
+          </form>
+        </article>
+      </div>
+      <button type="button" class="focus-todos-toggle" aria-expanded="false" aria-controls="focus-todos-panel">Todos</button>
+      <aside class="focus-todos-panel" id="focus-todos-panel" aria-hidden="true">
+        <div class="panel-title">
+          <h2>Todos</h2>
         </div>
-        <form method="post" action="/solo/cancel">
-          <button type="submit" class="timer-cancel">Cancel focus</button>
-        </form>
-      </article>
+        <ul class="todo-list">
+          {{range .PersonalTodos}}
+            {{if not .Removed}}{{template "todo-row-focus" .}}{{end}}
+          {{else}}
+            <li class="empty">No active tasks.</li>
+          {{end}}
+        </ul>
+      </aside>
+    </section>
     {{else}}
     <section class="grid two desk-grid">
       <article class="circle-timer-wrap">
@@ -1230,6 +1288,62 @@ body.menu-drawer-open {
   display: grid;
   align-content: center;
 }
+.focus-desk {
+  position: relative;
+  min-height: calc(100vh - 10rem);
+  display: grid;
+  place-items: center;
+}
+.focus-desk-main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.focus-todos-toggle {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 21;
+  padding: .65rem .45rem;
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: .5rem 0 0 .5rem;
+  background: var(--card);
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  cursor: pointer;
+  transition: right .25s ease, color .15s ease;
+}
+.focus-todos-toggle.is-open {
+  right: min(320px, 85vw);
+  color: var(--deep);
+}
+.focus-todos-toggle:hover {
+  color: var(--deep);
+}
+.focus-todos-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 85vw);
+  z-index: 20;
+  background: var(--card);
+  border-left: 1px solid var(--line);
+  box-shadow: -4px 0 24px var(--shadow);
+  padding: 1.25rem;
+  padding-top: 4.5rem;
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform .25s ease;
+}
+.focus-todos-panel.is-open {
+  transform: translateX(0);
+}
 .focus-message {
   text-align: center;
   color: var(--muted);
@@ -1248,5 +1362,7 @@ body.menu-drawer-open {
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; }
   .menu-drawer { transition: none; }
+  .focus-todos-panel { transition: none; }
+  .focus-todos-toggle { transition: none; }
 }
 `
