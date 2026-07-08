@@ -32,6 +32,16 @@ const layoutTemplates = `
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}} · junkie</title>
+  <script>
+    (function () {
+      var k = 'junkie:theme';
+      var t = localStorage.getItem(k);
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
   <link rel="stylesheet" href="/assets/app.css">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 </head>
@@ -41,17 +51,23 @@ const layoutTemplates = `
       <span class="brand-mark">j</span>
       <span>junkie</span>
     </a>
-    {{if .User.ID}}
-      <nav class="nav">
-        <span>{{.User.DisplayName}}</span>
-        <form method="post" action="/logout"><button class="link-button">Log out</button></form>
-      </nav>
-    {{else}}
-      <nav class="nav">
-        <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a>
-        <a class="nav-cta" href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a>
-      </nav>
-    {{end}}
+    <div class="topbar-actions">
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+        <span class="theme-icon theme-icon-light" aria-hidden="true">Light</span>
+        <span class="theme-icon theme-icon-dark" aria-hidden="true">Dark</span>
+      </button>
+      {{if .User.ID}}
+        <nav class="nav">
+          <span>{{.User.DisplayName}}</span>
+          <form method="post" action="/logout"><button class="link-button">Log out</button></form>
+        </nav>
+      {{else}}
+        <nav class="nav">
+          <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a>
+          <a class="nav-cta" href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a>
+        </nav>
+      {{end}}
+    </div>
   </header>
   <main class="page">
     {{if .Error}}<p class="notice">{{.Error}}</p>{{end}}
@@ -166,6 +182,20 @@ const layoutTemplates = `
         });
       };
       wireRoomsDrawer();
+
+      const themeKey = 'junkie:theme';
+      const themeToggle = document.getElementById('theme-toggle');
+      const syncThemeToggle = () => {
+        const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+        themeToggle?.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+      };
+      themeToggle?.addEventListener('click', () => {
+        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem(themeKey, next);
+        syncThemeToggle();
+      });
+      syncThemeToggle();
     })();
   </script>
 </body>
@@ -458,7 +488,8 @@ const layoutTemplates = `
 `
 
 const appCSS = `
-:root {
+:root, [data-theme="light"] {
+  color-scheme: light;
   --ink: #17211b;
   --muted: #657168;
   --paper: #f6f3ea;
@@ -469,6 +500,55 @@ const appCSS = `
   --mint: #cde8cf;
   --amber: #d9952f;
   --red: #a53d2f;
+  --surface: #fffaf0;
+  --input-bg: #fffaf0;
+  --code-bg: #fff8e5;
+  --notice-border: #ead39a;
+  --notice-bg: #fff2c7;
+  --card-mix: white;
+  --grid-line: rgba(47, 125, 74, .08);
+  --shadow: rgba(23, 33, 27, .08);
+  --shadow-strong: rgba(23, 33, 27, .12);
+  --backdrop: rgba(23, 33, 27, .28);
+  --btn-text: #fff;
+  --focus-glow: rgba(47, 125, 74, .25);
+  --break-glow: rgba(217, 149, 47, .25);
+  --heatmap-0: #ebedf0;
+  --heatmap-1: #9be9a8;
+  --heatmap-2: #40c463;
+  --heatmap-3: #30a14e;
+  --heatmap-4: #216e39;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e4ebe6;
+  --muted: #8fa095;
+  --paper: #0f1411;
+  --card: #1a221d;
+  --line: #2c3830;
+  --green: #4db870;
+  --deep: #8fd9a8;
+  --mint: #1e3a28;
+  --amber: #e8a84a;
+  --red: #d46a5c;
+  --surface: #1e2822;
+  --input-bg: #1e2822;
+  --code-bg: #1e2822;
+  --notice-border: #4a3f28;
+  --notice-bg: #2a2418;
+  --card-mix: #0f1411;
+  --grid-line: rgba(77, 184, 112, .05);
+  --shadow: rgba(0, 0, 0, .35);
+  --shadow-strong: rgba(0, 0, 0, .5);
+  --backdrop: rgba(0, 0, 0, .58);
+  --btn-text: #0f1411;
+  --focus-glow: rgba(77, 184, 112, .18);
+  --break-glow: rgba(232, 168, 74, .16);
+  --heatmap-0: #161b18;
+  --heatmap-1: #0e4429;
+  --heatmap-2: #006d32;
+  --heatmap-3: #26a641;
+  --heatmap-4: #39d353;
 }
 * { box-sizing: border-box; }
 body {
@@ -476,8 +556,8 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background:
-    linear-gradient(rgba(47,125,74,.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(47,125,74,.08) 1px, transparent 1px),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
     var(--paper);
   background-size: 22px 22px;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -490,7 +570,7 @@ button {
   border: 0;
   border-radius: 999px;
   background: var(--deep);
-  color: white;
+  color: var(--btn-text);
   padding: .8rem 1rem;
   cursor: pointer;
   font-weight: 750;
@@ -500,7 +580,7 @@ input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fffaf0;
+  background: var(--input-bg);
   padding: .85rem 1rem;
   color: var(--ink);
 }
@@ -508,13 +588,38 @@ code {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: .1rem .35rem;
-  background: #fff8e5;
+  background: var(--code-bg);
 }
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 1rem clamp(1rem, 4vw, 3rem);
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.theme-toggle {
+  background: transparent;
+  color: var(--muted);
+  padding: .35rem .65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  line-height: 1;
+}
+.theme-toggle:hover {
+  color: var(--ink);
+  filter: none;
+  border-color: color-mix(in srgb, var(--green) 45%, var(--line));
+}
+[data-theme="light"] .theme-icon-dark,
+[data-theme="dark"] .theme-icon-light {
+  display: none;
 }
 .brand {
   display: inline-flex;
