@@ -820,7 +820,8 @@ h2 {
   margin: 1rem 0 0;
   padding: 0;
   display: grid;
-  gap: 0;
+  gap: 0.25rem;
+  align-content: start;
 }
 .todo-list li {
   display: grid;
