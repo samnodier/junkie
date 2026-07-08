@@ -4,9 +4,42 @@
 
 There is no planting mechanic. Progress is represented by a GitHub-inspired work map of focused minutes per day.
 
+## Where your data lives
+
+junkie splits storage by whether you have an account. Solo use does not require signing up.
+
+### Without an account (guest / solo)
+
+These stay in **browser `localStorage` only** on the device you are using. They are **not** stored in PostgreSQL:
+
+- Private todos (`junkie:todos`)
+- Solo timer state (`junkie:soloTimer`)
+- Work map / focus minutes per day (`junkie:activity`)
+
+You can use junkie without creating an account. That data is tied to one browser profile on one device. Clearing site data or switching browsers or devices starts you over. Guest data is **not** automatically copied into an account when you sign up.
+
+### With an account
+
+These are stored in **PostgreSQL** on the server so they persist across sessions and devices:
+
+- Account credentials and session
+- Private todos
+- Solo timer runs and completed focus minutes (work map)
+- Room membership, room settings, room todos, and shared room timers
+
+Accounts are only required to create or join shared rooms. Everything else works as a guest.
+
+### Why guest data stays local
+
+Keeping solo progress in the browser avoids anonymous rows in the database, cleanup overhead, and extra privacy/account complexity. It also keeps the hosted database small. Server storage is reserved for features that need it—mainly shared rooms and cross-device persistence.
+
+### Keeping progress long-term
+
+Create an account and use junkie while logged in. Your todos, timer history, and work map will then live in PostgreSQL and follow you across devices. If you used junkie as a guest first, you will need to re-enter todos manually; guest `localStorage` does not migrate to your account today.
+
 ## V1 behavior
 
-- Use solo without an account: private todos, solo timer, and work map stay on your device.
+- Use solo without an account: private todos, solo timer, and work map stay in browser `localStorage` on your device.
 - Accounts are only required to create or join shared rooms.
 - Username/password accounts backed by PostgreSQL for room features.
 - Persistent rooms with generated invite codes at `/r/{code}`.
