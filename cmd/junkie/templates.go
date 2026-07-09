@@ -269,22 +269,47 @@ const layoutTemplates = `
       };
       wireFocusTodosPeek();
 
-      document.querySelectorAll('.copy-link').forEach((btn) => {
+      document.querySelectorAll('.copy-link, .copy-room-invite').forEach((btn) => {
         const targetId = btn.dataset.copyTarget;
-        btn.addEventListener('click', async () => {
-          const el = targetId ? document.getElementById(targetId) : null;
-          const text = el?.textContent?.trim() || btn.dataset.copy || '';
-          if (!text) return;
-          const full = text.startsWith('http') ? text : (location.origin + text);
+        const copyInvite = async (path, el) => {
+          const cleanPath = path.startsWith('http') ? new URL(path).pathname : path;
+          const message = 'Join my focus room on junkie: ' + location.origin + cleanPath;
           try {
-            await navigator.clipboard.writeText(full);
-            const prev = btn.textContent;
-            btn.textContent = 'Copied';
-            setTimeout(() => { btn.textContent = prev; }, 1500);
+            await navigator.clipboard.writeText(message);
+            const prev = el.textContent;
+            if (el.classList.contains('copy-link')) {
+              el.textContent = 'Copied!';
+              setTimeout(() => { el.textContent = prev; }, 1500);
+            } else {
+              el.dataset.copied = '1';
+              el.classList.add('is-copied');
+              setTimeout(() => {
+                el.classList.remove('is-copied');
+                delete el.dataset.copied;
+              }, 1500);
+            }
           } catch {
-            window.prompt('Copy this link:', full);
+            window.prompt('Copy this invite:', message);
           }
+        };
+        btn.addEventListener('click', async (event) => {
+          const path = btn.dataset.path || (targetId ? document.getElementById(targetId)?.textContent?.trim() : '') || btn.dataset.copy || '';
+          if (!path) return;
+          if (btn.classList.contains('copy-room-invite')) {
+            event.preventDefault();
+          }
+          await copyInvite(path, btn);
         });
+      });
+
+      document.querySelectorAll('.room-code-input').forEach((input) => {
+        const upper = () => {
+          const start = input.selectionStart;
+          const end = input.selectionEnd;
+          input.value = input.value.toUpperCase();
+          if (start != null && end != null) input.setSelectionRange(start, end);
+        };
+        input.addEventListener('input', upper);
       });
     })();
   </script>
@@ -359,6 +384,8 @@ const layoutTemplates = `
 {{define "profile"}}{{template "shell" .}}{{end}}
 {{define "room"}}{{template "shell" .}}{{end}}
 
+{{define "room-invite"}}{{template "shell" .}}{{end}}
+
 {{define "menu-drawer-guest"}}
 <div class="menu-drawer-backdrop" hidden></div>
 <aside class="menu-drawer" aria-hidden="true">
@@ -370,6 +397,12 @@ const layoutTemplates = `
     <a href="/profile">Profile</a>
     <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a>
   </nav>
+  <p class="menu-drawer-section-label">Join room</p>
+  <form class="room-join" method="post" action="/rooms/join-intent">
+    <input type="hidden" name="next" value="{{if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
+    <input class="room-code-input" name="code" placeholder="Room code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
+    <button>Join</button>
+  </form>
 </aside>
 {{end}}
 
@@ -391,7 +424,7 @@ const layoutTemplates = `
   <p class="menu-drawer-section-label">Join room</p>
   <form class="room-join" method="post" action="/rooms/join">
     <input type="hidden" name="next" value="{{if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
-    <input name="code" placeholder="Room code or link" required aria-label="Room code">
+    <input class="room-code-input" name="code" placeholder="Room code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
     <button>Join</button>
   </form>
   <p class="menu-drawer-section-label">Your rooms</p>
@@ -541,6 +574,21 @@ const layoutTemplates = `
         <p class="muted profile-follow-stub">Follow friends — coming soon</p>
       {{end}}
     </section>
+  {{else if eq .Title "Join room"}}
+    <section class="auth-card room-invite-card">
+      <div class="auth-card-top">
+        {{template "auth-back" .}}
+        {{template "auth-brand" .}}
+      </div>
+      <p class="eyebrow">Room invite</p>
+      <h1>Join {{.Room.Name}}?</h1>
+      <p class="muted">You were invited to a focus room. Room code: <strong>{{.Room.Code}}</strong></p>
+      <form class="stack room-invite-actions" method="post" action="/join/confirm">
+        <input type="hidden" name="code" value="{{.Room.Code}}">
+        <button type="submit" name="action" value="join">Join room</button>
+        <button type="submit" name="action" value="cancel" class="ghost">Cancel</button>
+      </form>
+    </section>
   {{else}}
     <section class="{{if .FocusMode}}focus-shell{{else}}room-shell{{end}}">
       <div class="room-header">
@@ -549,8 +597,8 @@ const layoutTemplates = `
           <h1>{{.Room.Name}}</h1>
           <p class="muted room-share">
             Share this link:
-            <code class="room-share-code" id="room-share-link">/r/{{.Room.Code}}</code>
-            <button type="button" class="ghost copy-link" data-copy-target="room-share-link" aria-label="Copy room link">Copy</button>
+            <button type="button" class="room-share-code copy-room-invite" id="room-share-link" data-path="/r/{{.Room.Code}}" title="Click to copy invite">/r/{{.Room.Code}}</button>
+            <button type="button" class="ghost copy-link" data-copy-target="room-share-link" data-path="/r/{{.Room.Code}}" aria-label="Copy room invite">Copy</button>
           </p>
         </div>
         {{if not .FocusMode}}
@@ -966,6 +1014,34 @@ h2 {
 }
 .room-share-code {
   font-size: .92rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: transparent;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: .2rem .45rem;
+  color: inherit;
+  cursor: pointer;
+}
+.room-share-code:hover {
+  border-color: var(--accent);
+}
+.room-share-code.is-copied {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.room-share-code.is-copied::after {
+  content: ' · Copied!';
+  font-family: inherit;
+  font-weight: 700;
+}
+.room-code-input {
+  text-transform: uppercase;
+}
+.room-invite-card h1 {
+  margin: .35rem 0 .75rem;
+}
+.room-invite-actions {
+  margin-top: 1rem;
 }
 .copy-link {
   font-size: .85rem;

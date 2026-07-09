@@ -149,6 +149,9 @@ func main() {
 	mux.HandleFunc("POST /todo/", a.requireAuth(a.todoAction))
 	mux.HandleFunc("POST /rooms", a.requireAuth(a.createRoom))
 	mux.HandleFunc("POST /rooms/join", a.requireAuth(a.joinRoom))
+	mux.HandleFunc("POST /rooms/join-intent", a.joinRoomIntent)
+	mux.HandleFunc("GET /join/confirm", a.requireAuth(a.joinRoomConfirm))
+	mux.HandleFunc("POST /join/confirm", a.requireAuth(a.joinRoomConfirmPost))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
@@ -372,19 +375,92 @@ func (a *app) joinRoom(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, back+"?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
 		return
 	}
-	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, rm.ID, u.ID)
+	a.addRoomMember(r.Context(), rm.ID, u.ID)
+	http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
+}
+
+func (a *app) joinRoomIntent(w http.ResponseWriter, r *http.Request) {
+	code := normalizeRoomCode(r.FormValue("code"))
+	back := safeNext(r.FormValue("next"))
+	if back == "/" {
+		back = "/dashboard"
+	}
+	if code == "" {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("Enter a room code to join."), http.StatusSeeOther)
+		return
+	}
+	rm, ok := a.findRoom(r.Context(), code)
+	if !ok {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
+		return
+	}
+	if u, ok := a.currentUser(r); ok {
+		if a.isRoomMember(r.Context(), rm.ID, u.ID) {
+			http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
+			return
+		}
+		a.addRoomMember(r.Context(), rm.ID, u.ID)
+		http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/login?next="+url.QueryEscape("/join/confirm?code="+rm.Code), http.StatusSeeOther)
+}
+
+func (a *app) joinRoomConfirm(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	code := normalizeRoomCode(r.URL.Query().Get("code"))
+	if code == "" {
+		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape("Enter a room code to join."), http.StatusSeeOther)
+		return
+	}
+	rm, ok := a.findRoom(r.Context(), code)
+	if !ok {
+		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
+		return
+	}
+	if a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
+		return
+	}
+	a.render(w, "room-invite", pageData{Title: "Join room", User: u, Room: rm})
+}
+
+func (a *app) joinRoomConfirmPost(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	if r.FormValue("action") == "cancel" {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		return
+	}
+	code := normalizeRoomCode(r.FormValue("code"))
+	if code == "" {
+		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape("Enter a room code to join."), http.StatusSeeOther)
+		return
+	}
+	rm, ok := a.findRoom(r.Context(), code)
+	if !ok {
+		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
+		return
+	}
+	a.addRoomMember(r.Context(), rm.ID, u.ID)
 	http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
 }
 
 func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
-	code := strings.TrimPrefix(r.URL.Path, "/r/")
+	code := normalizeRoomCode(strings.TrimPrefix(r.URL.Path, "/r/"))
+	if strings.Contains(code, "/") {
+		http.NotFound(w, r)
+		return
+	}
 	rm, ok := a.findRoom(r.Context(), code)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, rm.ID, u.ID)
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		a.render(w, "room-invite", pageData{Title: "Join room", User: u, Room: rm})
+		return
+	}
 	timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 	todos, _ := a.roomTodos(r.Context(), rm.ID)
 	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
@@ -398,13 +474,16 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	code, action := parts[0], parts[1]
+	code, action := normalizeRoomCode(parts[0]), parts[1]
 	rm, ok := a.findRoom(r.Context(), code)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, rm.ID, u.ID)
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
+		return
+	}
 	switch action {
 	case "rename":
 		name := strings.TrimSpace(r.FormValue("name"))
@@ -458,7 +537,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) roomWS(w http.ResponseWriter, r *http.Request) {
-	code := strings.TrimPrefix(r.URL.Path, "/ws/r/")
+	code := normalizeRoomCode(strings.TrimPrefix(r.URL.Path, "/ws/r/"))
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		return
@@ -637,9 +716,23 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request, userID strin
 }
 
 func (a *app) findRoom(ctx context.Context, code string) (room, bool) {
+	code = normalizeRoomCode(code)
+	if code == "" {
+		return room{}, false
+	}
 	var rm room
-	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions FROM rooms WHERE code = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions)
+	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions)
 	return rm, err == nil
+}
+
+func (a *app) isRoomMember(ctx context.Context, roomID, userID string) bool {
+	var exists bool
+	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2)`, roomID, userID).Scan(&exists)
+	return err == nil && exists
+}
+
+func (a *app) addRoomMember(ctx context.Context, roomID, userID string) {
+	_, _ = a.db.Exec(ctx, `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, userID)
 }
 
 func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
@@ -847,7 +940,7 @@ func normalizeRoomCode(raw string) string {
 	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
 		raw = raw[:i]
 	}
-	return strings.ToLower(raw)
+	return strings.ToUpper(raw)
 }
 
 func randomCode() string {
@@ -857,7 +950,7 @@ func randomCode() string {
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	return strings.ToUpper(hex.EncodeToString(b))
 }
 
 func clampInt(raw string, min, max, fallback int) int {
