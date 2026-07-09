@@ -268,6 +268,24 @@ const layoutTemplates = `
         });
       };
       wireFocusTodosPeek();
+
+      document.querySelectorAll('.copy-link').forEach((btn) => {
+        const targetId = btn.dataset.copyTarget;
+        btn.addEventListener('click', async () => {
+          const el = targetId ? document.getElementById(targetId) : null;
+          const text = el?.textContent?.trim() || btn.dataset.copy || '';
+          if (!text) return;
+          const full = text.startsWith('http') ? text : (location.origin + text);
+          try {
+            await navigator.clipboard.writeText(full);
+            const prev = btn.textContent;
+            btn.textContent = 'Copied';
+            setTimeout(() => { btn.textContent = prev; }, 1500);
+          } catch {
+            window.prompt('Copy this link:', full);
+          }
+        });
+      });
     })();
   </script>
 </body>
@@ -367,10 +385,18 @@ const layoutTemplates = `
   <nav class="menu-drawer-nav">
     <a href="/profile">Profile</a>
   </nav>
+  <p class="menu-drawer-section-label">Create room</p>
   <form class="room-create" method="post" action="/rooms">
     <input name="name" placeholder="Room name">
     <button>Create</button>
   </form>
+  <p class="menu-drawer-section-label">Join room</p>
+  <form class="room-join" method="post" action="/rooms/join">
+    <input type="hidden" name="next" value="{{if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
+    <input name="code" placeholder="Room code or link" required aria-label="Room code">
+    <button>Join</button>
+  </form>
+  <p class="menu-drawer-section-label">Your rooms</p>
   <div class="room-list">
     {{range .Rooms}}
       <a class="room-row" href="/r/{{.Code}}">
@@ -527,7 +553,11 @@ const layoutTemplates = `
         <div>
           <p class="eyebrow">Room code / {{.Room.Code}}</p>
           <h1>{{.Room.Name}}</h1>
-          <p class="muted">Share this link: <code>/r/{{.Room.Code}}</code></p>
+          <p class="muted room-share">
+            Share this link:
+            <code class="room-share-code" id="room-share-link">/r/{{.Room.Code}}</code>
+            <button type="button" class="ghost copy-link" data-copy-target="room-share-link" aria-label="Copy room link">Copy</button>
+          </p>
         </div>
         {{if not .FocusMode}}
           <form class="inline-form" method="post" action="/r/{{.Room.Code}}/rename">
@@ -904,10 +934,51 @@ h2 {
   align-items: end;
   margin: 2rem 0;
 }
-.room-create, .inline-form {
+.room-create, .room-join, .inline-form {
   display: flex;
   gap: .6rem;
   align-items: stretch;
+}
+.menu-drawer-section-label {
+  font-size: .74rem;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--muted);
+  font-weight: 800;
+  margin: 0;
+}
+.menu-drawer .room-create,
+.menu-drawer .room-join {
+  margin-bottom: 0;
+}
+.menu-drawer .room-create input,
+.menu-drawer .room-join input {
+  padding: 0.5rem 1rem;
+  height: 2.5rem;
+  box-sizing: border-box;
+}
+.menu-drawer .room-create button,
+.menu-drawer .room-join button {
+  flex: 0 0 auto;
+  height: 2.5rem;
+  padding: 0.5rem 1rem;
+  box-sizing: border-box;
+}
+.room-share {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+.room-share-code {
+  font-size: .92rem;
+}
+.copy-link {
+  font-size: .85rem;
+  font-weight: 700;
+  padding: .35rem .65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 .inline-form.todo-add-form {
   align-items: stretch;
@@ -1127,9 +1198,6 @@ h2 {
 }
 .menu-drawer-nav a:hover {
   border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
-}
-.menu-drawer .room-create {
-  margin-bottom: .5rem;
 }
 .profile-page {
   max-width: 720px;
@@ -1568,7 +1636,7 @@ body.menu-drawer-open {
   .dashboard-hero, .room-header, .grid.two, .settings, .desk-grid {
     grid-template-columns: 1fr;
   }
-  .room-create, .inline-form:not(.todo-add-form) {
+  .room-create, .room-join, .inline-form:not(.todo-add-form) {
     flex-direction: column;
   }
   .panel-title {

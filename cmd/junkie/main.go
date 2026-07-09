@@ -147,6 +147,7 @@ func main() {
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
 	mux.HandleFunc("POST /todo/", a.requireAuth(a.todoAction))
 	mux.HandleFunc("POST /rooms", a.requireAuth(a.createRoom))
+	mux.HandleFunc("POST /rooms/join", a.requireAuth(a.joinRoom))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
@@ -252,6 +253,7 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 		ActivityMonths:       heatmap.Months,
 		ActivityWeeks:        heatmap.Weeks,
 		ActivityTotalMinutes: heatmap.TotalMinutes,
+		Error:                r.URL.Query().Get("error"),
 	})
 }
 
@@ -270,6 +272,7 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 		PersonalTodos: todos,
 		Rooms:         rooms,
 		SoloTimer:     soloTimer,
+		Error:         r.URL.Query().Get("error"),
 	})
 }
 
@@ -337,12 +340,34 @@ func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 		name = u.DisplayName + "'s focus room"
 	}
 	code := randomCode()
-	_, err := a.db.Exec(r.Context(), `INSERT INTO rooms (code, name, creator_id) VALUES ($1, $2, $3)`, code, name, u.ID)
+	var roomID string
+	err := a.db.QueryRow(r.Context(), `INSERT INTO rooms (code, name, creator_id) VALUES ($1, $2, $3) RETURNING id`, code, name, u.ID).Scan(&roomID)
 	if err != nil {
 		http.Error(w, "could not create room", http.StatusInternalServerError)
 		return
 	}
+	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, u.ID)
 	http.Redirect(w, r, "/r/"+code, http.StatusSeeOther)
+}
+
+func (a *app) joinRoom(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	code := normalizeRoomCode(r.FormValue("code"))
+	back := safeNext(r.FormValue("next"))
+	if back == "/" {
+		back = "/dashboard"
+	}
+	if code == "" {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("Enter a room code to join."), http.StatusSeeOther)
+		return
+	}
+	rm, ok := a.findRoom(r.Context(), code)
+	if !ok {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
+		return
+	}
+	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, rm.ID, u.ID)
+	http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
 }
 
 func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
@@ -802,6 +827,17 @@ func (h *hub) broadcast(code, msg string) {
 	for _, c := range conns {
 		_ = c.Write(ctx, websocket.MessageText, []byte(msg))
 	}
+}
+
+func normalizeRoomCode(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if idx := strings.Index(raw, "/r/"); idx >= 0 {
+		raw = raw[idx+3:]
+	}
+	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
+		raw = raw[:i]
+	}
+	return strings.ToLower(raw)
 }
 
 func randomCode() string {
