@@ -181,7 +181,7 @@ func (a *app) home(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) signupForm(w http.ResponseWriter, r *http.Request) {
-	a.render(w, "signup", a.authPageData(r, "Create account", safeNext(r.URL.Query().Get("next")), ""))
+	a.render(w, "signup", a.authPageData(r, "Sign up", safeNext(r.URL.Query().Get("next")), ""))
 }
 
 func (a *app) signup(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +190,7 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	next := safeNext(r.FormValue("next"))
 	if username == "" || password == "" {
-		a.render(w, "signup", a.authPageData(r, "Create account", next, "Username and password are required."))
+		a.render(w, "signup", a.authPageData(r, "Sign up", next, "Username and password are required."))
 		return
 	}
 	displayName := displayNameFromUsername(username)
@@ -202,7 +202,7 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 	var id string
 	err = a.db.QueryRow(ctx, `INSERT INTO users (username, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id`, username, displayName, string(hash)).Scan(&id)
 	if err != nil {
-		a.render(w, "signup", a.authPageData(r, "Create account", next, "That username is already taken."))
+		a.render(w, "signup", a.authPageData(r, "Sign up", next, "That username is already taken."))
 		return
 	}
 	a.createSession(w, r, id)
@@ -210,7 +210,7 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) loginForm(w http.ResponseWriter, r *http.Request) {
-	a.render(w, "login", a.authPageData(r, "Log in", safeNext(r.URL.Query().Get("next")), ""))
+	a.render(w, "login", a.authPageData(r, "Sign in", safeNext(r.URL.Query().Get("next")), ""))
 }
 
 func (a *app) login(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +221,7 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	var id, hash string
 	err := a.db.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
-		a.render(w, "login", a.authPageData(r, "Log in", next, "Username or password is incorrect."))
+		a.render(w, "login", a.authPageData(r, "Sign in", next, "Username or password is incorrect."))
 		return
 	}
 	a.createSession(w, r, id)

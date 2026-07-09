@@ -351,8 +351,8 @@ const layoutTemplates = `
   </div>
   <nav class="menu-drawer-nav">
     <a href="/profile">Profile</a>
-    <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a>
-    <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a>
+    <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a>
+    <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Sign up</a>
   </nav>
 </aside>
 {{end}}
@@ -385,7 +385,7 @@ const layoutTemplates = `
 {{end}}
 
 {{define "content"}}
-  {{if eq .Title "Log in"}}
+  {{if eq .Title "Sign in"}}
     <section class="auth-card">
       <div class="auth-card-top">
         {{template "auth-back" .}}
@@ -395,11 +395,11 @@ const layoutTemplates = `
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
         <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-        <button>Log in</button>
+        <button>Sign in</button>
       </form>
-      <p class="muted auth-switch">Don't have an account? <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Create account</a></p>
+      <p class="muted auth-switch">Don't have an account? <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Sign up</a></p>
     </section>
-  {{else if eq .Title "Create account"}}
+  {{else if eq .Title "Sign up"}}
     <section class="auth-card">
       <div class="auth-card-top">
         {{template "auth-back" .}}
@@ -409,9 +409,9 @@ const layoutTemplates = `
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
         <label>Password <input type="password" name="password" autocomplete="new-password" required></label>
-        <button>Create account</button>
+        <button>Sign up</button>
       </form>
-      <p class="muted auth-switch">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Log in</a></p>
+      <p class="muted auth-switch">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a></p>
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .GuestMode}}
