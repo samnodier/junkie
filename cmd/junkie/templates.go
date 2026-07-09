@@ -449,6 +449,7 @@ const layoutTemplates = `
 {{define "todo-remove-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>{{end}}
 {{define "todo-delete-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{{end}}
 {{define "copy-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16V4a2 2 0 0 1 2-2h10"/></svg>{{end}}
+{{define "profile-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{{end}}
 
 {{define "room-membership-pill"}}
 {{if .Rooms}}
@@ -530,7 +531,7 @@ const layoutTemplates = `
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
   <nav class="menu-drawer-nav">
-    <a href="/profile">Profile</a>
+    <a href="/profile">{{template "profile-icon" .}}Profile</a>
     <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a>
   </nav>
   <p class="menu-drawer-section-label">Join room</p>
@@ -550,7 +551,7 @@ const layoutTemplates = `
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
   <nav class="menu-drawer-nav">
-    <a href="/profile">Profile</a>
+    <a href="/profile">{{template "profile-icon" .}}Profile</a>
   </nav>
   <p class="menu-drawer-section-label">Create room</p>
   <form class="room-create" method="post" action="/rooms">
@@ -1472,7 +1473,9 @@ h2 {
   gap: .5rem;
 }
 .menu-drawer-nav a {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
   padding: .75rem 1rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1480,6 +1483,11 @@ h2 {
   text-decoration: none;
   font-weight: 700;
   background: var(--surface);
+}
+.menu-drawer-nav a svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
 }
 .menu-drawer-nav a:hover {
   border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
