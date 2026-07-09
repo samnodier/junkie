@@ -1460,6 +1460,90 @@ body.menu-drawer-open {
 .desk-todos-panel .inline-form {
   flex-shrink: 0;
 }
+.desk-todos-head {
+  align-items: center;
+}
+.desk-todos-switch {
+  position: relative;
+  min-width: 0;
+}
+.desk-todos-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .2rem .45rem;
+  margin: -.2rem 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.desk-todos-mode:hover {
+  background: color-mix(in srgb, var(--muted) 10%, var(--paper));
+}
+.desk-todos-chevron {
+  width: .9rem;
+  height: .9rem;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.desk-todos-menu {
+  position: absolute;
+  top: calc(100% + .35rem);
+  left: 0;
+  z-index: 20;
+  min-width: 11rem;
+  max-width: min(18rem, 70vw);
+  padding: .25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 12%, transparent);
+  display: grid;
+  gap: .15rem;
+}
+.desk-todos-menu button {
+  display: block;
+  width: 100%;
+  padding: .45rem .55rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: .9rem;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-todos-menu button:hover {
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+.desk-todos-menu button.is-active {
+  background: color-mix(in srgb, var(--mint) 45%, transparent);
+  font-weight: 700;
+}
+.desk-todos-hint {
+  color: var(--muted);
+  font-size: .9rem;
+  flex-shrink: 0;
+}
+.desk-todos-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.desk-todos-view[hidden] {
+  display: none !important;
+}
 .desk-todos-panel .todo-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -1648,6 +1732,21 @@ body.menu-drawer-open {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: .7rem;
   align-items: end;
+}
+.settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+.settings input {
+  box-sizing: border-box;
+  height: 2.5rem;
+  padding: 0.5rem 1rem;
+}
+.settings button {
+  height: 2.5rem;
+  padding: 0.5rem 1rem;
 }
 .big-action { margin-top: 1rem; background: var(--green); }
 .danger { background: var(--red); }
