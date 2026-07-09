@@ -51,13 +51,44 @@ type todo struct {
 	Done        bool
 	Removed     bool
 	DisplayName string
+	UserID      string
+	HideAuthor  bool
 	RoomCode    string
 	CreatedAt   time.Time
 }
 
+type roomTodosSplit struct {
+	Mine   []todo
+	Others []todo
+}
+
+type todoGroupsView struct {
+	RoomCode string
+	UserName string
+	Mine     []todo
+	Others   []todo
+}
+
+func (s roomTodosSplit) View(roomCode, userName string) todoGroupsView {
+	return todoGroupsView{RoomCode: roomCode, UserName: userName, Mine: s.Mine, Others: s.Others}
+}
+
+func groupRoomTodos(todos []todo, userID string) roomTodosSplit {
+	var split roomTodosSplit
+	for _, t := range todos {
+		if t.UserID == userID {
+			t.HideAuthor = true
+			split.Mine = append(split.Mine, t)
+		} else {
+			split.Others = append(split.Others, t)
+		}
+	}
+	return split
+}
+
 type roomTodosGroup struct {
-	Room  room
-	Todos []todo
+	Room    room
+	Grouped roomTodosSplit
 }
 
 type timerRun struct {
@@ -80,7 +111,7 @@ type pageData struct {
 	Rooms                []room
 	Room                 room
 	PersonalTodos        []todo
-	RoomTodos            []todo
+	RoomTodosGrouped     roomTodosSplit
 	DeskRoomTodos        []roomTodosGroup
 	Timer                *timerRun
 	SoloTimer            *timerRun
@@ -288,7 +319,7 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 		for i := range roomTodoList {
 			roomTodoList[i].RoomCode = rm.Code
 		}
-		deskRoomTodos = append(deskRoomTodos, roomTodosGroup{Room: rm, Todos: roomTodoList})
+		deskRoomTodos = append(deskRoomTodos, roomTodosGroup{Room: rm, Grouped: groupRoomTodos(roomTodoList, u.ID)})
 	}
 	a.render(w, "dashboard", pageData{
 		Title:         "Dashboard",
@@ -489,7 +520,7 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	todos, _ := a.roomTodos(r.Context(), rm.ID)
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
-	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodos: todos, Timer: timer, FocusMode: focusMode})
+	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode})
 }
 
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
@@ -800,7 +831,7 @@ func (a *app) personalTodos(ctx context.Context, userID string) ([]todo, error) 
 }
 
 func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
-	rows, err := a.db.Query(ctx, `SELECT t.id, t.text, t.done, t.removed, u.display_name, t.created_at FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1 ORDER BY t.removed, t.done, t.created_at DESC`, roomID)
+	rows, err := a.db.Query(ctx, `SELECT t.id, t.text, t.done, t.removed, u.display_name, t.user_id, t.created_at FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1 ORDER BY t.removed, t.done, t.created_at DESC`, roomID)
 	if err != nil {
 		return nil, err
 	}
@@ -808,7 +839,7 @@ func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
 	var todos []todo
 	for rows.Next() {
 		var t todo
-		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.Removed, &t.DisplayName, &t.CreatedAt) == nil {
+		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.Removed, &t.DisplayName, &t.UserID, &t.CreatedAt) == nil {
 			todos = append(todos, t)
 		}
 	}

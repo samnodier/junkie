@@ -355,6 +355,32 @@ const layoutTemplates = `
       };
       wireDeskTodosSwitcher();
 
+      const wireTodoGroupCollapse = () => {
+        document.querySelectorAll('.todo-groups').forEach((groups) => {
+          const room = groups.dataset.room || '';
+          groups.querySelectorAll('.todo-group').forEach((section) => {
+            const group = section.dataset.group;
+            if (!group) return;
+            const key = 'junkie:todoGroup:' + group + ':' + room;
+            const toggle = section.querySelector('.todo-group-toggle');
+            if (!toggle) return;
+
+            const setCollapsed = (collapsed) => {
+              section.classList.toggle('is-collapsed', collapsed);
+              toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+              sessionStorage.setItem(key, collapsed ? 'collapsed' : 'expanded');
+            };
+
+            setCollapsed(sessionStorage.getItem(key) === 'collapsed');
+
+            toggle.addEventListener('click', () => {
+              setCollapsed(!section.classList.contains('is-collapsed'));
+            });
+          });
+        });
+      };
+      wireTodoGroupCollapse();
+
       const copyRoomInvite = async (path) => {
         const cleanPath = path.startsWith('http') ? new URL(path).pathname : path;
         const message = 'Join my focus room on junkie: ' + location.origin + cleanPath;
@@ -466,7 +492,7 @@ const layoutTemplates = `
 {{define "todo-row"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
     <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
-    <span>{{if .DisplayName}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
+    <span>{{if and .DisplayName (not .HideAuthor)}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
     {{if .Removed}}
       <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
     {{else}}
@@ -489,7 +515,7 @@ const layoutTemplates = `
       <input type="hidden" name="room" value="{{.RoomCode}}">
       <button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button>
     </form>
-    <span>{{if .DisplayName}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
+    <span>{{if and .DisplayName (not .HideAuthor)}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
     {{if .Removed}}
       <form method="post" action="/todo/{{.ID}}/delete">
         <input type="hidden" name="desk" value="1">
@@ -504,6 +530,68 @@ const layoutTemplates = `
       </form>
     {{end}}
   </li>
+{{end}}
+
+{{define "todo-groups-desk-room"}}
+<div class="todo-groups" data-room="{{.RoomCode}}">
+  <section class="todo-group" data-group="mine">
+    <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-mine-{{.RoomCode}}">
+      <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      <span>{{if .UserName}}{{.UserName}}{{else}}Your todos{{end}}</span>
+    </button>
+    <ul class="todo-list" id="todo-group-mine-{{.RoomCode}}">
+      {{range .Mine}}
+        {{template "todo-row-desk-room" .}}
+      {{else}}
+        <li class="empty">Nothing here yet.</li>
+      {{end}}
+    </ul>
+  </section>
+  {{if .Others}}
+  <section class="todo-group" data-group="others">
+    <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-others-{{.RoomCode}}">
+      <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      <span>Everyone else</span>
+    </button>
+    <ul class="todo-list" id="todo-group-others-{{.RoomCode}}">
+      {{range .Others}}
+        {{template "todo-row-desk-room" .}}
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+</div>
+{{end}}
+
+{{define "todo-groups-room"}}
+<div class="todo-groups" data-room="{{.RoomCode}}">
+  <section class="todo-group" data-group="mine">
+    <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-mine-{{.RoomCode}}">
+      <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      <span>{{if .UserName}}{{.UserName}}{{else}}Your todos{{end}}</span>
+    </button>
+    <ul class="todo-list" id="todo-group-mine-{{.RoomCode}}">
+      {{range .Mine}}
+        {{template "todo-row" .}}
+      {{else}}
+        <li class="empty">Nothing here yet.</li>
+      {{end}}
+    </ul>
+  </section>
+  {{if .Others}}
+  <section class="todo-group" data-group="others">
+    <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-others-{{.RoomCode}}">
+      <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      <span>Everyone else</span>
+    </button>
+    <ul class="todo-list" id="todo-group-others-{{.RoomCode}}">
+      {{range .Others}}
+        {{template "todo-row" .}}
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+</div>
 {{end}}
 
 {{define "auth-back"}}
@@ -710,13 +798,7 @@ const layoutTemplates = `
               <input name="text" placeholder="What are you working on?" required>
               <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
             </form>
-            <ul class="todo-list">
-              {{range .Todos}}
-                {{template "todo-row-desk-room" .}}
-              {{else}}
-                <li class="empty">No room tasks yet.</li>
-              {{end}}
-            </ul>
+            {{template "todo-groups-desk-room" (.Grouped.View .Room.Code $.User.DisplayName)}}
           </div>
           {{end}}
         </article>
@@ -836,11 +918,7 @@ const layoutTemplates = `
               <input name="text" placeholder="What are you working on?" required>
               <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
             </form>
-            <ul class="todo-list">
-              {{range .RoomTodos}}
-                {{template "todo-row" .}}
-              {{end}}
-            </ul>
+            {{template "todo-groups-room" (.RoomTodosGrouped.View .Room.Code .User.DisplayName)}}
           </article>
           <article class="panel">
             <div class="panel-title">
@@ -1310,6 +1388,46 @@ h2 {
 .todo-list li.removed span strong {
   color: var(--red);
   text-decoration: none;
+}
+.todo-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+}
+.todo-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  width: 100%;
+  padding: .35rem .45rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.todo-group-toggle:hover {
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+.todo-group-chevron {
+  width: .85rem;
+  height: .85rem;
+  flex-shrink: 0;
+  transition: transform .15s ease;
+}
+.todo-group.is-collapsed .todo-group-chevron {
+  transform: rotate(-90deg);
+}
+.todo-group.is-collapsed .todo-list {
+  display: none;
+}
+.todo-group .todo-list {
+  margin-top: 0.25rem;
 }
 .todo-action {
   background: transparent;
@@ -1787,11 +1905,14 @@ body.menu-drawer-open {
 .desk-todos-view[hidden] {
   display: none !important;
 }
-.desk-todos-panel .todo-list {
+.desk-todos-panel .todo-groups {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   margin-top: 0.5rem;
+}
+.desk-todos-panel .todo-group .todo-list {
+  overflow: visible;
 }
 .timer-cancel {
   background: var(--red);
