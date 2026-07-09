@@ -355,7 +355,6 @@ const layoutTemplates = `
 {{end}}
 
 {{define "login"}}{{template "shell" .}}{{end}}
-{{define "signup"}}{{template "shell" .}}{{end}}
 {{define "dashboard"}}{{template "shell" .}}{{end}}
 {{define "profile"}}{{template "shell" .}}{{end}}
 {{define "room"}}{{template "shell" .}}{{end}}
@@ -370,7 +369,6 @@ const layoutTemplates = `
   <nav class="menu-drawer-nav">
     <a href="/profile">Profile</a>
     <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a>
-    <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Sign up</a>
   </nav>
 </aside>
 {{end}}
@@ -411,26 +409,13 @@ const layoutTemplates = `
 {{end}}
 
 {{define "content"}}
-  {{if eq .Title "Sign in"}}
+  {{if or (eq .Title "Sign in") (eq .Title "Sign up")}}
     <section class="auth-card">
       <div class="auth-card-top">
         {{template "auth-back" .}}
         {{template "auth-brand" .}}
       </div>
-      <form class="stack auth-form" method="post" action="/login">
-        {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
-        <label>Username <input name="username" autocomplete="username" required></label>
-        <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-        <button>Sign in</button>
-      </form>
-      <p class="muted auth-switch">Don't have an account? <a href="/signup{{if .Next}}?next={{.Next}}{{end}}">Sign up</a></p>
-    </section>
-  {{else if eq .Title "Sign up"}}
-    <section class="auth-card">
-      <div class="auth-card-top">
-        {{template "auth-back" .}}
-        {{template "auth-brand" .}}
-      </div>
+      {{if .AuthSignup}}
       <form class="stack auth-form" method="post" action="/signup">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
@@ -438,6 +423,15 @@ const layoutTemplates = `
         <button>Sign up</button>
       </form>
       <p class="muted auth-switch">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a></p>
+      {{else}}
+      <form class="stack auth-form" method="post" action="/login">
+        {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
+        <label>Username <input name="username" autocomplete="username" required></label>
+        <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+        <button>Sign in</button>
+      </form>
+      <p class="muted auth-switch">New here? <a href="/login?mode=signup{{if .Next}}&amp;next={{.Next}}{{end}}">Sign up</a></p>
+      {{end}}
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .GuestMode}}

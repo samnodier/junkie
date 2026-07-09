@@ -84,6 +84,7 @@ type pageData struct {
 	FocusMode            bool
 	GuestMode            bool
 	Next                 string
+	AuthSignup           bool
 }
 
 type activityDay struct {
@@ -182,7 +183,11 @@ func (a *app) home(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) signupForm(w http.ResponseWriter, r *http.Request) {
-	a.render(w, "signup", a.authPageData(r, "Sign up", safeNext(r.URL.Query().Get("next")), ""))
+	dest := "/login?mode=signup"
+	if next := r.URL.Query().Get("next"); next != "" {
+		dest += "&next=" + url.QueryEscape(next)
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
 func (a *app) signup(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +196,7 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	next := safeNext(r.FormValue("next"))
 	if username == "" || password == "" {
-		a.render(w, "signup", a.authPageData(r, "Sign up", next, "Username and password are required."))
+		a.render(w, "login", a.authPageData(r, true, next, "Username and password are required."))
 		return
 	}
 	displayName := displayNameFromUsername(username)
@@ -203,7 +208,7 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 	var id string
 	err = a.db.QueryRow(ctx, `INSERT INTO users (username, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id`, username, displayName, string(hash)).Scan(&id)
 	if err != nil {
-		a.render(w, "signup", a.authPageData(r, "Sign up", next, "That username is already taken."))
+		a.render(w, "login", a.authPageData(r, true, next, "That username is already taken."))
 		return
 	}
 	a.createSession(w, r, id)
@@ -211,7 +216,8 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) loginForm(w http.ResponseWriter, r *http.Request) {
-	a.render(w, "login", a.authPageData(r, "Sign in", safeNext(r.URL.Query().Get("next")), ""))
+	signup := r.URL.Query().Get("mode") == "signup"
+	a.render(w, "login", a.authPageData(r, signup, safeNext(r.URL.Query().Get("next")), ""))
 }
 
 func (a *app) login(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +228,7 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	var id, hash string
 	err := a.db.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
-		a.render(w, "login", a.authPageData(r, "Sign in", next, "Username or password is incorrect."))
+		a.render(w, "login", a.authPageData(r, false, next, "Username or password is incorrect."))
 		return
 	}
 	a.createSession(w, r, id)
@@ -574,8 +580,12 @@ func (a *app) timerParticipants(ctx context.Context, runID string) ([]string, er
 	return names, nil
 }
 
-func (a *app) authPageData(r *http.Request, title, next, errMsg string) pageData {
-	data := pageData{Title: title, Next: next, Error: errMsg}
+func (a *app) authPageData(r *http.Request, signup bool, next, errMsg string) pageData {
+	title := "Sign in"
+	if signup {
+		title = "Sign up"
+	}
+	data := pageData{Title: title, Next: next, Error: errMsg, AuthSignup: signup}
 	if u, ok := a.currentUser(r); ok {
 		data.User = u
 	}
