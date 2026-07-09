@@ -51,7 +51,13 @@ type todo struct {
 	Done        bool
 	Removed     bool
 	DisplayName string
+	RoomCode    string
 	CreatedAt   time.Time
+}
+
+type roomTodosGroup struct {
+	Room  room
+	Todos []todo
 }
 
 type timerRun struct {
@@ -75,6 +81,7 @@ type pageData struct {
 	Room                 room
 	PersonalTodos        []todo
 	RoomTodos            []todo
+	DeskRoomTodos        []roomTodosGroup
 	Timer                *timerRun
 	SoloTimer            *timerRun
 	Activity             []activityDay
@@ -275,11 +282,20 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 	soloTimer, _ := a.normalizeSoloTimer(r.Context(), u.ID)
 	todos, _ := a.personalTodos(r.Context(), u.ID)
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
+	deskRoomTodos := make([]roomTodosGroup, 0, len(rooms))
+	for _, rm := range rooms {
+		roomTodoList, _ := a.roomTodos(r.Context(), rm.ID)
+		for i := range roomTodoList {
+			roomTodoList[i].RoomCode = rm.Code
+		}
+		deskRoomTodos = append(deskRoomTodos, roomTodosGroup{Room: rm, Todos: roomTodoList})
+	}
 	a.render(w, "dashboard", pageData{
 		Title:         "Dashboard",
 		User:          u,
 		PersonalTodos: todos,
 		Rooms:         rooms,
+		DeskRoomTodos: deskRoomTodos,
 		SoloTimer:     soloTimer,
 		Error:         r.URL.Query().Get("error"),
 	})
@@ -309,7 +325,7 @@ func (a *app) createPersonalTodo(w http.ResponseWriter, r *http.Request) {
 	if text != "" {
 		_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, text) VALUES ($1, $2)`, u.ID, text)
 	}
-	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	http.Redirect(w, r, "/dashboard?todos=private", http.StatusSeeOther)
 }
 
 func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
@@ -336,10 +352,18 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if roomCode != "" {
 		a.hub.broadcast(roomCode, "todos")
+		if r.FormValue("desk") == "1" {
+			code := strings.TrimSpace(r.FormValue("room"))
+			if code == "" {
+				code = roomCode
+			}
+			http.Redirect(w, r, "/dashboard?todos=room&room="+url.QueryEscape(code), http.StatusSeeOther)
+			return
+		}
 		http.Redirect(w, r, "/r/"+roomCode, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	http.Redirect(w, r, "/dashboard?todos=private", http.StatusSeeOther)
 }
 
 func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
@@ -463,8 +487,9 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	}
 	timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 	todos, _ := a.roomTodos(r.Context(), rm.ID)
+	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
-	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, RoomTodos: todos, Timer: timer, FocusMode: focusMode})
+	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodos: todos, Timer: timer, FocusMode: focusMode})
 }
 
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
@@ -509,6 +534,13 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		if text != "" {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, room_id, text) VALUES ($1, $2, $3)`, u.ID, rm.ID, text)
 		}
+		a.hub.broadcast(code, action)
+		if next := strings.TrimSpace(r.FormValue("next")); next != "" {
+			http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/r/"+code, http.StatusSeeOther)
+		return
 	case "timer-start":
 		if active, _ := a.activeTimer(r.Context(), rm.ID, u.ID); active == nil || active.Phase == "ended" {
 			ends := time.Now().Add(time.Duration(rm.FocusMinutes) * time.Minute)

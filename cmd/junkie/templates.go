@@ -16,6 +16,7 @@ func parseTemplates() *template.Template {
 			return seconds
 		},
 		"mul":  func(a, b int) int { return a * b },
+		"sub":  func(a, b int) int { return a - b },
 		"join": strings.Join,
 		"focusHours": func(minutes int) int {
 			return (minutes + 30) / 60
@@ -48,6 +49,7 @@ const layoutTemplates = `
   <script src="/assets/notifications.js"></script>
 </head>
 <body>
+  {{$menu := or (eq .Title "Dashboard") (eq .Title "Profile") (and (ne .Room.Code "") (ne .Title "Join room"))}}
   <header class="topbar">
     <a class="brand" href="/" aria-label="junkie home">
       <span class="brand-mark">j</span>
@@ -58,23 +60,15 @@ const layoutTemplates = `
         <span class="theme-icon theme-icon-dark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
         <span class="theme-icon theme-icon-light" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
       </button>
-      {{if or (eq .Title "Dashboard") (eq .Title "Profile")}}
-        {{if .User.ID}}
-          <nav class="nav nav-compact">
-            <span>{{.User.DisplayName}}</span>
-            <form method="post" action="/logout"><button class="link-button">Log out</button></form>
-          </nav>
-        {{end}}
+      {{if and $menu .User.ID}}
+        <span class="topbar-user">{{.User.DisplayName}}</span>
+      {{end}}
+      {{if $menu}}
         <button type="button" class="menu-drawer-trigger" aria-label="Open menu" aria-expanded="false">
           <span class="menu-bar" aria-hidden="true"></span>
           <span class="menu-bar" aria-hidden="true"></span>
           <span class="menu-bar" aria-hidden="true"></span>
         </button>
-      {{else if .User.ID}}
-        <nav class="nav">
-          <span>{{.User.DisplayName}}</span>
-          <form method="post" action="/logout"><button class="link-button">Log out</button></form>
-        </nav>
       {{end}}
     </div>
   </header>
@@ -82,7 +76,7 @@ const layoutTemplates = `
     {{if .Error}}<p class="notice">{{.Error}}</p>{{end}}
     {{template "content" .}}
   </main>
-  {{if or (eq .Title "Dashboard") (eq .Title "Profile")}}
+  {{if $menu}}
     {{if .GuestMode}}
       {{template "menu-drawer-guest" .}}
     {{else}}
@@ -269,6 +263,97 @@ const layoutTemplates = `
       };
       wireFocusTodosPeek();
 
+      const wireDeskTodosSwitcher = () => {
+        const panel = document.querySelector('.desk-todos-panel[data-has-rooms="true"]');
+        if (!panel) return;
+
+        const modeKey = 'junkie:deskTodosMode';
+        const roomKey = 'junkie:deskTodosRoom';
+        const trigger = panel.querySelector('.desk-todos-mode');
+        const menu = panel.querySelector('.desk-todos-menu');
+        const label = panel.querySelector('.desk-todos-mode-label');
+        const hint = panel.querySelector('.desk-todos-hint');
+        const views = panel.querySelectorAll('.desk-todos-view');
+        const options = menu ? Array.from(menu.querySelectorAll('[data-mode]')) : [];
+        const roomCodes = options.filter((opt) => opt.dataset.mode === 'room').map((opt) => opt.dataset.room);
+        const defaultRoom = roomCodes[0] || '';
+        const params = new URLSearchParams(location.search);
+
+        let mode = 'room';
+        let room = params.get('room') || sessionStorage.getItem(roomKey) || defaultRoom;
+        if (params.get('todos') === 'private') {
+          mode = 'private';
+        } else if (params.get('todos') === 'room') {
+          mode = 'room';
+        } else {
+          const savedMode = sessionStorage.getItem(modeKey);
+          if (savedMode === 'private') mode = 'private';
+          else if (savedMode === 'room' && roomCodes.length) mode = 'room';
+          else if (roomCodes.length) mode = 'room';
+          else mode = 'private';
+        }
+        if (mode === 'room' && !roomCodes.includes(room)) room = defaultRoom;
+
+        const shut = () => {
+          menu?.setAttribute('hidden', '');
+          trigger?.setAttribute('aria-expanded', 'false');
+        };
+
+        const apply = () => {
+          if (mode === 'private') {
+            label.textContent = 'Private todos';
+            hint.textContent = 'Only visible here';
+            views.forEach((view) => {
+              view.hidden = view.dataset.mode !== 'private';
+            });
+            options.forEach((opt) => {
+              opt.classList.toggle('is-active', opt.dataset.mode === 'private');
+            });
+          } else {
+            const active = options.find((opt) => opt.dataset.mode === 'room' && opt.dataset.room === room);
+            label.textContent = active?.textContent.trim() || 'Room todos';
+            hint.textContent = 'Public to the room';
+            views.forEach((view) => {
+              view.hidden = !(view.dataset.mode === 'room' && view.dataset.room === room);
+            });
+            options.forEach((opt) => {
+              opt.classList.toggle('is-active', opt.dataset.mode === 'room' && opt.dataset.room === room);
+            });
+          }
+          sessionStorage.setItem(modeKey, mode);
+          if (mode === 'room') sessionStorage.setItem(roomKey, room);
+        };
+
+        trigger?.addEventListener('click', () => {
+          const open = menu?.hasAttribute('hidden');
+          if (open) {
+            menu?.removeAttribute('hidden');
+            trigger.setAttribute('aria-expanded', 'true');
+          } else {
+            shut();
+          }
+        });
+
+        options.forEach((opt) => {
+          opt.addEventListener('click', () => {
+            mode = opt.dataset.mode || 'private';
+            if (opt.dataset.room) room = opt.dataset.room;
+            apply();
+            shut();
+          });
+        });
+
+        document.addEventListener('click', (event) => {
+          if (!panel.contains(event.target)) shut();
+        });
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') shut();
+        });
+
+        apply();
+      };
+      wireDeskTodosSwitcher();
+
       const copyRoomInvite = async (path) => {
         const cleanPath = path.startsWith('http') ? new URL(path).pathname : path;
         const message = 'Join my focus room on junkie: ' + location.origin + cleanPath;
@@ -364,6 +449,18 @@ const layoutTemplates = `
 {{define "todo-delete-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{{end}}
 {{define "copy-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16V4a2 2 0 0 1 2-2h10"/></svg>{{end}}
 
+{{define "room-membership-pill"}}
+{{if .Rooms}}
+<div class="desk-room-bar">
+  <a class="room-membership-pill" href="/r/{{(index .Rooms 0).Code}}">
+    <span class="room-membership-label">In room</span>
+    <span class="room-membership-name">{{(index .Rooms 0).Name}}</span>
+    {{if gt (len .Rooms) 1}}<span class="room-membership-more">+{{sub (len .Rooms) 1}}</span>{{end}}
+  </a>
+</div>
+{{end}}
+{{end}}
+
 {{define "todo-row"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
     <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
@@ -380,6 +477,30 @@ const layoutTemplates = `
   <li class="{{if .Done}}done{{end}}">
     <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     <span>{{.Text}}</span>
+  </li>
+{{end}}
+
+{{define "todo-row-desk-room"}}
+  <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
+    <form method="post" action="/todo/{{.ID}}/toggle">
+      <input type="hidden" name="desk" value="1">
+      <input type="hidden" name="room" value="{{.RoomCode}}">
+      <button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button>
+    </form>
+    <span>{{if .DisplayName}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
+    {{if .Removed}}
+      <form method="post" action="/todo/{{.ID}}/delete">
+        <input type="hidden" name="desk" value="1">
+        <input type="hidden" name="room" value="{{.RoomCode}}">
+        <button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button>
+      </form>
+    {{else}}
+      <form method="post" action="/todo/{{.ID}}/remove">
+        <input type="hidden" name="desk" value="1">
+        <input type="hidden" name="room" value="{{.RoomCode}}">
+        <button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button>
+      </form>
+    {{end}}
   </li>
 {{end}}
 
@@ -413,7 +534,7 @@ const layoutTemplates = `
   </nav>
   <p class="menu-drawer-section-label">Join room</p>
   <form class="room-join" method="post" action="/rooms/join-intent">
-    <input type="hidden" name="next" value="{{if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
+    <input type="hidden" name="next" value="{{if .Room.Code}}/r/{{.Room.Code}}{{else if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
     <input class="room-code-input" name="code" placeholder="Room code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
     <button>Join</button>
   </form>
@@ -437,7 +558,7 @@ const layoutTemplates = `
   </form>
   <p class="menu-drawer-section-label">Join room</p>
   <form class="room-join" method="post" action="/rooms/join">
-    <input type="hidden" name="next" value="{{if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
+    <input type="hidden" name="next" value="{{if .Room.Code}}/r/{{.Room.Code}}{{else if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
     <input class="room-code-input" name="code" placeholder="Room code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
     <button>Join</button>
   </form>
@@ -452,6 +573,9 @@ const layoutTemplates = `
       <p class="empty">No rooms yet.</p>
     {{end}}
   </div>
+  <form class="menu-drawer-logout" method="post" action="/logout">
+    <button type="submit">Log out</button>
+  </form>
 </aside>
 {{end}}
 
@@ -486,6 +610,8 @@ const layoutTemplates = `
     <script src="/assets/guest.js"></script>
     {{else}}
     {{if .SoloTimer}}
+    <div class="desk-shell desk-shell-focus">
+    {{template "room-membership-pill" .}}
     <section class="focus-desk">
       <div class="focus-desk-main">
         <article class="circle-timer-wrap">
@@ -517,8 +643,10 @@ const layoutTemplates = `
         </ul>
       </aside>
     </section>
+    </div>
     {{else}}
     <div class="desk-shell">
+    {{template "room-membership-pill" .}}
       <section class="grid two desk-grid">
         <article class="circle-timer-wrap">
           <form class="circle-timer-form" method="post" action="/solo/start">
@@ -540,20 +668,55 @@ const layoutTemplates = `
           </form>
         </article>
 
-        <article class="panel desk-todos-panel">
-          <div class="panel-title">
+        <article class="panel desk-todos-panel"{{if .DeskRoomTodos}} data-has-rooms="true"{{end}}>
+          <div class="panel-title desk-todos-head">
+            {{if .DeskRoomTodos}}
+            <div class="desk-todos-switch">
+              <button type="button" class="desk-todos-mode" aria-haspopup="listbox" aria-expanded="false">
+                <span class="desk-todos-mode-label">Room todos</span>
+                <svg class="desk-todos-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div class="desk-todos-menu" hidden role="listbox">
+                <button type="button" role="option" data-mode="private">Private todos</button>
+                {{range .DeskRoomTodos}}
+                <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}">{{.Room.Name}}</button>
+                {{end}}
+              </div>
+            </div>
+            {{else}}
             <h2>Private todos</h2>
-            <span>Only visible here</span>
-          </div>
-          <form class="inline-form todo-add-form" method="post" action="/todos">
-            <input name="text" placeholder="What do you need to do?" required>
-            <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
-          </form>
-          <ul class="todo-list">
-            {{range .PersonalTodos}}
-              {{template "todo-row" .}}
             {{end}}
-          </ul>
+            <span class="desk-todos-hint">{{if .DeskRoomTodos}}Public to the room{{else}}Only visible here{{end}}</span>
+          </div>
+          <div class="desk-todos-view" data-mode="private"{{if .DeskRoomTodos}} hidden{{end}}>
+            <form class="inline-form todo-add-form" method="post" action="/todos">
+              <input name="text" placeholder="What do you need to do?" required>
+              <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
+            </form>
+            <ul class="todo-list">
+              {{range .PersonalTodos}}
+                {{template "todo-row" .}}
+              {{else}}
+                {{if not .DeskRoomTodos}}<li class="empty">No tasks yet.</li>{{end}}
+              {{end}}
+            </ul>
+          </div>
+          {{range .DeskRoomTodos}}
+          <div class="desk-todos-view" data-mode="room" data-room="{{.Room.Code}}" hidden>
+            <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos">
+              <input type="hidden" name="next" value="/dashboard?todos=room&amp;room={{.Room.Code}}">
+              <input name="text" placeholder="What are you working on?" required>
+              <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
+            </form>
+            <ul class="todo-list">
+              {{range .Todos}}
+                {{template "todo-row-desk-room" .}}
+              {{else}}
+                <li class="empty">No room tasks yet.</li>
+              {{end}}
+            </ul>
+          </div>
+          {{end}}
         </article>
       </section>
 
@@ -1207,9 +1370,27 @@ h2 {
   background: var(--surface);
 }
 .room-row span { color: var(--muted); }
-.nav-compact {
-  gap: .65rem;
+.topbar-user {
+  color: var(--muted);
   font-size: .9rem;
+  font-weight: 600;
+}
+.menu-drawer-logout {
+  margin-top: auto;
+  padding-top: .5rem;
+  border-top: 1px solid var(--line);
+}
+.menu-drawer-logout button {
+  width: 100%;
+  background: transparent;
+  color: var(--deep);
+  border: 1px solid var(--line);
+  font-weight: 700;
+}
+.menu-drawer-logout button:hover {
+  filter: none;
+  border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
+  background: var(--surface);
 }
 .menu-drawer-trigger {
   display: grid;
@@ -1444,6 +1625,54 @@ body.menu-drawer-open {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 10rem);
+}
+.desk-shell-focus .focus-desk {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.desk-room-bar {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 0 .75rem;
+}
+.room-membership-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .35rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .82rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.room-membership-pill:hover {
+  color: var(--deep);
+  border-color: color-mix(in srgb, var(--green) 45%, var(--line));
+}
+.room-membership-label {
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .68rem;
+  font-weight: 800;
+  color: var(--green);
+}
+.room-membership-name {
+  color: var(--ink);
+  font-weight: 700;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-membership-more {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 700;
 }
 .desk-grid {
   flex: 1 1 auto;
