@@ -269,36 +269,49 @@ const layoutTemplates = `
       };
       wireFocusTodosPeek();
 
-      document.querySelectorAll('.copy-link, .copy-room-invite').forEach((btn) => {
-        const targetId = btn.dataset.copyTarget;
-        const copyInvite = async (path, el) => {
-          const cleanPath = path.startsWith('http') ? new URL(path).pathname : path;
-          const message = 'Join my focus room on junkie: ' + location.origin + cleanPath;
+      const copyRoomInvite = async (path) => {
+        const cleanPath = path.startsWith('http') ? new URL(path).pathname : path;
+        const message = 'Join my focus room on junkie: ' + location.origin + cleanPath;
+        try {
+          await navigator.clipboard.writeText(message);
+          return true;
+        } catch {
           try {
-            await navigator.clipboard.writeText(message);
-            const prev = el.textContent;
-            if (el.classList.contains('copy-link')) {
-              el.textContent = 'Copied!';
-              setTimeout(() => { el.textContent = prev; }, 1500);
-            } else {
-              el.dataset.copied = '1';
-              el.classList.add('is-copied');
-              setTimeout(() => {
-                el.classList.remove('is-copied');
-                delete el.dataset.copied;
-              }, 1500);
-            }
-          } catch {
-            window.prompt('Copy this invite:', message);
-          }
+            const ta = document.createElement('textarea');
+            ta.value = message;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ok) return true;
+          } catch {}
+          window.prompt('Copy this invite:', message);
+          return false;
+        }
+      };
+
+      document.querySelectorAll('.room-share').forEach((share) => {
+        const path = share.dataset.roomPath;
+        if (!path) return;
+        const feedback = share.querySelector('.room-share-feedback');
+        let copiedTimer = null;
+        const triggerCopy = async (event) => {
+          event.preventDefault();
+          if (!(await copyRoomInvite(path))) return;
+          share.classList.add('is-copied');
+          if (feedback) feedback.textContent = 'Copied!';
+          if (copiedTimer) clearTimeout(copiedTimer);
+          copiedTimer = setTimeout(() => {
+            share.classList.remove('is-copied');
+            if (feedback) feedback.textContent = '';
+            copiedTimer = null;
+          }, 1500);
         };
-        btn.addEventListener('click', async (event) => {
-          const path = btn.dataset.path || (targetId ? document.getElementById(targetId)?.textContent?.trim() : '') || btn.dataset.copy || '';
-          if (!path) return;
-          if (btn.classList.contains('copy-room-invite')) {
-            event.preventDefault();
-          }
-          await copyInvite(path, btn);
+        share.querySelectorAll('.room-share-code, .room-share-copy').forEach((btn) => {
+          btn.addEventListener('click', triggerCopy);
         });
       });
 
@@ -349,6 +362,7 @@ const layoutTemplates = `
 
 {{define "todo-remove-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>{{end}}
 {{define "todo-delete-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{{end}}
+{{define "copy-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16V4a2 2 0 0 1 2-2h10"/></svg>{{end}}
 
 {{define "todo-row"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
@@ -595,10 +609,11 @@ const layoutTemplates = `
         <div>
           <p class="eyebrow">Room code / {{.Room.Code}}</p>
           <h1>{{.Room.Name}}</h1>
-          <p class="muted room-share">
-            Share this link:
-            <button type="button" class="room-share-code copy-room-invite" id="room-share-link" data-path="/r/{{.Room.Code}}" title="Click to copy invite">/r/{{.Room.Code}}</button>
-            <button type="button" class="ghost copy-link" data-copy-target="room-share-link" data-path="/r/{{.Room.Code}}" aria-label="Copy room invite">Copy</button>
+          <p class="muted room-share" data-room-path="/r/{{.Room.Code}}">
+            <span class="room-share-label">Share this link:</span>
+            <button type="button" class="room-share-code" title="Click to copy invite">/r/{{.Room.Code}}</button>
+            <button type="button" class="room-share-copy" aria-label="Copy room invite">{{template "copy-icon"}}</button>
+            <span class="room-share-feedback" aria-live="polite"></span>
           </p>
         </div>
         {{if not .FocusMode}}
@@ -1015,6 +1030,7 @@ h2 {
 .room-share-code {
   font-size: .92rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
   background: transparent;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
@@ -1022,17 +1038,41 @@ h2 {
   color: inherit;
   cursor: pointer;
 }
-.room-share-code:hover {
+.room-share-code:hover,
+.room-share.is-copied .room-share-code {
   border-color: var(--accent);
 }
-.room-share-code.is-copied {
-  border-color: var(--accent);
+.room-share.is-copied .room-share-code {
   color: var(--accent);
 }
-.room-share-code.is-copied::after {
-  content: ' · Copied!';
-  font-family: inherit;
+.room-share-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: .2rem;
+  width: 1.85rem;
+  height: 1.85rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.room-share-copy svg {
+  width: 1rem;
+  height: 1rem;
+}
+.room-share-copy:hover,
+.room-share.is-copied .room-share-copy {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.room-share-feedback {
+  font-size: .85rem;
   font-weight: 700;
+  color: var(--accent);
+  min-width: 0;
 }
 .room-code-input {
   text-transform: uppercase;
@@ -1042,13 +1082,6 @@ h2 {
 }
 .room-invite-actions {
   margin-top: 1rem;
-}
-.copy-link {
-  font-size: .85rem;
-  font-weight: 700;
-  padding: .35rem .65rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
 }
 .inline-form.todo-add-form {
   align-items: stretch;
