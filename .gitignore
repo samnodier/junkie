@@ -7,3 +7,4 @@ tmp/
 *.db
 *.sqlite
 design-audit/
+docs/
