@@ -269,6 +269,7 @@ const layoutTemplates = `
 
         const modeKey = 'junkie:deskTodosMode';
         const roomKey = 'junkie:deskTodosRoom';
+        const switcher = panel.querySelector('.desk-todos-switch');
         const trigger = panel.querySelector('.desk-todos-mode');
         const menu = panel.querySelector('.desk-todos-menu');
         const label = panel.querySelector('.desk-todos-mode-label');
@@ -344,7 +345,7 @@ const layoutTemplates = `
         });
 
         document.addEventListener('click', (event) => {
-          if (!panel.contains(event.target)) shut();
+          if (!switcher?.contains(event.target)) shut();
         });
         document.addEventListener('keydown', (event) => {
           if (event.key === 'Escape') shut();
@@ -1691,10 +1692,12 @@ body.menu-drawer-open {
 }
 .desk-todos-head {
   align-items: center;
+  overflow: visible;
 }
 .desk-todos-switch {
   position: relative;
   min-width: 0;
+  z-index: 2;
 }
 .desk-todos-mode {
   display: inline-flex;
@@ -1735,6 +1738,9 @@ body.menu-drawer-open {
   box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 12%, transparent);
   display: grid;
   gap: .15rem;
+}
+.desk-todos-menu[hidden] {
+  display: none !important;
 }
 .desk-todos-menu button {
   display: block;
