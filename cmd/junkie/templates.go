@@ -342,9 +342,9 @@ const layoutTemplates = `
         const apply = () => {
           if (mode === 'private') {
             label.textContent = 'Private todos';
-            hint.textContent = 'Only on this device';
-            hint?.classList.remove('label-warn');
-            hint?.classList.add('label-accent');
+            hint.textContent = '';
+            hint?.setAttribute('hidden', '');
+            hint?.classList.remove('label-warn', 'label-accent');
             views.forEach((view) => {
               view.hidden = view.dataset.mode !== 'private';
             });
