@@ -1803,9 +1803,13 @@ const layoutTemplates = `
           <details class="room-details panel" data-room-section="controls">
             <summary><span class="label">Room controls</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <p class="muted">During focus, late joiners can watch the countdown but cannot enter the active block. During break, anyone can join the next block.</p>
+            {{if eq .Room.CreatorID .User.ID}}
             <form method="post" action="/r/{{.Room.Code}}/delete" onsubmit="return confirm('Delete \'{{.Room.Name}}\'? This removes it for all {{.MemberCount}} members.')">
               <button type="submit" class="btn-danger">Delete room</button>
             </form>
+            {{else}}
+            <p class="muted">Only the room's creator can delete this room.</p>
+            {{end}}
           </details>
           {{end}}
         </div>
