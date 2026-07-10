@@ -61,6 +61,12 @@ func TestDashboardRendersIndependentSoloAndRoomTimers(t *testing.T) {
 		`Break · session 2 of 3`,
 		`Watching · 1 focusing`,
 		`action="/r/JUNK-IES/timer-join"`,
+		`data-room-sync="JUNK-IES"`,
+		`data-run-id="room-timer-id"`,
+		`data-participant-count="1"`,
+		`/timer-status`,
+		`visibilitychange`,
+		`ws.onclose`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Errorf("dashboard output missing %q", expected)
@@ -86,6 +92,7 @@ func TestDashboardRendersIdleRoomStart(t *testing.T) {
 		`action="/r/JUNK-IES/timer-start"`,
 		`name="focus_minutes" min="5" max="180" value="45"`,
 		`Scroll ±1 · buttons ±5 · tap ring to start room`,
+		`data-run-id="" data-phase="idle"`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Errorf("dashboard output missing %q", expected)

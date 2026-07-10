@@ -19,6 +19,9 @@ func parseTemplates() *template.Template {
 		"mul":  func(a, b int) int { return a * b },
 		"sub":  func(a, b int) int { return a - b },
 		"join": strings.Join,
+		"rfc3339Nano": func(t time.Time) string {
+			return t.UTC().Format(time.RFC3339Nano)
+		},
 		"focusHours": func(minutes int) int {
 			return (minutes + 30) / 60
 		},
@@ -237,7 +240,14 @@ const layoutTemplates = `
             const deskView = box.closest('.desk-timer-view');
             if (!deskView || !deskView.hidden) {
               window.junkieNotify?.onTimerEnd(phase);
-              setTimeout(() => location.reload(), 400);
+              const roomSync = box.closest('[data-room-sync]');
+              setTimeout(() => {
+                if (roomSync && window.junkieReconcileRoomTimer) {
+                  window.junkieReconcileRoomTimer('countdown');
+                } else {
+                  location.reload();
+                }
+              }, 400);
             }
           }
           if (left > 0) left -= 1;
@@ -555,6 +565,76 @@ const layoutTemplates = `
       };
       wireDeskTimerMode();
 
+      const roomStatusFromElement = (el) => ({
+        runId: el?.dataset.runId || '',
+        phase: el?.dataset.phase || 'idle',
+        endsAt: el?.dataset.endsAt || '',
+        currentSession: Number(el?.dataset.currentSession || 0),
+        totalSessions: Number(el?.dataset.totalSessions || 0),
+        participant: el?.dataset.participant === 'true',
+        participantCount: Number(el?.dataset.participantCount || 0),
+      });
+
+      const selectedRoomTimer = () => {
+        const roomPage = document.querySelector('[data-room-sync][data-room-page]');
+        if (roomPage) return roomPage;
+        return document.querySelector('.desk-timer-view[data-room-sync]:not([hidden])');
+      };
+
+      const sameRoomStatus = (current, server) => {
+        const currentEnd = current.endsAt ? Date.parse(current.endsAt) : 0;
+        const serverEnd = server.endsAt ? Date.parse(server.endsAt) : 0;
+        return current.runId === (server.runId || '') &&
+          current.phase === (server.phase || 'idle') &&
+          currentEnd === serverEnd &&
+          current.currentSession === Number(server.currentSession || 0) &&
+          current.totalSessions === Number(server.totalSessions || 0) &&
+          current.participant === Boolean(server.participant) &&
+          current.participantCount === Number(server.participantCount || 0);
+      };
+
+      let roomStatusRequest = null;
+      let roomStatusReloading = false;
+      let lastRoomStatusCheck = 0;
+      const reconcileRoomTimer = async (reason) => {
+        if (document.visibilityState === 'hidden' || roomStatusReloading) return;
+        const el = selectedRoomTimer();
+        const code = el?.dataset.roomSync;
+        if (!code) return;
+        const now = Date.now();
+        if (roomStatusRequest || (reason !== 'countdown' && now - lastRoomStatusCheck < 1000)) {
+          return roomStatusRequest;
+        }
+        lastRoomStatusCheck = now;
+        roomStatusRequest = fetch('/r/' + encodeURIComponent(code) + '/timer-status', {
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        }).then(async (response) => {
+          if (!response.ok) return;
+          const server = await response.json();
+          if (!sameRoomStatus(roomStatusFromElement(el), server)) {
+            roomStatusReloading = true;
+            location.reload();
+          }
+        }).catch(() => {
+          // A later focus, visibility, online, or periodic check retries.
+        }).finally(() => {
+          roomStatusRequest = null;
+        });
+        return roomStatusRequest;
+      };
+      window.junkieReconcileRoomTimer = reconcileRoomTimer;
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reconcileRoomTimer('visible');
+      });
+      window.addEventListener('focus', () => reconcileRoomTimer('focus'));
+      window.addEventListener('online', () => reconcileRoomTimer('online'));
+      setInterval(() => {
+        if (document.visibilityState === 'visible') reconcileRoomTimer('periodic');
+      }, 45000);
+
       const showFocusJoinPrompt = (code, roomName) => {
         if (document.getElementById('focus-join-prompt')) return;
         if (document.querySelector('.room-focus-shell')) return;
@@ -619,8 +699,32 @@ const layoutTemplates = `
           const code = el.dataset.roomWs;
           const name = el.dataset.roomName;
           if (!code) return;
-          const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + code);
-          ws.onmessage = (event) => window.junkieOnRoomWSMessage(code, event.data, name);
+          let ws = null;
+          let retryTimer = null;
+          let retryCount = 0;
+          const connect = () => {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+            clearTimeout(retryTimer);
+            ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + encodeURIComponent(code));
+            ws.onopen = () => {
+              retryCount = 0;
+              reconcileRoomTimer('ws-open');
+            };
+            ws.onmessage = (event) => window.junkieOnRoomWSMessage(code, event.data, name);
+            ws.onerror = () => ws?.close();
+            ws.onclose = () => {
+              ws = null;
+              const delay = Math.min(30000, 1000 * (2 ** Math.min(retryCount, 5)));
+              retryCount++;
+              retryTimer = setTimeout(connect, delay + Math.floor(Math.random() * 500));
+            };
+          };
+          connect();
+          window.addEventListener('online', connect);
+          window.addEventListener('focus', connect);
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') connect();
+          });
         });
       };
       wireDeskRoomWS();
@@ -847,6 +951,8 @@ const layoutTemplates = `
   </li>
 {{end}}
 
+{{define "room-timer-status-attrs"}}data-room-sync="{{.Room.Code}}" {{if .Timer}}data-run-id="{{.Timer.ID}}" data-phase="{{.Timer.Phase}}" data-ends-at="{{rfc3339Nano .Timer.PhaseEndsAt}}" data-current-session="{{.Timer.CurrentSession}}" data-total-sessions="{{.Timer.TotalSessions}}" data-participant="{{if .Timer.Participant}}true{{else}}false{{end}}" data-participant-count="{{len .Timer.Participants}}"{{else}}data-run-id="" data-phase="idle" data-ends-at="" data-current-session="0" data-total-sessions="0" data-participant="false" data-participant-count="0"{{end}}{{end}}
+
 {{define "todo-row-focus"}}
   <li class="{{if .Done}}done{{end}}">
     <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
@@ -1018,7 +1124,7 @@ const layoutTemplates = `
 {{end}}
 
 {{define "desk-room-timer"}}
-<div class="desk-timer-view" data-mode="room" data-room="{{.Room.Code}}" hidden>
+<div class="desk-timer-view" data-mode="room" data-room="{{.Room.Code}}" {{template "room-timer-status-attrs" .}} hidden>
   {{if .Timer}}
   <article class="timer-card panel desk-timer-card {{.Timer.Phase}}">
     <p class="label {{if eq .Timer.Phase "focus"}}label-accent{{else}}label-warn{{end}}">
@@ -1472,8 +1578,9 @@ const layoutTemplates = `
       </form>
     </section>
   {{else}}
+    <span hidden data-room-ws="{{.Room.Code}}" data-room-name="{{.Room.Name}}"></span>
     {{if .FocusMode}}
-    <div class="room-focus-page">
+    <div class="room-focus-page" data-room-page {{template "room-timer-status-attrs" .}}>
     {{template "room-membership-pill" .}}
     <section class="room-focus-shell">
       <p class="label label-accent">Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}</p>
@@ -1497,7 +1604,7 @@ const layoutTemplates = `
     </section>
     </div>
     {{else}}
-    <section class="room-shell">
+    <section class="room-shell" data-room-page {{template "room-timer-status-attrs" .}}>
       <div class="room-header-new">
         <div class="room-header-main">
           <div class="label label-accent room-eyebrow">

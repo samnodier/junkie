@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -110,6 +111,16 @@ type timerRun struct {
 	Transitioned   bool
 }
 
+type timerStatus struct {
+	RunID            string `json:"runId"`
+	Phase            string `json:"phase"`
+	EndsAt           string `json:"endsAt"`
+	CurrentSession   int    `json:"currentSession"`
+	TotalSessions    int    `json:"totalSessions"`
+	Participant      bool   `json:"participant"`
+	ParticipantCount int    `json:"participantCount"`
+}
+
 type pageData struct {
 	Title                string
 	User                 user
@@ -212,6 +223,7 @@ func main() {
 	mux.HandleFunc("POST /rooms/join-intent", a.joinRoomIntent)
 	mux.HandleFunc("GET /join/confirm", a.requireAuth(a.joinRoomConfirm))
 	mux.HandleFunc("POST /join/confirm", a.requireAuth(a.joinRoomConfirmPost))
+	mux.HandleFunc("GET /r/{code}/timer-status", a.requireAuth(a.roomTimerStatus))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
@@ -598,6 +610,46 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount, Error: r.URL.Query().Get("error")})
 }
 
+func (a *app) roomTimerStatus(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		http.Error(w, "room membership required", http.StatusForbidden)
+		return
+	}
+
+	timer, transitioned, err := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+	if err != nil {
+		http.Error(w, "could not read timer status", http.StatusInternalServerError)
+		return
+	}
+	if transitioned {
+		a.hub.broadcast(rm.Code, "timer-phase")
+	}
+
+	status := timerStatus{Phase: "idle"}
+	if timer != nil {
+		status = timerStatus{
+			RunID:            timer.ID,
+			Phase:            timer.Phase,
+			EndsAt:           timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
+			CurrentSession:   timer.CurrentSession,
+			TotalSessions:    timer.TotalSessions,
+			Participant:      timer.Participant,
+			ParticipantCount: len(timer.Participants),
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		log.Printf("encode room timer status %s: %v", rm.Code, err)
+	}
+}
+
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/r/"), "/")
@@ -684,7 +736,17 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) roomWS(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
 	code := normalizeRoomCode(strings.TrimPrefix(r.URL.Path, "/ws/r/"))
+	rm, ok := a.findRoom(r.Context(), code)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		http.Error(w, "room membership required", http.StatusForbidden)
+		return
+	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		return

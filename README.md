@@ -49,6 +49,10 @@ Create an account and use junkie while logged in. Your todos, timer history, and
 - Room timers run from server timestamps, so clients count down locally without timer spam.
 - Focus blocks lock late joins out of the active timer.
 - Break blocks allow new people to join for the next focus block.
+- Participant avatars show who intentionally joined the active focus block, not
+  who currently has the room tab visible or an open WebSocket. Hiding or closing
+  a tab does not leave a block; participation ends through **Leave focus block**
+  or when the timer ends.
 - Focus mode hides todo boards so the app does not become the distraction.
 
 ## Local development
