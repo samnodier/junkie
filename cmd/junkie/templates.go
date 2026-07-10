@@ -582,11 +582,11 @@ const layoutTemplates = `
 {{define "todo-row"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
     {{if .ReadOnly}}
-    <span class="check check-readonly" aria-hidden="true">{{if .Done}}✓{{else}}○{{end}}</span>
+    <span class="todo-avatar" aria-hidden="true">{{initial .DisplayName}}</span>
     {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     {{end}}
-    <span>{{if and .DisplayName (not .HideAuthor)}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
+    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
       <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
     {{else}}
@@ -605,7 +605,7 @@ const layoutTemplates = `
 {{define "todo-row-desk-room"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
     {{if .ReadOnly}}
-    <span class="check check-readonly" aria-hidden="true">{{if .Done}}✓{{else}}○{{end}}</span>
+    <span class="todo-avatar" aria-hidden="true">{{initial .DisplayName}}</span>
     {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle">
       <input type="hidden" name="desk" value="1">
@@ -613,7 +613,7 @@ const layoutTemplates = `
       <button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button>
     </form>
     {{end}}
-    <span>{{if and .DisplayName (not .HideAuthor)}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
+    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
       <form method="post" action="/todo/{{.ID}}/delete">
         <input type="hidden" name="desk" value="1">
@@ -1667,7 +1667,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   border-radius: var(--radius-sm);
 }
 .todo-list li:hover:not(.empty) { background: var(--surface-2); }
-.todo-list li.done span { color: var(--faint); text-decoration: line-through; }
+.todo-list li.done > span:not(:has(.todo-author)) { color: var(--faint); text-decoration: line-through; }
+.todo-list li.done .todo-text,
+.todo-list li.done .todo-author { color: var(--faint); text-decoration: line-through; }
+.todo-list li.done .todo-sep { color: var(--faint); }
 .todo-list li.removed span { color: var(--danger); }
 .check {
   width: 18px;
@@ -1687,10 +1690,25 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   border-color: var(--accent-btn);
   color: var(--accent-ink);
 }
-.check-readonly {
-  cursor: default;
-  pointer-events: none;
-  opacity: 0.85;
+.todo-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-btn);
+  color: var(--accent-ink);
+  font-family: var(--font-serif);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.todo-sep { color: var(--faint); }
+.todo-author {
+  font-size: var(--fs-small);
+  color: var(--faint);
+  font-weight: 400;
 }
 .todo-action {
   background: transparent;
