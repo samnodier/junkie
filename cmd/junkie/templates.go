@@ -479,7 +479,10 @@ const layoutTemplates = `
         const applySolo = () => {
           form.action = '/solo/start';
           form.removeAttribute('data-room-name');
-          steps.forEach((step) => step.removeAttribute('hidden'));
+          steps.forEach((step) => {
+            step.removeAttribute('hidden');
+            step.removeAttribute('disabled');
+          });
           input?.removeAttribute('readonly');
           if (hint) hint.textContent = hint.dataset.hintPrivate || 'Set minutes · tap ring to focus';
           idleRing?.classList.remove('room-desk-timer');
@@ -499,7 +502,10 @@ const layoutTemplates = `
             input.closest('.circle-timer-time')?.classList.toggle('digits-3', String(focusMinutes).length >= 3);
           }
           window.junkieCircleTimer?.setRing(idleRing, focusMinutes / 180);
-          steps.forEach((step) => step.setAttribute('hidden', ''));
+          steps.forEach((step) => {
+            step.removeAttribute('hidden');
+            step.setAttribute('disabled', '');
+          });
           if (hint) hint.textContent = 'Room focus · ' + name;
           idleRing?.classList.add('room-desk-timer');
         };
@@ -1831,7 +1837,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   grid-template-columns: 1fr 400px;
   gap: 48px;
   padding: 20px clamp(20px, 5vw, 64px) 0;
-  align-items: start;
+  align-items: center;
   flex: 1 1 auto;
 }
 .desk-ring-column {
@@ -2116,6 +2122,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 }
 .circle-timer-step:hover { border-color: var(--border-strong); color: var(--ink); filter: none; }
 .circle-timer-step[hidden] { display: none; }
+.circle-timer-step:disabled { opacity: 0.35; pointer-events: none; cursor: default; }
 .join-prompt-backdrop {
   position: fixed;
   inset: 0;
