@@ -367,6 +367,8 @@ const layoutTemplates = `
         const hint = panel.querySelector('.desk-todos-hint');
         const views = panel.querySelectorAll('.desk-todos-view');
         const options = menu ? Array.from(menu.querySelectorAll('[data-mode]')) : [];
+        const membershipPill = document.querySelector('.room-membership-pill');
+        const membershipName = membershipPill?.querySelector('.room-membership-name');
         const roomCodes = options.filter((opt) => opt.dataset.mode === 'room').map((opt) => opt.dataset.room);
         const defaultRoom = roomCodes[0] || '';
         const params = new URLSearchParams(location.search);
@@ -392,6 +394,7 @@ const layoutTemplates = `
         };
 
         const apply = () => {
+          let activeRoom = null;
           if (mode === 'private') {
             label.textContent = 'Private todos';
             hint.textContent = '';
@@ -404,8 +407,8 @@ const layoutTemplates = `
               opt.classList.toggle('is-active', opt.dataset.mode === 'private');
             });
           } else {
-            const active = options.find((opt) => opt.dataset.mode === 'room' && opt.dataset.room === room);
-            label.textContent = active?.textContent.trim() || 'Room todos';
+            activeRoom = options.find((opt) => opt.dataset.mode === 'room' && opt.dataset.room === room);
+            label.textContent = activeRoom?.dataset.roomName || activeRoom?.textContent.trim() || 'Room todos';
             hint.textContent = 'Public to the room';
             hint?.removeAttribute('hidden');
             hint?.classList.add('label-warn');
@@ -417,9 +420,31 @@ const layoutTemplates = `
               opt.classList.toggle('is-active', opt.dataset.mode === 'room' && opt.dataset.room === room);
             });
           }
+
+          const contextRoom = mode === 'room' ? room : membershipPill?.dataset.membershipRoom;
+          const contextName = mode === 'room'
+            ? (activeRoom?.dataset.roomName || activeRoom?.textContent.trim() || room)
+            : membershipPill?.dataset.membershipName;
+          if (membershipPill && contextRoom) {
+            membershipPill.href = '/r/' + encodeURIComponent(contextRoom);
+            if (membershipName && contextName) membershipName.textContent = contextName;
+          }
+
           sessionStorage.setItem(modeKey, mode);
           if (mode === 'room') sessionStorage.setItem(roomKey, room);
-          panel.dispatchEvent(new CustomEvent('desk-todos-mode-change'));
+          const nextURL = new URL(location.href);
+          nextURL.searchParams.set('todos', mode);
+          if (mode === 'room') nextURL.searchParams.set('room', room);
+          else nextURL.searchParams.delete('room');
+          history.replaceState(null, '', nextURL);
+
+          panel.dispatchEvent(new CustomEvent('desk-todos-mode-change', {
+            detail: {
+              mode,
+              room: mode === 'room' ? room : '',
+              roomName: mode === 'room' ? contextName : '',
+            },
+          }));
         };
 
         trigger?.addEventListener('click', () => {
@@ -465,13 +490,13 @@ const layoutTemplates = `
         const modeKey = 'junkie:deskTodosMode';
         const roomKey = 'junkie:deskTodosRoom';
 
-        const roomMeta = () => {
-          const room = sessionStorage.getItem(roomKey) || panel.querySelector('.desk-todos-view[data-mode="room"]')?.dataset.room || '';
+        const roomMeta = (context) => {
+          const room = context?.room || sessionStorage.getItem(roomKey) || panel.querySelector('.desk-todos-view[data-mode="room"]')?.dataset.room || '';
           const menuOpt = panel.querySelector('.desk-todos-menu [data-mode="room"][data-room="' + room + '"]');
           const meta = column.querySelector('[data-room-focus="' + room + '"]');
           return {
             room,
-            name: meta?.dataset.roomName || menuOpt?.textContent.trim() || room,
+            name: context?.roomName || meta?.dataset.roomName || menuOpt?.dataset.roomName || menuOpt?.textContent.trim() || room,
             focusMinutes: Number(meta?.dataset.focusMinutes || 50),
           };
         };
@@ -488,8 +513,8 @@ const layoutTemplates = `
           idleRing?.classList.remove('room-desk-timer');
         };
 
-        const applyRoom = () => {
-          const { room, name, focusMinutes } = roomMeta();
+        const applyRoom = (context) => {
+          const { room, name, focusMinutes } = roomMeta(context);
           if (!room) {
             applySolo();
             return;
@@ -510,9 +535,10 @@ const layoutTemplates = `
           idleRing?.classList.add('room-desk-timer');
         };
 
-        const sync = () => {
-          const mode = sessionStorage.getItem(modeKey) || 'room';
-          if (mode === 'room') applyRoom();
+        const sync = (event) => {
+          const context = event?.detail;
+          const mode = context?.mode || sessionStorage.getItem(modeKey) || 'room';
+          if (mode === 'room') applyRoom(context);
           else applySolo();
         };
 
@@ -759,7 +785,7 @@ const layoutTemplates = `
 {{define "room-membership-pill"}}
 {{if .Room.Code}}
 <div class="desk-room-bar">
-  <a class="room-membership-pill" href="/r/{{.Room.Code}}">
+  <a class="room-membership-pill" href="/r/{{.Room.Code}}" data-membership-room="{{.Room.Code}}" data-membership-name="{{.Room.Name}}">
     <span class="room-membership-dot" aria-hidden="true"></span>
     <span class="label room-membership-label">In room</span>
     <span class="room-membership-name">{{.Room.Name}}</span>
@@ -767,7 +793,7 @@ const layoutTemplates = `
 </div>
 {{else if and .Rooms (not .SoloTimer)}}
 <div class="desk-room-bar">
-  <a class="room-membership-pill" href="/r/{{(index .Rooms 0).Code}}">
+  <a class="room-membership-pill" href="/r/{{(index .Rooms 0).Code}}" data-membership-room="{{(index .Rooms 0).Code}}" data-membership-name="{{(index .Rooms 0).Name}}">
     <span class="room-membership-dot" aria-hidden="true"></span>
     <span class="label room-membership-label">In room</span>
     <span class="room-membership-name">{{(index .Rooms 0).Name}}</span>
@@ -1158,7 +1184,7 @@ const layoutTemplates = `
               <div class="desk-todos-menu" hidden role="listbox">
                 <button type="button" role="option" data-mode="private">Private todos</button>
                 {{range .DeskRoomTodos}}
-                <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}">{{.Room.Name}}</button>
+                <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}" data-room-name="{{.Room.Name}}">{{.Room.Name}}</button>
                 {{end}}
               </div>
             </div>
