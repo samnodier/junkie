@@ -563,6 +563,7 @@ const layoutTemplates = `
 {{end}}
 
 {{define "todo-remove-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>{{end}}
+{{define "todo-restore-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>{{end}}
 {{define "todo-delete-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>{{end}}
 {{define "copy-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16V4a2 2 0 0 1 2-2h10"/></svg>{{end}}
 {{define "profile-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{{end}}
@@ -588,6 +589,7 @@ const layoutTemplates = `
     {{end}}
     <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
+      <form method="post" action="/todo/{{.ID}}/restore"><button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button></form>
       <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
     {{else}}
       <form method="post" action="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
@@ -615,6 +617,11 @@ const layoutTemplates = `
     {{end}}
     <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
+      <form method="post" action="/todo/{{.ID}}/restore">
+        <input type="hidden" name="desk" value="1">
+        <input type="hidden" name="room" value="{{.RoomCode}}">
+        <button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button>
+      </form>
       <form method="post" action="/todo/{{.ID}}/delete">
         <input type="hidden" name="desk" value="1">
         <input type="hidden" name="room" value="{{.RoomCode}}">
@@ -1721,8 +1728,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   opacity: 0;
 }
 .todo-list li:hover .todo-action, .todo-list li:focus-within .todo-action { opacity: 1; }
+.todo-list li.removed .todo-action { opacity: 1; }
 .todo-action svg { width: 1rem; height: 1rem; }
 .todo-delete { color: var(--danger); }
+.todo-restore { color: var(--accent); }
 .todo-add-plus {
   flex: 0 0 auto;
   min-width: 44px;

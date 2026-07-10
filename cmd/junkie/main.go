@@ -390,6 +390,8 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		}
 	case "remove":
 		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = true, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
+	case "restore":
+		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = false, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
 	case "delete":
 		_, _ = a.db.Exec(r.Context(), `DELETE FROM todos WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
 	default:
