@@ -146,7 +146,7 @@ const layoutTemplates = `
           setRing(timer, minutes / 180);
         };
 
-        const isReadOnly = () => input.readOnly || timer.classList.contains('room-desk-timer');
+        const isReadOnly = () => input.readOnly;
         const adjustMinutes = (delta) => {
           if (isReadOnly()) return;
           input.value = clampMinutes((Number(input.value) || 50) + delta);
@@ -1059,13 +1059,13 @@ const layoutTemplates = `
           <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
         </svg>
         <div class="circle-timer-core">
-          <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Room duration is fixed" disabled>−</button>
-          <label class="circle-timer-time"><input type="number" name="focus_minutes" value="{{.Room.FocusMinutes}}" readonly aria-label="Room focus minutes"></label>
-          <button type="button" class="circle-timer-step" data-delta="5" aria-label="Room duration is fixed" disabled>+</button>
+          <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease room focus by 5 minutes">−</button>
+          <label class="circle-timer-time"><input type="number" name="focus_minutes" min="5" max="180" value="{{.Room.FocusMinutes}}" aria-label="Room focus minutes"></label>
+          <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase room focus by 5 minutes">+</button>
         </div>
       </div>
     </form>
-    <p class="label desk-ring-hint">Room focus · {{.Room.Name}} · {{.Room.AutoSessions}} × {{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</p>
+    <p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to start room</p>
   </article>
   {{end}}
 </div>

@@ -637,7 +637,12 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/r/"+code, http.StatusSeeOther)
 		return
 	case "timer-start":
-		if _, err := a.startRoomTimer(r.Context(), rm, u.ID); err != nil {
+		focusMinutes, err := requestedRoomFocusMinutes(r, rm.FocusMinutes)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, err := a.startRoomTimer(r.Context(), rm, u.ID, focusMinutes); err != nil {
 			log.Printf("start room timer %s: %v", rm.Code, err)
 			http.Error(w, "could not start timer", http.StatusInternalServerError)
 			return
@@ -783,7 +788,22 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	return &timer, timer.Transitioned, nil
 }
 
-func (a *app) startRoomTimer(ctx context.Context, rm room, userID string) (bool, error) {
+func requestedRoomFocusMinutes(r *http.Request, fallback int) (int, error) {
+	value := strings.TrimSpace(r.FormValue("focus_minutes"))
+	if value == "" {
+		value = strings.TrimSpace(r.FormValue("minutes"))
+	}
+	if value == "" {
+		return fallback, nil
+	}
+	minutes, err := strconv.Atoi(value)
+	if err != nil || minutes < 5 || minutes > 180 {
+		return 0, errors.New("focus minutes must be a whole number from 5 to 180")
+	}
+	return minutes, nil
+}
+
+func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusMinutes int) (bool, error) {
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -807,12 +827,12 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string) (bool,
 		return false, tx.Commit(ctx)
 	}
 
-	ends := time.Now().Add(time.Duration(rm.FocusMinutes) * time.Minute)
+	ends := time.Now().Add(time.Duration(focusMinutes) * time.Minute)
 	var runID string
 	if err = tx.QueryRow(ctx, `
 		INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at)
 		VALUES ($1, $2, 'focus', $3, $4, $5, $6)
-		RETURNING id`, rm.ID, userID, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, ends).Scan(&runID); err != nil {
+		RETURNING id`, rm.ID, userID, focusMinutes, rm.BreakMinutes, rm.AutoSessions, ends).Scan(&runID); err != nil {
 		return false, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2)`, runID, userID); err != nil {
