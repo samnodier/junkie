@@ -136,6 +136,7 @@ type pageData struct {
 	Title                string
 	User                 user
 	Error                string
+	Notice               string
 	Rooms                []room
 	Room                 room
 	PersonalTodos        []todo
@@ -226,6 +227,7 @@ func main() {
 		http.Redirect(w, r, dest, http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("GET /profile", a.profilePage)
+	mux.HandleFunc("POST /profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
@@ -432,7 +434,58 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 		ActivityWeeks:        heatmap.Weeks,
 		ActivityTotalMinutes: heatmap.TotalMinutes,
 		Error:                r.URL.Query().Get("error"),
+		Notice:               r.URL.Query().Get("notice"),
 	})
+}
+
+func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	fail := func(msg string) {
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape(msg), http.StatusSeeOther)
+	}
+	if !a.limiter.allow("pwchange:"+u.ID, 10, 15*time.Minute) {
+		fail("Too many attempts. Try again in a few minutes.")
+		return
+	}
+	current := r.FormValue("current_password")
+	newPassword := r.FormValue("new_password")
+	confirm := r.FormValue("confirm_password")
+	var hash string
+	if err := a.db.QueryRow(r.Context(), `SELECT password_hash FROM users WHERE id = $1`, u.ID).Scan(&hash); err != nil {
+		fail("Could not verify your password.")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(current)) != nil {
+		fail("Current password is incorrect.")
+		return
+	}
+	if len([]rune(newPassword)) < minPasswordLength {
+		fail(fmt.Sprintf("New password must be at least %d characters.", minPasswordLength))
+		return
+	}
+	if len(newPassword) > maxPasswordBytes {
+		fail("That new password is too long.")
+		return
+	}
+	if newPassword != confirm {
+		fail("New passwords do not match.")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		fail("Could not update your password.")
+		return
+	}
+	if _, err := a.db.Exec(r.Context(), `UPDATE users SET password_hash = $1 WHERE id = $2`, string(newHash), u.ID); err != nil {
+		fail("Could not update your password.")
+		return
+	}
+	// Sign out every other session so a compromised login cannot survive a
+	// password change; only the session that made the change stays valid.
+	if cookie, err := r.Cookie("junkie_session"); err == nil {
+		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE user_id = $1 AND token <> $2`, u.ID, hashToken(cookie.Value))
+	}
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Password updated. All other devices were signed out."), http.StatusSeeOther)
 }
 
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
