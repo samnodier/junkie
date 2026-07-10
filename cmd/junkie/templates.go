@@ -243,14 +243,53 @@ const layoutTemplates = `
       syncThemeToggle();
 
       const wireFocusTodosPeek = () => {
+        if (document.getElementById('guest-desk')) return;
         const toggle = document.querySelector('.focus-todos-toggle');
         const panel = document.querySelector('.focus-todos-panel');
+        const backdrop = document.querySelector('.focus-todos-backdrop');
         const pinBtn = document.querySelector('.focus-todos-pin');
         if (!toggle || !panel) return;
 
         const pinKey = 'junkie:todosPinned';
         const peekKey = 'junkie:peekSeen';
         let pinned = localStorage.getItem(pinKey) === '1';
+        let hideTimer = null;
+        let open = false;
+
+        const syncOpen = (next) => {
+          open = next;
+          panel.classList.toggle('is-open', open);
+          toggle.classList.toggle('is-open', open);
+          toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+          if (open && !pinned) backdrop?.removeAttribute('hidden');
+          else backdrop?.setAttribute('hidden', '');
+        };
+
+        const close = () => {
+          if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+          }
+          syncOpen(false);
+        };
+
+        const dismiss = () => {
+          if (pinned) return;
+          close();
+        };
+
+        const scheduleDismiss = () => {
+          if (pinned) return;
+          if (hideTimer) clearTimeout(hideTimer);
+          hideTimer = setTimeout(dismiss, 10000);
+        };
+
+        const show = () => {
+          syncOpen(true);
+          scheduleDismiss();
+        };
+
         if (pinBtn) {
           pinBtn.classList.toggle('is-pinned', pinned);
           pinBtn.addEventListener('click', (event) => {
@@ -258,9 +297,15 @@ const layoutTemplates = `
             pinned = !pinned;
             localStorage.setItem(pinKey, pinned ? '1' : '0');
             pinBtn.classList.toggle('is-pinned', pinned);
-            if (pinned && hideTimer) {
-              clearTimeout(hideTimer);
-              hideTimer = null;
+            if (pinned) {
+              if (hideTimer) {
+                clearTimeout(hideTimer);
+                hideTimer = null;
+              }
+              backdrop?.setAttribute('hidden', '');
+            } else if (open) {
+              backdrop?.removeAttribute('hidden');
+              scheduleDismiss();
             }
           });
         }
@@ -270,35 +315,11 @@ const layoutTemplates = `
           setTimeout(() => toggle.classList.remove('peek-pulse'), 2400);
         }
 
-        let hideTimer = null;
-
-        const hide = () => {
-          if (pinned) return;
-          panel.classList.remove('is-open');
-          toggle.classList.remove('is-open');
-          toggle.setAttribute('aria-expanded', 'false');
-          panel.setAttribute('aria-hidden', 'true');
-          if (hideTimer) {
-            clearTimeout(hideTimer);
-            hideTimer = null;
-          }
-        };
-
-        const show = () => {
-          panel.classList.add('is-open');
-          toggle.classList.add('is-open');
-          toggle.setAttribute('aria-expanded', 'true');
-          panel.setAttribute('aria-hidden', 'false');
-          if (!pinned) {
-            if (hideTimer) clearTimeout(hideTimer);
-            hideTimer = setTimeout(hide, 10000);
-          }
-        };
-
         toggle.addEventListener('click', () => {
-          if (panel.classList.contains('is-open')) hide();
+          if (open) close();
           else show();
         });
+        backdrop?.addEventListener('click', dismiss);
       };
       wireFocusTodosPeek();
 
@@ -847,18 +868,24 @@ const layoutTemplates = `
           </form>
         </article>
       </div>
+      <div class="focus-todos-backdrop" hidden></div>
       <button type="button" class="focus-todos-toggle" aria-expanded="false" aria-controls="focus-todos-panel">Todos</button>
       <aside class="focus-todos-panel" id="focus-todos-panel" aria-hidden="true">
         <button type="button" class="focus-todos-pin" aria-label="Pin todos panel" title="Pin panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 17v5M9 3h6l1 7h4l-5 6v5H9v-5L4 10h4z"/></svg></button>
         <div class="panel-title">
           <h2>Todos</h2>
         </div>
-        <ul class="todo-list">
-          {{range .PersonalTodos}}
-            {{if not .Removed}}{{template "todo-row-focus" .}}{{end}}
-          {{else}}
+        <ul class="todo-list" id="focus-todos-list">
+          {{- $hasActive := false -}}
+          {{- range .PersonalTodos -}}
+            {{- if not .Removed -}}
+              {{- $hasActive = true -}}
+              {{template "todo-row-focus" .}}
+            {{- end -}}
+          {{- end -}}
+          {{- if not $hasActive -}}
             <li class="empty">Nothing yet. Add one thing worth finishing.</li>
-          {{end}}
+          {{- end -}}
         </ul>
       </aside>
     </section>
@@ -1889,6 +1916,13 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   50% { opacity: 0.45; }
 }
 .focus-todos-toggle.is-open { right: min(320px, 85vw); color: var(--accent); }
+.focus-todos-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  background: var(--backdrop);
+}
+.focus-todos-backdrop[hidden] { display: none !important; }
 .focus-todos-panel {
   position: fixed;
   top: 25vh;
@@ -1907,6 +1941,12 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   transition: transform 200ms ease-out;
 }
 .focus-todos-panel.is-open { transform: translateX(0); }
+.focus-todos-panel .panel-title { flex-shrink: 0; }
+.focus-todos-panel .todo-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 .focus-todos-pin {
   position: absolute;
   top: var(--sp-3);

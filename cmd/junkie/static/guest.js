@@ -318,6 +318,47 @@
   let focusTodosPeekOpen = false;
   let focusTodosHideTimer = null;
   let focusTodosPinned = localStorage.getItem('junkie:todosPinned') === '1';
+  let focusPeekWired = false;
+  let focusPeekPulseDone = localStorage.getItem('junkie:peekSeen') === '1';
+
+  const syncFocusPeekOpen = () => {
+    const toggle = document.querySelector('.focus-todos-toggle');
+    const panel = document.querySelector('.focus-todos-panel');
+    const backdrop = document.querySelector('.focus-todos-backdrop');
+    if (!toggle || !panel) return;
+    toggle.classList.toggle('is-open', focusTodosPeekOpen);
+    panel.classList.toggle('is-open', focusTodosPeekOpen);
+    toggle.setAttribute('aria-expanded', focusTodosPeekOpen ? 'true' : 'false');
+    panel.setAttribute('aria-hidden', focusTodosPeekOpen ? 'false' : 'true');
+    if (focusTodosPeekOpen && !focusTodosPinned) backdrop?.removeAttribute('hidden');
+    else backdrop?.setAttribute('hidden', '');
+  };
+
+  const closeFocusPeek = () => {
+    focusTodosPeekOpen = false;
+    if (focusTodosHideTimer) {
+      clearTimeout(focusTodosHideTimer);
+      focusTodosHideTimer = null;
+    }
+    syncFocusPeekOpen();
+  };
+
+  const dismissFocusPeek = () => {
+    if (focusTodosPinned) return;
+    closeFocusPeek();
+  };
+
+  const scheduleFocusPeekDismiss = () => {
+    if (focusTodosPinned) return;
+    if (focusTodosHideTimer) clearTimeout(focusTodosHideTimer);
+    focusTodosHideTimer = setTimeout(dismissFocusPeek, 10000);
+  };
+
+  const openFocusPeek = () => {
+    focusTodosPeekOpen = true;
+    syncFocusPeekOpen();
+    scheduleFocusPeekDismiss();
+  };
 
   const focusTodoPeekItemsHTML = (todos) => {
     const active = sortTodos(todos).filter((todo) => !todo.removed);
@@ -348,6 +389,7 @@
       '<div class="focus-desk-main">' +
         mainHTML +
       '</div>' +
+      '<div class="focus-todos-backdrop"' + (focusTodosPeekOpen && !focusTodosPinned ? '' : ' hidden') + '></div>' +
       '<button type="button" class="focus-todos-toggle' +
         (focusTodosPeekOpen ? ' is-open' : '') +
         '" aria-expanded="' +
@@ -367,63 +409,36 @@
     '</section>';
 
   const wireFocusTodosPeek = () => {
-    const toggle = document.querySelector('.focus-todos-toggle');
-    const panel = document.querySelector('.focus-todos-panel');
-    const pinBtn = document.querySelector('.focus-todos-pin');
-    if (!toggle || !panel) return;
+    if (!deskRoot || focusPeekWired) return;
+    focusPeekWired = true;
 
-    const peekKey = 'junkie:peekSeen';
-    if (!localStorage.getItem(peekKey)) {
-      toggle.classList.add('peek-pulse');
-      localStorage.setItem(peekKey, '1');
-      setTimeout(() => toggle.classList.remove('peek-pulse'), 2400);
-    }
+    deskRoot.addEventListener('click', (event) => {
+      if (!deskRoot.querySelector('.focus-desk')) return;
 
-    pinBtn?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      focusTodosPinned = !focusTodosPinned;
-      localStorage.setItem('junkie:todosPinned', focusTodosPinned ? '1' : '0');
-      pinBtn.classList.toggle('is-pinned', focusTodosPinned);
-      if (focusTodosPinned && focusTodosHideTimer) {
-        clearTimeout(focusTodosHideTimer);
-        focusTodosHideTimer = null;
+      const pinBtn = event.target.closest('.focus-todos-pin');
+      if (pinBtn) {
+        event.stopPropagation();
+        focusTodosPinned = !focusTodosPinned;
+        localStorage.setItem('junkie:todosPinned', focusTodosPinned ? '1' : '0');
+        pinBtn.classList.toggle('is-pinned', focusTodosPinned);
+        if (focusTodosPinned && focusTodosHideTimer) {
+          clearTimeout(focusTodosHideTimer);
+          focusTodosHideTimer = null;
+        }
+        syncFocusPeekOpen();
+        return;
       }
-    });
 
-    const hide = () => {
-      if (focusTodosPinned) return;
-      focusTodosPeekOpen = false;
-      panel.classList.remove('is-open');
-      toggle.classList.remove('is-open');
-      toggle.setAttribute('aria-expanded', 'false');
-      panel.setAttribute('aria-hidden', 'true');
-      if (focusTodosHideTimer) {
-        clearTimeout(focusTodosHideTimer);
-        focusTodosHideTimer = null;
+      if (event.target.closest('.focus-todos-backdrop')) {
+        dismissFocusPeek();
+        return;
       }
-    };
 
-    const scheduleHide = () => {
-      if (focusTodosPinned) return;
-      if (focusTodosHideTimer) clearTimeout(focusTodosHideTimer);
-      focusTodosHideTimer = setTimeout(hide, 10000);
-    };
-
-    const show = () => {
-      focusTodosPeekOpen = true;
-      panel.classList.add('is-open');
-      toggle.classList.add('is-open');
-      toggle.setAttribute('aria-expanded', 'true');
-      panel.setAttribute('aria-hidden', 'false');
-      scheduleHide();
-    };
-
-    toggle.addEventListener('click', () => {
-      if (focusTodosPeekOpen) hide();
-      else show();
+      const toggle = event.target.closest('.focus-todos-toggle');
+      if (!toggle) return;
+      if (focusTodosPeekOpen) closeFocusPeek();
+      else openFocusPeek();
     });
-
-    if (focusTodosPeekOpen) scheduleHide();
   };
 
   const focusTodoInput = () => {
@@ -479,7 +494,14 @@
         render();
       });
 
-      wireFocusTodosPeek();
+      if (!focusPeekPulseDone) {
+        focusPeekPulseDone = true;
+        localStorage.setItem('junkie:peekSeen', '1');
+        const toggle = document.querySelector('.focus-todos-toggle');
+        toggle?.classList.add('peek-pulse');
+        setTimeout(() => toggle?.classList.remove('peek-pulse'), 2400);
+      }
+      if (focusTodosPeekOpen) scheduleFocusPeekDismiss();
 
       const running = deskRoot.querySelector('.circle-timer.running');
       const total = timer.focusMinutes * 60;
@@ -608,6 +630,7 @@
 
   renderGuestProfile();
   if (deskRoot) {
+    wireFocusTodosPeek();
     render();
   }
 })();
