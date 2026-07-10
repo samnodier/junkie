@@ -613,6 +613,9 @@ const layoutTemplates = `
       const sameRoomStatus = (current, server) => {
         const currentEnd = current.endsAt ? Date.parse(current.endsAt) : 0;
         const serverEnd = server.endsAt ? Date.parse(server.endsAt) : 0;
+        const paused = Boolean(server.paused);
+        const pausedRemainingMatch = !paused ||
+          current.pausedRemainingSeconds === Number(server.pausedRemainingSeconds || 0);
         return current.runId === (server.runId || '') &&
           current.phase === (server.phase || 'idle') &&
           currentEnd === serverEnd &&
@@ -620,8 +623,8 @@ const layoutTemplates = `
           current.totalSessions === Number(server.totalSessions || 0) &&
           current.participant === Boolean(server.participant) &&
           current.participantCount === Number(server.participantCount || 0) &&
-          current.paused === Boolean(server.paused) &&
-          current.pausedRemainingSeconds === Number(server.pausedRemainingSeconds || 0);
+          current.paused === paused &&
+          pausedRemainingMatch;
       };
 
       let roomStatusRequest = null;
@@ -1022,7 +1025,7 @@ const layoutTemplates = `
   </li>
 {{end}}
 
-{{define "room-timer-status-attrs"}}data-room-sync="{{.Room.Code}}" {{if .Timer}}data-run-id="{{.Timer.ID}}" data-phase="{{.Timer.Phase}}" data-ends-at="{{rfc3339Nano .Timer.PhaseEndsAt}}" data-current-session="{{.Timer.CurrentSession}}" data-total-sessions="{{.Timer.TotalSessions}}" data-participant="{{if .Timer.Participant}}true{{else}}false{{end}}" data-participant-count="{{len .Timer.Participants}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}" data-paused-remaining="{{timerSeconds .Timer}}"{{else}}data-run-id="" data-phase="idle" data-ends-at="" data-current-session="0" data-total-sessions="0" data-participant="false" data-participant-count="0" data-paused="false" data-paused-remaining="0"{{end}}{{end}}
+{{define "room-timer-status-attrs"}}data-room-sync="{{.Room.Code}}" {{if .Timer}}data-run-id="{{.Timer.ID}}" data-phase="{{.Timer.Phase}}" data-ends-at="{{rfc3339Nano .Timer.PhaseEndsAt}}" data-current-session="{{.Timer.CurrentSession}}" data-total-sessions="{{.Timer.TotalSessions}}" data-participant="{{if .Timer.Participant}}true{{else}}false{{end}}" data-participant-count="{{len .Timer.Participants}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}" data-paused-remaining="{{if .Timer.PausedAt}}{{timerSeconds .Timer}}{{else}}0{{end}}"{{else}}data-run-id="" data-phase="idle" data-ends-at="" data-current-session="0" data-total-sessions="0" data-participant="false" data-participant-count="0" data-paused="false" data-paused-remaining="0"{{end}}{{end}}
 
 {{define "todo-row-focus"}}
   <li class="{{if .Done}}done{{end}}">

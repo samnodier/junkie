@@ -64,6 +64,7 @@ func TestDashboardRendersIndependentSoloAndRoomTimers(t *testing.T) {
 		`data-room-sync="JUNK-IES"`,
 		`data-run-id="room-timer-id"`,
 		`data-participant-count="1"`,
+		`data-paused="false" data-paused-remaining="0"`,
 		`/timer-status`,
 		`visibilitychange`,
 		`ws.onclose`,
@@ -107,6 +108,7 @@ func TestDashboardRendersRoomLobby(t *testing.T) {
 		`class="timer-card panel desk-timer-card lobby"`,
 		`data-total="10"`,
 		`data-phase="lobby"`,
+		`data-paused="false" data-paused-remaining="0"`,
 		`data-user-id="starter-id"`,
 		`is starting a focus block in`,
 	} {
