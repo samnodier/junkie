@@ -99,9 +99,13 @@
 
   const ringSVG = () =>
     '<svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">' +
-      '<circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>' +
-      '<circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>' +
+      '<circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>' +
+      '<circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>' +
     '</svg>';
+
+  const setFocusActive = (on) => {
+    document.body.classList.toggle('focus-active', on);
+  };
 
   const buildYearHeatmap = () => {
     const activity = load(keys.activity, {});
@@ -237,21 +241,23 @@
     const total = timer.focusMinutes * 60;
     const left = secondsLeft(timer);
     return (
+      '<p class="label label-accent">' + timer.focusMinutes + ' min focus</p>' +
       '<article class="circle-timer-wrap">' +
         '<div class="circle-timer running" role="timer" aria-label="Focus countdown">' +
           ringSVG() +
           '<div class="circle-timer-core">' +
-            '<div class="circle-timer-countdown" id="guest-countdown" data-total="' + total + '">' +
+            '<div class="circle-timer-countdown" id="guest-countdown" aria-live="polite" data-total="' + total + '">' +
               formatCountdown(left) +
             '</div>' +
           '</div>' +
         '</div>' +
-        '<button type="button" class="timer-cancel" id="guest-timer-cancel">Cancel focus</button>' +
+        '<button type="button" class="btn-ghost timer-cancel" id="guest-timer-cancel">End early</button>' +
       '</article>'
     );
   };
 
   const idleTimerHTML = () =>
+    '<div class="desk-ring-column">' +
     '<article class="circle-timer-wrap">' +
       '<form class="circle-timer-form" id="guest-timer-form">' +
         '<div class="circle-timer idle" role="group" aria-label="Set focus duration">' +
@@ -260,14 +266,14 @@
             '<button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>' +
             '<label class="circle-timer-time">' +
               '<input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">' +
-              '<span class="circle-timer-suffix">min</span>' +
             '</label>' +
             '<button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>' +
           '</div>' +
-          '<span class="circle-timer-hint">Tap to start</span>' +
         '</div>' +
       '</form>' +
-    '</article>';
+    '</article>' +
+    '<p class="label desk-ring-hint">Set minutes · tap ring to focus</p>' +
+    '</div>';
 
   const wireIdleTimer = (form) => {
     const timer = form.querySelector('.circle-timer.idle');
@@ -305,10 +311,11 @@
   let tickHandle = null;
   let focusTodosPeekOpen = false;
   let focusTodosHideTimer = null;
+  let focusTodosPinned = localStorage.getItem('junkie:todosPinned') === '1';
 
   const focusTodoPeekItemsHTML = (todos) => {
     const active = sortTodos(todos).filter((todo) => !todo.removed);
-    if (!active.length) return '<li class="empty">No active tasks.</li>';
+    if (!active.length) return '<li class="empty">Nothing yet. Add one thing worth finishing.</li>';
     return active
       .map(
         (todo) =>
@@ -345,6 +352,7 @@
         '" id="focus-todos-panel" aria-hidden="' +
         (focusTodosPeekOpen ? 'false' : 'true') +
         '">' +
+        '<button type="button" class="focus-todos-pin' + (focusTodosPinned ? ' is-pinned' : '') + '" aria-label="Pin todos panel" title="Pin panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 17v5M9 3h6l1 7h4l-5 6v5H9v-5L4 10h4z"/></svg></button>' +
         '<div class="panel-title"><h2>Todos</h2></div>' +
         '<ul class="todo-list" id="guest-focus-todos">' +
           focusTodoPeekItemsHTML(todos) +
@@ -355,9 +363,29 @@
   const wireFocusTodosPeek = () => {
     const toggle = document.querySelector('.focus-todos-toggle');
     const panel = document.querySelector('.focus-todos-panel');
+    const pinBtn = document.querySelector('.focus-todos-pin');
     if (!toggle || !panel) return;
 
+    const peekKey = 'junkie:peekSeen';
+    if (!localStorage.getItem(peekKey)) {
+      toggle.classList.add('peek-pulse');
+      localStorage.setItem(peekKey, '1');
+      setTimeout(() => toggle.classList.remove('peek-pulse'), 2400);
+    }
+
+    pinBtn?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      focusTodosPinned = !focusTodosPinned;
+      localStorage.setItem('junkie:todosPinned', focusTodosPinned ? '1' : '0');
+      pinBtn.classList.toggle('is-pinned', focusTodosPinned);
+      if (focusTodosPinned && focusTodosHideTimer) {
+        clearTimeout(focusTodosHideTimer);
+        focusTodosHideTimer = null;
+      }
+    });
+
     const hide = () => {
+      if (focusTodosPinned) return;
       focusTodosPeekOpen = false;
       panel.classList.remove('is-open');
       toggle.classList.remove('is-open');
@@ -370,6 +398,7 @@
     };
 
     const scheduleHide = () => {
+      if (focusTodosPinned) return;
       if (focusTodosHideTimer) clearTimeout(focusTodosHideTimer);
       focusTodosHideTimer = setTimeout(hide, 10000);
     };
@@ -416,15 +445,19 @@
     }
 
     if (inFocus) {
-      deskRoot.innerHTML = focusDeskHTML(runningTimerHTML(timer), todos);
+      setFocusActive(true);
+      deskRoot.innerHTML = '<div class="desk-shell desk-shell-focus">' + focusDeskHTML(runningTimerHTML(timer), todos) + '</div>';
 
       document.getElementById('guest-timer-cancel')?.addEventListener('click', () => {
+        if (!confirm("End this focus session? It won't count toward your map.")) return;
         focusTodosPeekOpen = false;
+        focusTodosPinned = localStorage.getItem('junkie:todosPinned') === '1';
         if (focusTodosHideTimer) {
           clearTimeout(focusTodosHideTimer);
           focusTodosHideTimer = null;
         }
         save(keys.timer, null);
+        setFocusActive(false);
         render();
       });
 
@@ -477,20 +510,40 @@
             '</li>'
           );
         }).join('')
-      : '<li class="empty">Add a private task for today.</li>';
+      : '<li class="empty">Nothing yet. Add one thing worth finishing.</li>';
 
     deskRoot.innerHTML =
+      '<div class="desk-shell">' +
       '<section class="grid two desk-grid">' +
         idleTimerHTML() +
         '<article class="panel desk-todos-panel">' +
-          '<div class="panel-title"><h2>Private todos</h2><span>Stored on this device</span></div>' +
+          '<div class="panel-title"><h2>Private todos</h2><span class="label">Only on this device</span></div>' +
           '<form class="inline-form todo-add-form" id="guest-todo-form">' +
             '<input name="text" placeholder="What do you need to do?" required>' +
             '<button type="submit" class="todo-add-plus" aria-label="Add task">+</button>' +
           '</form>' +
           '<ul class="todo-list" id="guest-todos">' + todoItems + '</ul>' +
+          '<p class="desk-join-link"><a href="#" data-open-join class="mono-link">Have a room code?</a></p>' +
         '</article>' +
-      '</section>';
+      '</section></div>';
+
+    setFocusActive(false);
+
+    document.querySelector('[data-open-join]')?.addEventListener('click', (event) => {
+      event.preventDefault();
+      const trigger = document.querySelector('.menu-drawer-trigger');
+      const drawer = document.querySelector('.menu-drawer');
+      const backdrop = document.querySelector('.menu-drawer-backdrop');
+      if (!trigger || !drawer) return;
+      drawer.classList.add('open');
+      backdrop?.removeAttribute('hidden');
+      drawer.setAttribute('aria-hidden', 'false');
+      trigger.setAttribute('aria-expanded', 'true');
+      document.body.classList.add('menu-drawer-open');
+      const join = document.getElementById('drawer-join-section');
+      if (join) join.open = true;
+      join?.querySelector('input')?.focus();
+    });
 
     const todoForm = document.getElementById('guest-todo-form');
     const todoInput = todoForm?.querySelector('input[name="text"]');

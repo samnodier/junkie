@@ -123,6 +123,8 @@ type pageData struct {
 	GuestMode            bool
 	Next                 string
 	AuthSignup           bool
+	AuthBanner           string
+	MemberCount          int
 }
 
 type activityDay struct {
@@ -179,7 +181,14 @@ func main() {
 	mux.HandleFunc("GET /login", a.loginForm)
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
-	mux.HandleFunc("GET /dashboard", a.home)
+	mux.HandleFunc("GET /dashboard", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.RawQuery
+		dest := "/"
+		if q != "" {
+			dest += "?" + q
+		}
+		http.Redirect(w, r, dest, http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("GET /profile", a.profilePage)
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
@@ -520,7 +529,8 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	todos, _ := a.roomTodos(r.Context(), rm.ID)
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
-	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode})
+	memberCount, _ := a.roomMemberCount(r.Context(), rm.ID)
+	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount})
 }
 
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
@@ -727,11 +737,35 @@ func (a *app) authPageData(r *http.Request, signup bool, next, errMsg string) pa
 	if signup {
 		title = "Sign up"
 	}
-	data := pageData{Title: title, Next: next, Error: errMsg, AuthSignup: signup}
+	data := pageData{Title: title, Next: next, Error: errMsg, AuthSignup: signup, AuthBanner: a.authBanner(r, next, signup)}
 	if u, ok := a.currentUser(r); ok {
 		data.User = u
 	}
 	return data
+}
+
+func (a *app) authBanner(r *http.Request, next string, signup bool) string {
+	if next == "" || next == "/" {
+		return ""
+	}
+	if u, ok := url.Parse(next); ok == nil && strings.HasPrefix(u.Path, "/join/confirm") {
+		if rm, found := a.findRoom(r.Context(), u.Query().Get("code")); found {
+			if signup {
+				return "Create an account to join " + rm.Name
+			}
+			return "Sign in to join " + rm.Name
+		}
+	}
+	if signup {
+		return ""
+	}
+	return "Sign in to continue"
+}
+
+func (a *app) roomMemberCount(ctx context.Context, roomID string) (int, error) {
+	var count int
+	err := a.db.QueryRow(ctx, `SELECT COUNT(*) FROM room_members WHERE room_id = $1`, roomID).Scan(&count)
+	return count, err
 }
 
 func (a *app) currentUser(r *http.Request) (user, bool) {

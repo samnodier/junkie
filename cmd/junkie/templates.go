@@ -21,6 +21,12 @@ func parseTemplates() *template.Template {
 		"focusHours": func(minutes int) int {
 			return (minutes + 30) / 60
 		},
+		"initial": func(name string) string {
+			for _, r := range name {
+				return strings.ToUpper(string(r))
+			}
+			return "?"
+		},
 	}
 	return template.Must(template.New("junkie").Funcs(funcs).Parse(layoutTemplates))
 }
@@ -43,12 +49,15 @@ const layoutTemplates = `
       document.documentElement.setAttribute('data-theme', t);
     })();
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,wght@0,600;1,500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="/assets/notifications.js"></script>
 </head>
-<body>
+<body{{if or .SoloTimer .FocusMode}} class="focus-active"{{end}}>
   {{$menu := or (eq .Title "Dashboard") (eq .Title "Profile") (and (ne .Room.Code "") (ne .Title "Join room"))}}
   <header class="topbar">
     <a class="brand" href="/" aria-label="junkie home">
@@ -61,7 +70,7 @@ const layoutTemplates = `
         <span class="theme-icon theme-icon-light" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
       </button>
       {{if and $menu .User.ID}}
-        <span class="topbar-user">{{.User.DisplayName}}</span>
+        <span class="topbar-user mono">{{.User.DisplayName}}</span>
       {{end}}
       {{if $menu}}
         <button type="button" class="menu-drawer-trigger" aria-label="Open menu" aria-expanded="false">
@@ -73,7 +82,7 @@ const layoutTemplates = `
     </div>
   </header>
   <main class="page">
-    {{if .Error}}<p class="notice">{{.Error}}</p>{{end}}
+    {{if and .Error (ne .Title "Sign in") (ne .Title "Sign up") (ne .Title "Dashboard")}}<p class="notice notice-error">{{.Error}}</p>{{end}}
     {{template "content" .}}
   </main>
   {{if $menu}}
@@ -149,6 +158,8 @@ const layoutTemplates = `
           const m = String(Math.floor(left / 60)).padStart(2, '0');
           const s = String(left % 60).padStart(2, '0');
           box.textContent = m + ':' + s;
+          const live = box.closest('[aria-live]') || box.parentElement;
+          if (live && left % 60 === 0) live.setAttribute('aria-label', m + ' minutes remaining');
           setRing(timer, left / total);
           if (left <= 0 && !notified) {
             notified = true;
@@ -195,6 +206,7 @@ const layoutTemplates = `
           drawer.setAttribute('aria-hidden', 'false');
           trigger.setAttribute('aria-expanded', 'true');
           document.body.classList.add('menu-drawer-open');
+          drawer.querySelector('a, button, input, summary')?.focus();
         };
         const shut = () => {
           drawer.classList.remove('open');
@@ -202,6 +214,7 @@ const layoutTemplates = `
           drawer.setAttribute('aria-hidden', 'true');
           trigger.setAttribute('aria-expanded', 'false');
           document.body.classList.remove('menu-drawer-open');
+          trigger.focus();
         };
 
         trigger.addEventListener('click', open);
@@ -232,11 +245,35 @@ const layoutTemplates = `
       const wireFocusTodosPeek = () => {
         const toggle = document.querySelector('.focus-todos-toggle');
         const panel = document.querySelector('.focus-todos-panel');
+        const pinBtn = document.querySelector('.focus-todos-pin');
         if (!toggle || !panel) return;
+
+        const pinKey = 'junkie:todosPinned';
+        const peekKey = 'junkie:peekSeen';
+        let pinned = localStorage.getItem(pinKey) === '1';
+        if (pinBtn) {
+          pinBtn.classList.toggle('is-pinned', pinned);
+          pinBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            pinned = !pinned;
+            localStorage.setItem(pinKey, pinned ? '1' : '0');
+            pinBtn.classList.toggle('is-pinned', pinned);
+            if (pinned && hideTimer) {
+              clearTimeout(hideTimer);
+              hideTimer = null;
+            }
+          });
+        }
+        if (!localStorage.getItem(peekKey)) {
+          toggle.classList.add('peek-pulse');
+          localStorage.setItem(peekKey, '1');
+          setTimeout(() => toggle.classList.remove('peek-pulse'), 2400);
+        }
 
         let hideTimer = null;
 
         const hide = () => {
+          if (pinned) return;
           panel.classList.remove('is-open');
           toggle.classList.remove('is-open');
           toggle.setAttribute('aria-expanded', 'false');
@@ -252,8 +289,10 @@ const layoutTemplates = `
           toggle.classList.add('is-open');
           toggle.setAttribute('aria-expanded', 'true');
           panel.setAttribute('aria-hidden', 'false');
-          if (hideTimer) clearTimeout(hideTimer);
-          hideTimer = setTimeout(hide, 10000);
+          if (!pinned) {
+            if (hideTimer) clearTimeout(hideTimer);
+            hideTimer = setTimeout(hide, 10000);
+          }
         };
 
         toggle.addEventListener('click', () => {
@@ -303,7 +342,9 @@ const layoutTemplates = `
         const apply = () => {
           if (mode === 'private') {
             label.textContent = 'Private todos';
-            hint.textContent = 'Only visible here';
+            hint.textContent = 'Only on this device';
+            hint?.classList.remove('label-warn');
+            hint?.classList.add('label-accent');
             views.forEach((view) => {
               view.hidden = view.dataset.mode !== 'private';
             });
@@ -314,6 +355,8 @@ const layoutTemplates = `
             const active = options.find((opt) => opt.dataset.mode === 'room' && opt.dataset.room === room);
             label.textContent = active?.textContent.trim() || 'Room todos';
             hint.textContent = 'Public to the room';
+            hint?.classList.add('label-warn');
+            hint?.classList.remove('label-accent');
             views.forEach((view) => {
               view.hidden = !(view.dataset.mode === 'room' && view.dataset.room === room);
             });
@@ -414,7 +457,7 @@ const layoutTemplates = `
           event.preventDefault();
           if (!(await copyRoomInvite(path))) return;
           share.classList.add('is-copied');
-          if (feedback) feedback.textContent = 'Copied!';
+          if (feedback) feedback.textContent = 'COPIED ✓';
           if (copiedTimer) clearTimeout(copiedTimer);
           copiedTimer = setTimeout(() => {
             share.classList.remove('is-copied');
@@ -425,6 +468,37 @@ const layoutTemplates = `
         share.querySelectorAll('.room-share-code, .room-share-copy').forEach((btn) => {
           btn.addEventListener('click', triggerCopy);
         });
+      });
+
+      document.querySelectorAll('[data-open-join]').forEach((link) => {
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          const trigger = document.querySelector('.menu-drawer-trigger');
+          const drawer = document.querySelector('.menu-drawer');
+          const backdrop = document.querySelector('.menu-drawer-backdrop');
+          if (!trigger || !drawer) return;
+          drawer.classList.add('open');
+          backdrop?.removeAttribute('hidden');
+          drawer.setAttribute('aria-hidden', 'false');
+          trigger.setAttribute('aria-expanded', 'true');
+          document.body.classList.add('menu-drawer-open');
+          const join = document.getElementById('drawer-join-section');
+          if (join) join.open = true;
+          join?.querySelector('input')?.focus();
+        });
+      });
+
+      document.querySelectorAll('form').forEach((form) => {
+        form.addEventListener('submit', () => {
+          form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach((btn) => {
+            btn.disabled = true;
+            btn.style.opacity = '0.6';
+          });
+        });
+      });
+
+      document.querySelectorAll('.context-banner-dismiss .banner-dismiss').forEach((btn) => {
+        btn.addEventListener('click', () => btn.closest('.context-banner')?.remove());
       });
 
       document.querySelectorAll('.room-code-input').forEach((input) => {
@@ -478,12 +552,12 @@ const layoutTemplates = `
 {{define "profile-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{{end}}
 
 {{define "room-membership-pill"}}
-{{if .Rooms}}
+{{if and .Rooms (not .SoloTimer)}}
 <div class="desk-room-bar">
   <a class="room-membership-pill" href="/r/{{(index .Rooms 0).Code}}">
-    <span class="room-membership-label">In room</span>
+    <span class="room-membership-dot" aria-hidden="true"></span>
+    <span class="label room-membership-label">In room</span>
     <span class="room-membership-name">{{(index .Rooms 0).Name}}</span>
-    {{if gt (len .Rooms) 1}}<span class="room-membership-more">+{{sub (len .Rooms) 1}}</span>{{end}}
   </a>
 </div>
 {{end}}
@@ -537,7 +611,7 @@ const layoutTemplates = `
   <section class="todo-group" data-group="mine">
     <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-mine-{{.RoomCode}}">
       <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-      <span>{{if .UserName}}{{.UserName}}{{else}}Your todos{{end}}</span>
+      <span class="label">{{if .UserName}}{{.UserName}}{{else}}You{{end}}</span>
     </button>
     <ul class="todo-list" id="todo-group-mine-{{.RoomCode}}">
       {{range .Mine}}
@@ -551,7 +625,7 @@ const layoutTemplates = `
   <section class="todo-group" data-group="others">
     <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-others-{{.RoomCode}}">
       <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-      <span>Everyone else</span>
+      <span class="label">Everyone else</span>
     </button>
     <ul class="todo-list" id="todo-group-others-{{.RoomCode}}">
       {{range .Others}}
@@ -568,7 +642,7 @@ const layoutTemplates = `
   <section class="todo-group" data-group="mine">
     <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-mine-{{.RoomCode}}">
       <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-      <span>{{if .UserName}}{{.UserName}}{{else}}Your todos{{end}}</span>
+      <span class="label">{{if .UserName}}{{.UserName}}{{else}}You{{end}}</span>
     </button>
     <ul class="todo-list" id="todo-group-mine-{{.RoomCode}}">
       {{range .Mine}}
@@ -582,7 +656,7 @@ const layoutTemplates = `
   <section class="todo-group" data-group="others">
     <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-others-{{.RoomCode}}">
       <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-      <span>Everyone else</span>
+      <span class="label">Everyone else</span>
     </button>
     <ul class="todo-list" id="todo-group-others-{{.RoomCode}}">
       {{range .Others}}
@@ -595,7 +669,7 @@ const layoutTemplates = `
 {{end}}
 
 {{define "auth-back"}}
-<a class="auth-back" href="{{if .User.ID}}/dashboard{{else}}/{{end}}" aria-label="Back to home">
+<a class="auth-back" href="/" aria-label="Back to home">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
 </a>
 {{end}}
@@ -615,19 +689,24 @@ const layoutTemplates = `
 <div class="menu-drawer-backdrop" hidden></div>
 <aside class="menu-drawer" aria-hidden="true">
   <div class="menu-drawer-head">
-    <h2>Menu</h2>
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
-  <nav class="menu-drawer-nav">
-    <a href="/profile">{{template "profile-icon" .}}Profile</a>
-    <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a>
-  </nav>
-  <p class="menu-drawer-section-label">Join room</p>
-  <form class="room-join" method="post" action="/rooms/join-intent">
-    <input type="hidden" name="next" value="{{if .Room.Code}}/r/{{.Room.Code}}{{else if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
-    <input class="room-code-input" name="code" placeholder="Room code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
-    <button>Join</button>
-  </form>
+  <div class="drawer-identity">
+    <a href="/profile" class="drawer-profile-row">
+      <span class="drawer-avatar">{{template "profile-icon" .}}</span>
+      <span class="drawer-name">Profile</span>
+    </a>
+    <a href="/login{{if .Next}}?next={{.Next}}{{end}}" class="btn-primary drawer-signin">Sign in</a>
+    <p class="label drawer-guest-hint">Rooms need an account — sign in to study together.</p>
+  </div>
+  <details class="drawer-details" id="drawer-join-section">
+    <summary><span class="label">Join room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+    <form class="room-join" method="post" action="/rooms/join-intent">
+      <input type="hidden" name="next" value="{{if .Room.Code}}/r/{{.Room.Code}}{{else if eq .Title "Profile"}}/profile{{else}}/{{end}}">
+      <input class="room-code-input" name="code" placeholder="Code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
+      <button type="submit" class="btn-primary btn-compact">Join</button>
+    </form>
+  </details>
 </aside>
 {{end}}
 
@@ -635,36 +714,46 @@ const layoutTemplates = `
 <div class="menu-drawer-backdrop" hidden></div>
 <aside class="menu-drawer" aria-hidden="true">
   <div class="menu-drawer-head">
-    <h2>Menu</h2>
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
-  <nav class="menu-drawer-nav">
-    <a href="/profile">{{template "profile-icon" .}}Profile</a>
-  </nav>
-  <p class="menu-drawer-section-label">Create room</p>
-  <form class="room-create" method="post" action="/rooms">
-    <input name="name" placeholder="Room name">
-    <button>Create</button>
-  </form>
-  <p class="menu-drawer-section-label">Join room</p>
-  <form class="room-join" method="post" action="/rooms/join">
-    <input type="hidden" name="next" value="{{if .Room.Code}}/r/{{.Room.Code}}{{else if eq .Title "Profile"}}/profile{{else}}/dashboard{{end}}">
-    <input class="room-code-input" name="code" placeholder="Room code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
-    <button>Join</button>
-  </form>
-  <p class="menu-drawer-section-label">Your rooms</p>
+  <div class="drawer-identity drawer-identity-user">
+    <span class="drawer-avatar">{{initial .User.DisplayName}}</span>
+    <div class="drawer-user-meta">
+      <span class="drawer-name">{{.User.DisplayName}}</span>
+      <a href="/profile" class="label drawer-profile-link">View profile</a>
+    </div>
+  </div>
+  <p class="label drawer-section-label">Your rooms</p>
   <div class="room-list">
     {{range .Rooms}}
-      <a class="room-row" href="/r/{{.Code}}">
-        <strong>{{.Name}}</strong>
-        <span>/r/{{.Code}} · {{.AutoSessions}}×{{.FocusMinutes}}/{{.BreakMinutes}}</span>
+      <a class="room-row{{if eq $.Room.Code .Code}} is-here{{end}}" href="/r/{{.Code}}">
+        <div class="room-row-main">
+          <strong>{{.Name}}</strong>
+          <span class="mono room-row-code">{{.Code}} · {{.AutoSessions}}×{{.FocusMinutes}}/{{.BreakMinutes}}</span>
+        </div>
+        {{if eq $.Room.Code .Code}}<span class="label here-tag">Here</span>{{end}}
       </a>
     {{else}}
       <p class="empty">No rooms yet.</p>
     {{end}}
   </div>
+  <details class="drawer-details">
+    <summary><span class="label">Create room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+    <form class="room-create" method="post" action="/rooms">
+      <input name="name" placeholder="Room name (optional)">
+      <button type="submit" class="btn-primary btn-compact">Create</button>
+    </form>
+  </details>
+  <details class="drawer-details" id="drawer-join-section">
+    <summary><span class="label">Join room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+    <form class="room-join" method="post" action="/rooms/join">
+      <input type="hidden" name="next" value="{{if .Room.Code}}/r/{{.Room.Code}}{{else if eq .Title "Profile"}}/profile{{else}}/{{end}}">
+      <input class="room-code-input" name="code" placeholder="Code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
+      <button type="submit" class="btn-primary btn-compact">Join</button>
+    </form>
+  </details>
   <form class="menu-drawer-logout" method="post" action="/logout">
-    <button type="submit">Log out</button>
+    <button type="submit" class="btn-ghost">Log out</button>
   </form>
 </aside>
 {{end}}
@@ -677,11 +766,18 @@ const layoutTemplates = `
         {{template "auth-brand" .}}
       </div>
       {{if .AuthSignup}}
+      <h1 class="auth-title">Start focusing</h1>
+      {{else}}
+      <h1 class="auth-title">Welcome back</h1>
+      {{end}}
+      {{if .AuthBanner}}<p class="context-banner">{{.AuthBanner}}</p>{{end}}
+      {{if .Error}}<p class="notice notice-error">{{.Error}}</p>{{end}}
+      {{if .AuthSignup}}
       <form class="stack auth-form" method="post" action="/signup">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
         <label>Password <input type="password" name="password" autocomplete="new-password" required></label>
-        <button>Sign up</button>
+        <button type="submit" class="btn-primary">Create account</button>
       </form>
       <p class="muted auth-switch">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a></p>
       {{else}}
@@ -689,38 +785,40 @@ const layoutTemplates = `
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
         <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-        <button>Sign in</button>
+        <button type="submit" class="btn-primary">Sign in</button>
       </form>
-      <p class="muted auth-switch">New here? <a href="/login?mode=signup{{if .Next}}&amp;next={{.Next}}{{end}}">Sign up</a></p>
+      <p class="muted auth-switch">New here? <a href="/login?mode=signup{{if .Next}}&amp;next={{.Next}}{{end}}">Create an account</a></p>
       {{end}}
     </section>
   {{else if eq .Title "Dashboard"}}
+    {{if .Error}}<p class="context-banner context-banner-dismiss" role="status">{{.Error}} <button type="button" class="banner-dismiss" aria-label="Dismiss">×</button></p>{{end}}
     {{if .GuestMode}}
     <div id="guest-desk" class="desk-shell"></div>
     <script src="/assets/guest.js"></script>
     {{else}}
     {{if .SoloTimer}}
     <div class="desk-shell desk-shell-focus">
-    {{template "room-membership-pill" .}}
     <section class="focus-desk">
       <div class="focus-desk-main">
+        <p class="label label-accent">{{.SoloTimer.FocusMinutes}} min focus</p>
         <article class="circle-timer-wrap">
           <div class="circle-timer running" role="timer" aria-label="Focus countdown">
             <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
-              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
+              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
             </svg>
             <div class="circle-timer-core">
-              <div class="circle-timer-countdown countdown" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.FocusMinutes 60}}">--:--</div>
+              <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.FocusMinutes 60}}">--:--</div>
             </div>
           </div>
-          <form method="post" action="/solo/cancel">
-            <button type="submit" class="timer-cancel">Cancel focus</button>
+          <form method="post" action="/solo/cancel" onsubmit="return confirm('End this focus session? It won\'t count toward your map.')">
+            <button type="submit" class="btn-ghost timer-cancel">End early</button>
           </form>
         </article>
       </div>
       <button type="button" class="focus-todos-toggle" aria-expanded="false" aria-controls="focus-todos-panel">Todos</button>
       <aside class="focus-todos-panel" id="focus-todos-panel" aria-hidden="true">
+        <button type="button" class="focus-todos-pin" aria-label="Pin todos panel" title="Pin panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 17v5M9 3h6l1 7h4l-5 6v5H9v-5L4 10h4z"/></svg></button>
         <div class="panel-title">
           <h2>Todos</h2>
         </div>
@@ -728,7 +826,7 @@ const layoutTemplates = `
           {{range .PersonalTodos}}
             {{if not .Removed}}{{template "todo-row-focus" .}}{{end}}
           {{else}}
-            <li class="empty">No active tasks.</li>
+            <li class="empty">Nothing yet. Add one thing worth finishing.</li>
           {{end}}
         </ul>
       </aside>
@@ -738,25 +836,30 @@ const layoutTemplates = `
     <div class="desk-shell">
     {{template "room-membership-pill" .}}
       <section class="grid two desk-grid">
+        <div class="desk-ring-column">
         <article class="circle-timer-wrap">
           <form class="circle-timer-form" method="post" action="/solo/start">
             <div class="circle-timer idle" role="group" aria-label="Set focus duration">
               <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-                <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
-                <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10" stroke-dasharray="553" stroke-dashoffset="0"/>
+                <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+                <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
               </svg>
               <div class="circle-timer-core">
                 <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
                 <label class="circle-timer-time">
                   <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
-                  <span class="circle-timer-suffix">min</span>
                 </label>
                 <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
               </div>
-              <span class="circle-timer-hint">Tap to start</span>
             </div>
           </form>
+          {{if .DeskRoomTodos}}
+          <p class="label desk-ring-hint">Solo timer · rooms run their own</p>
+          {{else}}
+          <p class="label desk-ring-hint">Set minutes · tap ring to focus</p>
+          {{end}}
         </article>
+        </div>
 
         <article class="panel desk-todos-panel"{{if .DeskRoomTodos}} data-has-rooms="true"{{end}}>
           <div class="panel-title desk-todos-head">
@@ -764,19 +867,19 @@ const layoutTemplates = `
             <div class="desk-todos-switch">
               <button type="button" class="desk-todos-mode" aria-haspopup="listbox" aria-expanded="false">
                 <span class="desk-todos-mode-label">Room todos</span>
-                <svg class="desk-todos-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                <svg class="desk-todos-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
               </button>
               <div class="desk-todos-menu" hidden role="listbox">
                 <button type="button" role="option" data-mode="private">Private todos</button>
                 {{range .DeskRoomTodos}}
-                <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}">{{.Room.Name}}</button>
+                <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}">{{.Room.Name}} <span class="mono">{{.Room.Code}}</span></button>
                 {{end}}
               </div>
             </div>
             {{else}}
             <h2>Private todos</h2>
             {{end}}
-            <span class="desk-todos-hint">{{if .DeskRoomTodos}}Public to the room{{else}}Only visible here{{end}}</span>
+            <span class="label desk-todos-hint{{if .DeskRoomTodos}} label-warn{{end}}">{{if .DeskRoomTodos}}Public to the room{{else}}Only on this device{{end}}</span>
           </div>
           <div class="desk-todos-view" data-mode="private"{{if .DeskRoomTodos}} hidden{{end}}>
             <form class="inline-form todo-add-form" method="post" action="/todos">
@@ -787,14 +890,19 @@ const layoutTemplates = `
               {{range .PersonalTodos}}
                 {{template "todo-row" .}}
               {{else}}
-                {{if not .DeskRoomTodos}}<li class="empty">No tasks yet.</li>{{end}}
+                {{if not .DeskRoomTodos}}<li class="empty">Nothing yet. Add one thing worth finishing.</li>{{end}}
               {{end}}
             </ul>
+            {{if not .DeskRoomTodos}}
+            <p class="desk-join-link"><a href="#" data-open-join class="mono-link">Have a room code?</a></p>
+            {{else if not .Rooms}}
+            <p class="desk-join-link"><a href="#" class="btn-ghost btn-compact" onclick="document.querySelector('.menu-drawer-trigger')?.click();return false">Create a room</a></p>
+            {{end}}
           </div>
           {{range .DeskRoomTodos}}
           <div class="desk-todos-view" data-mode="room" data-room="{{.Room.Code}}" hidden>
             <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos">
-              <input type="hidden" name="next" value="/dashboard?todos=room&amp;room={{.Room.Code}}">
+              <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
               <input name="text" placeholder="What are you working on?" required>
               <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
             </form>
@@ -851,88 +959,133 @@ const layoutTemplates = `
       </form>
     </section>
   {{else}}
-    <section class="{{if .FocusMode}}focus-shell{{else}}room-shell{{end}}">
-      <div class="room-header">
-        <div>
-          <p class="eyebrow">Room code / {{.Room.Code}}</p>
-          <h1>{{.Room.Name}}</h1>
-          <p class="muted room-share" data-room-path="/r/{{.Room.Code}}">
-            <span class="room-share-label">Share this link:</span>
-            <button type="button" class="room-share-code" title="Click to copy invite">/r/{{.Room.Code}}</button>
-            <button type="button" class="room-share-copy" aria-label="Copy room invite">{{template "copy-icon"}}</button>
-            <span class="room-share-feedback" aria-live="polite"></span>
-          </p>
+    {{if .FocusMode}}
+    <section class="room-focus-shell">
+      <p class="label label-accent">Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}</p>
+      <p class="room-focus-name">{{.Room.Name}}</p>
+      <div class="circle-timer running room-focus-ring" role="timer" aria-label="Focus countdown">
+        <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+          <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+        </svg>
+        <div class="circle-timer-core">
+          <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}" data-total="{{mul .Timer.FocusMinutes 60}}">--:--</div>
         </div>
-        {{if not .FocusMode}}
-          <form class="inline-form" method="post" action="/r/{{.Room.Code}}/rename">
-            <input name="name" value="{{.Room.Name}}" aria-label="Room name">
-            <button>Rename</button>
+      </div>
+      <div class="participant-avatars" aria-hidden="true">
+        {{range .Timer.Participants}}<span class="participant-avatar">{{initial .}}</span>{{end}}
+      </div>
+      <p class="label">{{len .Timer.Participants}} focusing</p>
+      <form method="post" action="/r/{{.Room.Code}}/timer-leave">
+        <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
+      </form>
+    </section>
+    {{else}}
+    <section class="room-shell">
+      <div class="room-header-new">
+        <div class="room-header-main">
+          <p class="label label-accent room-eyebrow">
+            Room · <span class="mono">{{.Room.Code}}</span>
+            <span class="room-share" data-room-path="/r/{{.Room.Code}}">
+              <button type="button" class="copy-chip room-share-code">Copy link</button>
+              <span class="room-share-feedback" aria-live="polite"></span>
+            </span>
+          </p>
+          <div class="room-title-row">
+            <h1 class="room-name-display" id="room-name-display">{{.Room.Name}}</h1>
+            <button type="button" class="room-rename-trigger" aria-label="Rename room"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          </div>
+          <form class="room-rename-form" id="room-rename-form" method="post" action="/r/{{.Room.Code}}/rename" hidden>
+            <input name="name" value="{{.Room.Name}}" aria-label="Room name" required>
+            <button type="submit" class="btn-primary btn-compact">Save</button>
+            <button type="button" class="btn-ghost btn-compact room-rename-cancel">Cancel</button>
           </form>
-        {{end}}
+        </div>
+        <div class="room-members-meta">
+          <div class="participant-avatars participant-avatars-sm">
+            {{if .Timer}}{{range .Timer.Participants}}<span class="participant-avatar">{{initial .}}</span>{{end}}{{end}}
+          </div>
+          <span class="label">{{if .MemberCount}}{{.MemberCount}}{{else}}0{{end}} members</span>
+        </div>
       </div>
 
-      {{if .Timer}}
-        <article class="timer-card {{.Timer.Phase}}">
-          <p class="eyebrow">{{.Timer.Phase}} · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}</p>
-          <div class="countdown" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}">--:--</div>
-          <p class="muted">In this timer: {{join .Timer.Participants ", "}}</p>
-          {{if and (eq .Timer.Phase "break") (not .Timer.Participant)}}
-            <form method="post" action="/r/{{.Room.Code}}/timer-join"><button>Join for the next focus block</button></form>
-          {{end}}
-          {{if and (eq .Timer.Phase "focus") (not .Timer.Participant)}}
-            <p class="notice">A focus block is running. You can watch now and join during the next break.</p>
-          {{end}}
-          {{if and (eq .Timer.Phase "focus") .Timer.Participant}}
-            <form method="post" action="/r/{{.Room.Code}}/timer-leave">
-              <button type="submit" class="timer-cancel">Leave focus block</button>
-            </form>
-          {{end}}
-        </article>
-      {{else if not .FocusMode}}
-        <article class="timer-card idle">
-          <p class="eyebrow">Ready room</p>
-          <h2>No active timer.</h2>
-          <form class="settings" method="post" action="/r/{{.Room.Code}}/settings">
-            <label>Focus <input type="number" name="focus_minutes" min="5" max="180" value="{{.Room.FocusMinutes}}"></label>
-            <label>Break <input type="number" name="break_minutes" min="1" max="60" value="{{.Room.BreakMinutes}}"></label>
-            <label>Sessions <input type="number" name="auto_sessions" min="1" max="12" value="{{.Room.AutoSessions}}"></label>
-            <button>Save settings</button>
-          </form>
-          <form method="post" action="/r/{{.Room.Code}}/timer-start"><button class="big-action">Start focus run</button></form>
-        </article>
-      {{end}}
-
-      {{if .FocusMode}}
-        <section class="focus-message">
-          <h2>Focus mode is on.</h2>
-          <p>The todo board is hidden until the focus block ends so junkie does not become the distraction.</p>
-        </section>
-      {{else}}
-        <section class="grid two">
-          <article class="panel">
-            <div class="panel-title">
-              <h2>Room todos</h2>
-              <span>Everything here is public to the room</span>
+      <section class="grid two room-desk-grid">
+        <div class="room-timer-column">
+          {{if .Timer}}
+          <article class="timer-card panel {{.Timer.Phase}}">
+            {{if eq .Timer.Phase "focus"}}
+            <p class="label label-accent">Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}</p>
+            <div class="circle-timer running room-active-ring" role="timer">
+              <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+                <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+                <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+              </svg>
+              <div class="circle-timer-core">
+                <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}" data-total="{{mul .Timer.FocusMinutes 60}}">--:--</div>
+              </div>
             </div>
-            <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos">
-              <input name="text" placeholder="What are you working on?" required>
-              <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
-            </form>
-            {{template "todo-groups-room" (.RoomTodosGrouped.View .Room.Code .User.DisplayName)}}
+            {{if not .Timer.Participant}}
+            <p class="label label-warn">Watching · join on the next break</p>
+            {{end}}
+            {{else}}
+            <p class="label label-warn">Break · next block in <span class="countdown mono" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}">--:--</span></p>
+            <div class="room-ready-time mono">{{.Timer.FocusMinutes}}:00</div>
+            {{if not .Timer.Participant}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
+            {{end}}
+            {{end}}
+            <div class="participant-avatars participant-avatars-sm">
+              {{range .Timer.Participants}}<span class="participant-avatar">{{initial .}}</span>{{end}}
+            </div>
           </article>
-          <article class="panel">
-            <div class="panel-title">
-              <h2>Room controls</h2>
-              <span>Anyone can edit; only creator can delete</span>
-            </div>
+          {{else}}
+          <article class="timer-card panel idle ready-card">
+            <p class="label label-accent">Ready · {{.Room.AutoSessions}} × {{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</p>
+            <div class="room-ready-time mono">{{.Room.FocusMinutes}}:00</div>
+            <form method="post" action="/r/{{.Room.Code}}/timer-start"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
+            <p class="muted room-ready-hint">Everyone in the room can join once it starts.</p>
+          </article>
+          <details class="room-details panel" data-room-section="settings">
+            <summary><span class="label">Timer settings · {{.Room.AutoSessions}}×{{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <form class="settings stack" method="post" action="/r/{{.Room.Code}}/settings">
+              <label>Focus <input type="number" name="focus_minutes" min="5" max="180" value="{{.Room.FocusMinutes}}"></label>
+              <label>Break <input type="number" name="break_minutes" min="1" max="60" value="{{.Room.BreakMinutes}}"></label>
+              <label>Sessions <input type="number" name="auto_sessions" min="1" max="12" value="{{.Room.AutoSessions}}"></label>
+              <button type="submit" class="btn-primary btn-compact">Save</button>
+            </form>
+          </details>
+          <details class="room-details panel" data-room-section="share">
+            <summary><span class="label">Share room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+            <p class="room-share room-share-block" data-room-path="/r/{{.Room.Code}}">
+              <button type="button" class="copy-chip mono room-share-code">junkie.app/r/{{.Room.Code}}</button>
+              <button type="button" class="btn-ghost btn-compact room-share-copy">Copy</button>
+              <span class="room-share-feedback" aria-live="polite"></span>
+            </p>
+          </details>
+          <details class="room-details panel" data-room-section="controls">
+            <summary><span class="label">Room controls</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <p class="muted">During focus, late joiners can watch the countdown but cannot enter the active block. During break, anyone can join the next block.</p>
-            <form method="post" action="/r/{{.Room.Code}}/delete" onsubmit="return confirm('Delete this room for everyone?')">
-              <button class="danger">Delete room</button>
+            <form method="post" action="/r/{{.Room.Code}}/delete" onsubmit="return confirm('Delete \'{{.Room.Name}}\'? This removes it for all {{.MemberCount}} members.')">
+              <button type="submit" class="btn-danger">Delete room</button>
             </form>
-          </article>
-        </section>
-      {{end}}
+          </details>
+          {{end}}
+        </div>
+
+        <article class="panel room-todos-panel">
+          <div class="panel-title">
+            <h2>Room todos</h2>
+            <span class="label label-warn">Public to the room</span>
+          </div>
+          <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos">
+            <input name="text" placeholder="What are you working on?" required>
+            <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
+          </form>
+          {{template "todo-groups-room" (.RoomTodosGrouped.View .Room.Code .User.DisplayName)}}
+        </article>
+      </section>
     </section>
+    {{end}}
     <script>
       (function () {
         const code = '{{.Room.Code}}';
@@ -946,6 +1099,31 @@ const layoutTemplates = `
         }
         sessionStorage.setItem(phaseKey, phase);
 
+        document.querySelectorAll('.room-details').forEach((el) => {
+          const section = el.dataset.roomSection;
+          const key = 'junkie:room:' + code + ':open:' + section;
+          if (localStorage.getItem(key) === '1') el.open = true;
+          el.addEventListener('toggle', () => localStorage.setItem(key, el.open ? '1' : '0'));
+        });
+
+        const renameTrigger = document.querySelector('.room-rename-trigger');
+        const renameForm = document.getElementById('room-rename-form');
+        const nameDisplay = document.getElementById('room-name-display');
+        renameTrigger?.addEventListener('click', () => {
+          nameDisplay?.setAttribute('hidden', '');
+          renameTrigger.setAttribute('hidden', '');
+          renameForm?.removeAttribute('hidden');
+          renameForm?.querySelector('input')?.focus();
+        });
+        document.querySelector('.room-rename-cancel')?.addEventListener('click', () => {
+          renameForm?.setAttribute('hidden', '');
+          nameDisplay?.removeAttribute('hidden');
+          renameTrigger?.removeAttribute('hidden');
+        });
+        renameForm?.querySelector('input')?.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') document.querySelector('.room-rename-cancel')?.click();
+        });
+
         const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + code);
         ws.onmessage = () => setTimeout(() => location.reload(), 200);
       })();
@@ -957,118 +1135,202 @@ const layoutTemplates = `
 const appCSS = `
 :root, [data-theme="light"] {
   color-scheme: light;
-  --ink: #17211b;
-  --muted: #657168;
-  --paper: #f6f3ea;
-  --card: #fffdf6;
-  --line: #dcd3bd;
-  --green: #2f7d4a;
-  --deep: #0e3b2a;
-  --mint: #cde8cf;
-  --amber: #d9952f;
-  --red: #a53d2f;
-  --surface: #fffaf0;
-  --input-bg: #fffaf0;
-  --code-bg: #fff8e5;
-  --notice-border: #ead39a;
-  --notice-bg: #fff2c7;
-  --card-mix: white;
-  --grid-line: rgba(47, 125, 74, .08);
-  --shadow: rgba(23, 33, 27, .08);
-  --shadow-strong: rgba(23, 33, 27, .12);
-  --backdrop: rgba(23, 33, 27, .28);
-  --btn-text: #fff;
-  --focus-glow: rgba(47, 125, 74, .25);
-  --break-glow: rgba(217, 149, 47, .25);
-  --heatmap-0: #ebedf0;
-  --heatmap-1: #9be9a8;
-  --heatmap-2: #40c463;
-  --heatmap-3: #30a14e;
-  --heatmap-4: #216e39;
-  --radius: 5px;
+  --bg: #F2F0E6;
+  --grid-line: rgba(28,35,30,0.05);
+  --surface: #FBFAF3;
+  --surface-2: #F2F0E6;
+  --border: #E1DECD;
+  --border-strong: #C9C5B2;
+  --ink: #1D241F;
+  --muted: #6F766A;
+  --faint: #8A9083;
+  --accent: #1E5C3C;
+  --accent-btn: #1E5C3C;
+  --accent-hover: #174A30;
+  --accent-ink: #F4F6EF;
+  --accent-soft: #EAF0E6;
+  --accent-soft-border: #CFDCC9;
+  --warn: #B3801F;
+  --danger: #A8452F;
+  --heat-0: #E7E5D8; --heat-1: #BFDCC6; --heat-2: #8CC3A0; --heat-3: #55A278; --heat-4: #2C7A52;
+  --backdrop: rgba(9,12,9,0.55);
+  --focus-ring: rgba(30,92,60,0.12);
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
+  --fs-display: 2.25rem;
+  --fs-title: 1.625rem;
+  --fs-card-title: 1.1875rem;
+  --fs-body: 0.9rem;
+  --fs-small: 0.8125rem;
+  --fs-label: 0.65rem;
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --shadow-card: 0 1px 3px rgba(28,35,30,0.05);
+  --shadow-auth: 0 2px 10px rgba(28,35,30,0.06);
+  --shadow-drawer: -16px 0 48px rgba(28,35,30,0.18);
 }
 [data-theme="dark"] {
   color-scheme: dark;
-  --ink: #e4ebe6;
-  --muted: #8fa095;
-  --paper: #0f1411;
-  --card: #1a221d;
-  --line: #2c3830;
-  --green: #4db870;
-  --deep: #8fd9a8;
-  --mint: #1e3a28;
-  --amber: #e8a84a;
-  --red: #d46a5c;
-  --surface: #1e2822;
-  --input-bg: #1e2822;
-  --code-bg: #1e2822;
-  --notice-border: #4a3f28;
-  --notice-bg: #2a2418;
-  --card-mix: #0f1411;
-  --grid-line: rgba(77, 184, 112, .05);
-  --shadow: rgba(0, 0, 0, .35);
-  --shadow-strong: rgba(0, 0, 0, .5);
-  --backdrop: rgba(0, 0, 0, .58);
-  --btn-text: #0f1411;
-  --focus-glow: rgba(77, 184, 112, .18);
-  --break-glow: rgba(232, 168, 74, .16);
-  --heatmap-0: #161b18;
-  --heatmap-1: #0e4429;
-  --heatmap-2: #006d32;
-  --heatmap-3: #26a641;
-  --heatmap-4: #39d353;
-  --radius: 5px;
+  --bg: #121712;
+  --grid-line: rgba(236,235,224,0.045);
+  --surface: #1A211B;
+  --surface-2: #121712;
+  --border: #2A332B;
+  --border-strong: #3A453B;
+  --ink: #ECEBE0;
+  --muted: #99A193;
+  --faint: #6E7568;
+  --accent: #7CC79A;
+  --accent-btn: #2E7D53;
+  --accent-hover: #35905F;
+  --accent-ink: #F0F7F1;
+  --accent-soft: #1E2A20;
+  --accent-soft-border: #2E4A3A;
+  --warn: #D8A84E;
+  --danger: #C86A55;
+  --heat-0: #202920; --heat-1: #274C36; --heat-2: #2F6B47; --heat-3: #3F8F60; --heat-4: #62BC85;
+  --focus-ring: rgba(124,199,154,0.15);
+  --shadow-card: none;
+  --shadow-auth: none;
+  --shadow-drawer: -16px 0 48px rgba(0,0,0,0.4);
 }
 * { box-sizing: border-box; }
+html { font-size: 16px; }
 body {
   margin: 0;
   min-height: 100vh;
   color: var(--ink);
-  background:
+  background-color: var(--bg);
+  background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    var(--paper);
-  background-size: 22px 22px;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 36px 36px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  transition: background-color 150ms ease, color 150ms ease;
 }
-a { color: var(--deep); }
-button, input {
+body.focus-active {
+  background-image: none;
+}
+body.focus-active .topbar {
+  opacity: 0.35;
+  transition: opacity 200ms ease;
+}
+body.focus-active .topbar:hover {
+  opacity: 1;
+}
+.mono, .room-code-input, code {
+  font-family: var(--font-mono);
+}
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 0;
+}
+.label-accent { color: var(--accent); }
+.label-warn { color: var(--warn); }
+.mono-link {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-decoration: none;
+}
+.mono-link:hover { color: var(--accent-hover); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+button, input, select, textarea {
   font: inherit;
 }
 button {
   border: 0;
   border-radius: var(--radius);
-  background: var(--deep);
-  color: var(--btn-text);
-  padding: .8rem 1rem;
   cursor: pointer;
-  font-weight: 750;
+  font-weight: 600;
+  font-size: 0.9375rem;
 }
-button:hover { filter: brightness(1.05); }
-input {
+button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.btn-primary, button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(.todo-action):not(.circle-timer-step):not(.theme-toggle):not(.menu-drawer-close):not(.menu-drawer-trigger):not(.desk-todos-mode):not(.todo-group-toggle):not(.todo-add-plus):not(.room-share-code):not(.copy-chip):not(.room-rename-trigger):not(.focus-todos-pin):not(.banner-dismiss) {
+  min-height: 48px;
+  padding: 0 24px;
+  background: var(--accent-btn);
+  color: var(--accent-ink);
+}
+.btn-primary:hover, button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(.todo-action):not(.circle-timer-step):hover {
+  background: var(--accent-hover);
+}
+.btn-compact { min-height: 44px; padding: 0 18px; font-size: 0.875rem; }
+.btn-ghost, .ghost {
+  min-height: 48px;
+  padding: 0 24px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover, .ghost:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+  filter: none;
+}
+.btn-danger, .danger {
+  min-height: 48px;
+  padding: 0 24px;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.btn-danger:hover, .danger:hover {
+  background: var(--danger);
+  color: var(--accent-ink);
+  filter: none;
+}
+input, select, textarea {
   width: 100%;
-  border: 1px solid var(--line);
+  min-height: 44px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--input-bg);
-  padding: .85rem 1rem;
+  background: var(--surface-2);
+  padding: 0 16px;
   color: var(--ink);
 }
+input::placeholder { color: var(--faint); }
+input:focus {
+  border-color: var(--accent);
+  border-width: 1.5px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  outline: none;
+}
 code {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: .1rem .35rem;
-  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.35rem;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
 }
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem clamp(1rem, 4vw, 3rem);
+  min-height: 68px;
+  padding: 0 clamp(20px, 4vw, 32px);
 }
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: var(--sp-4);
 }
 .theme-toggle {
   display: inline-flex;
@@ -1079,31 +1341,23 @@ code {
   padding: 0;
   background: transparent;
   color: var(--muted);
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  line-height: 0;
+  min-height: 0;
 }
-.theme-toggle:hover {
-  color: var(--ink);
-  filter: none;
-  border-color: color-mix(in srgb, var(--green) 45%, var(--line));
-}
-.theme-toggle svg {
-  width: 1rem;
-  height: 1rem;
-}
-[data-theme="light"] .theme-icon-dark,
-[data-theme="dark"] .theme-icon-light {
-  display: none;
-}
+.theme-toggle:hover { color: var(--ink); border-color: var(--border-strong); filter: none; }
+.theme-toggle svg { width: 1rem; height: 1rem; }
+[data-theme="light"] .theme-icon-dark, [data-theme="dark"] .theme-icon-light { display: none; }
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: .65rem;
+  gap: 0.65rem;
   color: var(--ink);
   text-decoration: none;
-  font-weight: 900;
-  letter-spacing: -.04em;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 1.125rem;
+  letter-spacing: -0.02em;
 }
 .brand-mark {
   display: grid;
@@ -1111,44 +1365,58 @@ code {
   width: 2rem;
   height: 2rem;
   border-radius: 40% 60% 50% 50%;
-  background: var(--deep);
-  color: var(--paper);
+  background: var(--accent-btn);
+  color: var(--accent-ink);
+  font-family: var(--font-serif);
+  font-weight: 600;
 }
-.nav {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
+.topbar-user {
   color: var(--muted);
-}
-.nav a {
-  color: var(--deep);
-  text-decoration: none;
-  font-weight: 700;
-}
-.nav-cta {
-  border: 1px solid var(--deep);
-  border-radius: var(--radius);
-  padding: .45rem .85rem;
-}
-.link-button, .ghost {
-  background: transparent;
-  color: var(--deep);
-  padding: .25rem .4rem;
+  font-size: var(--fs-small);
+  font-weight: 500;
 }
 .page {
-  width: min(1120px, calc(100% - 2rem));
+  width: min(1400px, 100%);
   margin: 0 auto 4rem;
+  padding: 0;
+}
+.page:has(.desk-shell) { max-width: none; }
+.context-banner {
+  margin: var(--sp-3) clamp(20px, 4vw, 64px) 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft-border);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-size: var(--fs-small);
+}
+.context-banner-dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.banner-dismiss {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0;
+  min-height: 0;
 }
 .auth-card, .panel, .timer-card {
-  background: color-mix(in srgb, var(--card) 92%, var(--card-mix));
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: 0 24px 80px var(--shadow);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
 }
 .auth-card {
-  max-width: 520px;
-  margin: 8vh auto;
-  padding: clamp(1.5rem, 5vw, 3rem);
+  max-width: 420px;
+  margin: 36px auto 0;
+  padding: 32px 36px 36px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-auth);
 }
 .auth-card-top {
   position: relative;
@@ -1156,7 +1424,7 @@ code {
   align-items: center;
   justify-content: center;
   min-height: 2rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--sp-6);
 }
 .auth-back {
   position: absolute;
@@ -1172,369 +1440,422 @@ code {
   text-decoration: none;
   border-radius: var(--radius);
 }
-.auth-back:hover {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--muted) 12%, transparent);
-}
-.auth-back svg {
-  width: 1.25rem;
-  height: 1.25rem;
-}
-.auth-brand {
-  display: flex;
-  justify-content: center;
+.auth-back:hover { color: var(--ink); background: var(--surface-2); }
+.auth-back svg { width: 1.25rem; height: 1.25rem; }
+.auth-brand { display: flex; justify-content: center; }
+.auth-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--sp-4);
+  text-align: center;
 }
 .auth-form label {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--sp-2);
+  font-weight: 600;
+  font-size: var(--fs-small);
+}
+.auth-switch { margin: var(--sp-5) 0 0; text-align: center; font-size: var(--fs-small); }
+.auth-switch a { font-weight: 600; }
+h1, h2, p { margin-top: 0; }
+h1, h2 {
+  font-family: var(--font-serif);
   font-weight: 600;
 }
-.auth-form input {
-  padding: 0.5rem 1rem;
-}
-.auth-switch {
-  margin: 1.25rem 0 0;
-  text-align: center;
-  font-size: 0.92rem;
-}
-.auth-switch a {
-  font-weight: 700;
-}
-h1, h2, p { margin-top: 0; }
-h1 {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2.35rem, 6vw, 5rem);
-  line-height: .92;
-  letter-spacing: -.07em;
-}
-h2 {
-  font-size: 1.15rem;
-  letter-spacing: -.03em;
-}
+h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  letter-spacing: .16em;
-  font-size: .74rem;
-  color: var(--green);
-  font-weight: 900;
-}
-.muted, .empty { color: var(--muted); }
-.notice {
-  border: 1px solid var(--notice-border);
-  border-radius: var(--radius);
-  background: var(--notice-bg);
-  padding: .9rem 1rem;
-}
-.stack { display: grid; gap: 1rem; }
-.dashboard-hero, .room-header {
-  display: grid;
-  grid-template-columns: 1fr minmax(280px, 420px);
-  gap: 1.25rem;
-  align-items: end;
-  margin: 2rem 0;
-}
-.room-create, .room-join, .inline-form {
-  display: flex;
-  gap: .6rem;
-  align-items: stretch;
-}
-.menu-drawer-section-label {
-  font-size: .74rem;
-  text-transform: uppercase;
-  letter-spacing: .12em;
-  color: var(--muted);
-  font-weight: 800;
-  margin: 0;
-}
-.menu-drawer .room-create,
-.menu-drawer .room-join {
-  margin-bottom: 0;
-}
-.menu-drawer .room-create input,
-.menu-drawer .room-join input {
-  padding: 0.5rem 1rem;
-  height: 2.5rem;
-  box-sizing: border-box;
-}
-.menu-drawer .room-create button,
-.menu-drawer .room-join button {
-  flex: 0 0 auto;
-  height: 2.5rem;
-  padding: 0.5rem 1rem;
-  box-sizing: border-box;
-}
-.room-share {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .5rem;
-}
-.room-share-code {
-  font-size: .92rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  text-transform: uppercase;
-  background: transparent;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  padding: .2rem .45rem;
-  color: inherit;
-  cursor: pointer;
-}
-.room-share-code:hover,
-.room-share.is-copied .room-share-code {
-  border-color: var(--accent);
-}
-.room-share.is-copied .room-share-code {
   color: var(--accent);
 }
-.room-share-copy {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--line);
+.muted, .empty { color: var(--muted); font-size: var(--fs-small); }
+.notice-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   border-radius: var(--radius);
-  padding: .2rem;
-  width: 1.85rem;
-  height: 1.85rem;
-  cursor: pointer;
-  flex-shrink: 0;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
 }
-.room-share-copy svg {
-  width: 1rem;
-  height: 1rem;
-}
-.room-share-copy:hover,
-.room-share.is-copied .room-share-copy {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.room-share-feedback {
-  font-size: .85rem;
-  font-weight: 700;
-  color: var(--accent);
-  min-width: 0;
-}
-.room-code-input {
-  text-transform: uppercase;
-}
-.room-invite-card h1 {
-  margin: .35rem 0 .75rem;
-}
-.room-invite-actions {
-  margin-top: 1rem;
-}
-.inline-form.todo-add-form {
-  align-items: stretch;
-}
-.inline-form.todo-add-form input,
-.inline-form.todo-add-form .todo-add-plus {
-  box-sizing: border-box;
-  height: 2.5rem;
-}
-.inline-form.todo-add-form input {
-  padding: 0.5rem 1rem;
-}
-.inline-form input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.grid.two {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-}
-.panel {
-  padding: 1.25rem;
-  margin-bottom: 1rem;
-  border-radius: var(--radius);
-}
+.stack { display: grid; gap: var(--sp-4); }
+.panel { padding: 20px 22px; margin-bottom: var(--sp-4); }
 .panel-title {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 1rem;
-  padding-bottom: .75rem;
+  align-items: center;
+  gap: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-3);
 }
-.panel-title span { color: var(--muted); font-size: .9rem; }
+.panel-title h2 { margin: 0; font-size: var(--fs-card-title); }
+.inline-form, .room-create, .room-join {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+.inline-form.todo-add-form input,
+.inline-form.todo-add-form .todo-add-plus { height: 44px; box-sizing: border-box; }
+.inline-form input { flex: 1 1 auto; min-width: 0; }
+.grid.two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+.desk-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 68px);
+}
+.desk-shell-focus .focus-desk { flex: 1 1 auto; min-height: 0; }
+.desk-room-bar {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 var(--sp-3);
+}
+.room-membership-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: var(--fs-small);
+}
+.room-membership-pill:hover { border-color: var(--border-strong); }
+.room-membership-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.room-membership-label { color: var(--accent); }
+.room-membership-name { color: var(--ink); font-weight: 500; }
+.desk-grid {
+  grid-template-columns: 1fr 400px;
+  gap: 48px;
+  padding: 20px clamp(20px, 5vw, 64px) 0;
+  align-items: start;
+  flex: 1 1 auto;
+}
+.desk-ring-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.desk-ring-hint { text-align: center; }
+.desk-join-link {
+  margin: var(--sp-4) 0 0;
+  text-align: right;
+}
+.desk-todos-panel {
+  display: flex;
+  flex-direction: column;
+  height: min(32rem, calc(100vh - 10rem));
+  margin-bottom: 0;
+}
+.desk-todos-head { align-items: center; overflow: visible; }
+.desk-todos-switch { position: relative; z-index: 2; min-width: 0; }
+.desk-todos-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: var(--fs-body);
+  min-height: 44px;
+}
+.desk-todos-chevron { width: 0.9rem; height: 0.9rem; color: var(--muted); }
+.desk-todos-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  left: 0;
+  z-index: 20;
+  min-width: 14rem;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  gap: var(--sp-1);
+}
+.desk-todos-menu[hidden] { display: none !important; }
+.desk-todos-menu button {
+  display: block;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--fs-small);
+  text-align: left;
+  min-height: 0;
+}
+.desk-todos-menu button:hover { background: var(--surface-2); }
+.desk-todos-menu button.is-active { background: var(--accent-soft); font-weight: 600; }
+.desk-todos-menu button .mono { color: var(--faint); margin-left: var(--sp-2); }
+.desk-todos-hint { flex-shrink: 0; }
+.desk-todos-view { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.desk-todos-view[hidden] { display: none !important; }
+.desk-todos-panel .todo-groups { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .todo-list {
   list-style: none;
-  margin: 1rem 0 0;
+  margin: var(--sp-4) 0 0;
   padding: 0;
   display: grid;
-  gap: 0.25rem;
-  align-content: start;
+  gap: var(--sp-2);
 }
 .todo-list li {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: .5rem;
-  padding: .2rem .35rem;
-  border-radius: var(--radius);
+  gap: var(--sp-3);
+  min-height: 40px;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+.todo-list li:hover:not(.empty) { background: var(--surface-2); }
+.todo-list li.done span { color: var(--faint); text-decoration: line-through; }
+.todo-list li.removed span { color: var(--danger); }
+.check {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
   background: transparent;
+  color: var(--ink);
+  font-size: 0.7rem;
+  display: grid;
+  place-items: center;
 }
-.todo-list li:hover:not(.empty) {
-  background: color-mix(in srgb, var(--muted) 12%, transparent);
-}
-.todo-list li.done span {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-.todo-list li.removed span,
-.todo-list li.removed span strong {
-  color: var(--red);
-  text-decoration: none;
-}
-.todo-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin: 0.5rem 0 0;
-}
-.todo-group-toggle {
-  display: flex;
-  align-items: center;
-  gap: .35rem;
-  width: 100%;
-  padding: .35rem .45rem;
-  border: 0;
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--muted) 8%, transparent);
-  color: var(--muted);
-  font: inherit;
-  font-size: .85rem;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-}
-.todo-group-toggle:hover {
-  background: color-mix(in srgb, var(--muted) 14%, transparent);
-}
-.todo-group-chevron {
-  width: .85rem;
-  height: .85rem;
-  flex-shrink: 0;
-  transition: transform .15s ease;
-}
-.todo-group.is-collapsed .todo-group-chevron {
-  transform: rotate(-90deg);
-}
-.todo-group.is-collapsed .todo-list {
-  display: none;
-}
-.todo-group .todo-list {
-  margin-top: 0.25rem;
+.todo-list li.done .check {
+  background: var(--accent-btn);
+  border-color: var(--accent-btn);
+  color: var(--accent-ink);
 }
 .todo-action {
   background: transparent;
   color: var(--muted);
-  padding: .2rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: var(--radius);
-  flex-shrink: 0;
+  padding: var(--sp-1);
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  border-radius: var(--radius-sm);
+  opacity: 0;
 }
-.todo-action svg {
-  width: 1.1rem;
-  height: 1.1rem;
-}
-.todo-action:hover { filter: none; }
-.todo-remove:hover {
-  color: var(--deep);
-  background: color-mix(in srgb, var(--mint) 55%, transparent);
-}
-.todo-delete {
-  color: var(--red);
-}
-.todo-delete:hover {
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-}
-.check {
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  background: var(--mint);
-  color: var(--deep);
-}
+.todo-list li:hover .todo-action, .todo-list li:focus-within .todo-action { opacity: 1; }
+.todo-action svg { width: 1rem; height: 1rem; }
+.todo-delete { color: var(--danger); }
 .todo-add-plus {
   flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: auto;
-  min-width: 2.5rem;
-  padding: 0.5rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
   font-size: 1.2rem;
   line-height: 1;
   font-weight: 500;
 }
-.room-list { display: grid; gap: .65rem; }
-.room-row {
-  display: grid;
-  gap: .25rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 1rem;
-  color: var(--ink);
-  text-decoration: none;
-  background: var(--surface);
-}
-.room-row span { color: var(--muted); }
-.topbar-user {
-  color: var(--muted);
-  font-size: .9rem;
-  font-weight: 600;
-}
-.menu-drawer-logout {
-  margin-top: auto;
-  padding-top: .5rem;
-  border-top: 1px solid var(--line);
-}
-.menu-drawer-logout button {
+.todo-groups { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
+.todo-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   width: 100%;
+  padding: var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--deep);
-  border: 1px solid var(--line);
-  font-weight: 700;
+  color: var(--faint);
+  text-align: left;
+  min-height: 0;
 }
-.menu-drawer-logout button:hover {
-  filter: none;
-  border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
-  background: var(--surface);
+.todo-group-chevron { width: 0.85rem; height: 0.85rem; transition: transform 120ms ease; }
+.todo-group.is-collapsed .todo-group-chevron { transform: rotate(-90deg); }
+.todo-group.is-collapsed .todo-list { display: none; }
+.circle-timer-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6) 0;
 }
-.menu-drawer-trigger {
+.circle-timer {
+  position: relative;
+  aspect-ratio: 1;
   display: grid;
-  gap: 5px;
-  width: 2.5rem;
-  height: 2.5rem;
-  padding: .55rem;
-  background: transparent;
-  color: var(--ink);
-  border: none;
-  border-radius: var(--radius);
+  place-items: center;
   cursor: pointer;
-  flex-shrink: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
 }
-.menu-drawer-trigger:hover {
-  filter: none;
-  background: color-mix(in srgb, var(--card) 70%, var(--surface));
+.circle-timer.idle { width: min(300px, 82vw); }
+.circle-timer.running, .room-focus-ring, .room-active-ring { width: min(340px, 90vw); cursor: default; }
+.circle-timer.idle:hover .circle-timer-progress { stroke: var(--accent-hover); }
+.circle-timer-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
 }
-.menu-bar {
-  display: block;
-  height: 2px;
-  background: currentColor;
-  border-radius: 1px;
+.circle-timer-track { stroke: var(--border); }
+.circle-timer.idle .circle-timer-track,
+.circle-timer.idle .circle-timer-progress { stroke-width: 7; }
+.circle-timer.running .circle-timer-track,
+.circle-timer.running .circle-timer-progress,
+.room-focus-ring .circle-timer-track,
+.room-focus-ring .circle-timer-progress,
+.room-active-ring .circle-timer-track,
+.room-active-ring .circle-timer-progress { stroke-width: 5; }
+.circle-timer-progress {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 300ms linear, stroke 200ms ease;
 }
+.circle-timer-core {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  pointer-events: none;
+}
+.circle-timer-time { pointer-events: auto; }
+.circle-timer-time input {
+  width: 3.5ch;
+  min-width: 3.5ch;
+  min-height: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 3.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+  box-shadow: none;
+}
+.circle-timer-time input:focus { box-shadow: none; border: none; }
+.circle-timer-time.digits-3 input { font-size: 3rem; }
+.circle-timer-countdown, .countdown {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+.circle-timer-countdown { font-size: 5.125rem; }
+.countdown { font-size: 4.875rem; }
+.circle-timer-step {
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 1.1rem;
+  pointer-events: auto;
+}
+.circle-timer-step:hover { border-color: var(--border-strong); color: var(--ink); filter: none; }
+.timer-cancel { margin-top: var(--sp-4); }
+.focus-desk {
+  position: relative;
+  min-height: calc(100vh - 68px);
+  display: grid;
+  place-items: center;
+}
+.focus-desk-main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.focus-todos-toggle {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 21;
+  padding: var(--sp-4) var(--sp-2);
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--surface);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  min-height: 0;
+}
+.focus-todos-toggle.peek-pulse { animation: peek-pulse 1.2s ease 2; }
+@keyframes peek-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.focus-todos-toggle.is-open { right: min(320px, 85vw); color: var(--accent); }
+.focus-todos-panel {
+  position: fixed;
+  top: 25vh;
+  right: 0;
+  height: 50vh;
+  width: min(320px, 85vw);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  padding: var(--sp-5);
+  transform: translateX(100%);
+  transition: transform 200ms ease-out;
+}
+.focus-todos-panel.is-open { transform: translateX(0); }
+.focus-todos-pin {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  width: 2rem;
+  height: 2rem;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.focus-todos-pin.is-pinned { color: var(--accent); border-color: var(--accent); }
+.focus-todos-pin svg { width: 0.9rem; height: 0.9rem; }
 .menu-drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -1546,682 +1867,321 @@ h2 {
   top: 0;
   right: 0;
   z-index: 100;
-  width: min(380px, 92vw);
+  width: min(380px, 100%);
   height: 100vh;
-  padding: 1.25rem;
+  padding: var(--sp-5);
   overflow-y: auto;
-  background: var(--card);
-  border-left: 1px solid var(--line);
-  box-shadow: -16px 0 48px var(--shadow-strong);
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-drawer);
   transform: translateX(100%);
-  transition: transform .28s ease;
-  display: grid;
-  gap: 1rem;
-  align-content: start;
+  transition: transform 200ms ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
 }
-.menu-drawer.open {
-  transform: translateX(0);
-}
+[data-theme="dark"] .menu-drawer { background: #161D17; }
+.menu-drawer.open { transform: translateX(0); }
 .menu-drawer-head {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: .25rem;
-  padding-bottom: .75rem;
-  border-bottom: 1px solid var(--line);
-}
-.menu-drawer-head h2 {
-  margin: 0;
 }
 .menu-drawer-close {
   background: transparent;
   color: var(--muted);
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   line-height: 1;
-  padding: .15rem .45rem;
+  padding: var(--sp-1);
+  min-height: 0;
   border: 0;
 }
-.menu-drawer-close:hover {
-  color: var(--deep);
-  filter: none;
-}
-.menu-drawer-nav {
-  display: grid;
-  gap: .5rem;
-}
-.menu-drawer-nav a {
+.drawer-identity { display: grid; gap: var(--sp-4); }
+.drawer-identity-user {
   display: flex;
   align-items: center;
-  gap: .5rem;
-  padding: .75rem 1rem;
-  border: 1px solid var(--line);
+  gap: var(--sp-4);
+}
+.drawer-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.drawer-profile-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+.drawer-name { font-family: var(--font-serif); font-size: 1.125rem; font-weight: 600; }
+.drawer-profile-link { text-decoration: none; display: inline-block; margin-top: var(--sp-1); }
+.drawer-guest-hint { font-size: var(--fs-label); }
+.drawer-section-label { margin: 0; }
+.drawer-signin { width: 100%; text-align: center; text-decoration: none; display: grid; place-items: center; }
+.drawer-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+.drawer-details summary, .room-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 14px 18px;
+  cursor: pointer;
+  list-style: none;
+}
+.drawer-details summary::-webkit-details-marker, .room-details summary::-webkit-details-marker { display: none; }
+.drawer-chevron { width: 1rem; height: 1rem; flex-shrink: 0; transition: transform 120ms ease; color: var(--muted); }
+.drawer-details[open] .drawer-chevron, .room-details[open] .drawer-chevron { transform: rotate(180deg); }
+.drawer-details form, .room-details > :not(summary) { padding: 0 18px 18px; }
+.room-list { display: grid; gap: var(--sp-2); }
+.room-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 44px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--ink);
   text-decoration: none;
-  font-weight: 700;
-  background: var(--surface);
+  background: transparent;
 }
-.menu-drawer-nav a svg {
-  width: 1rem;
-  height: 1rem;
-  flex-shrink: 0;
+.room-row:hover { background: var(--surface-2); }
+.room-row.is-here {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-border);
 }
-.menu-drawer-nav a:hover {
-  border-color: color-mix(in srgb, var(--deep) 35%, var(--line));
+.room-row-main { display: grid; gap: 2px; min-width: 0; }
+.room-row strong { font-weight: 600; font-size: var(--fs-body); }
+.room-row-code { font-size: 0.75rem; color: var(--faint); }
+.here-tag { color: var(--accent); flex-shrink: 0; }
+.menu-drawer-logout { margin-top: auto; padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.menu-drawer-logout button { width: 100%; }
+.menu-drawer .room-create input, .menu-drawer .room-join input { min-height: 40px; }
+.menu-drawer-trigger {
+  display: grid;
+  gap: 5px;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0.55rem;
+  background: transparent;
+  color: var(--ink);
+  border: none;
+  min-height: 0;
 }
-.profile-page {
-  max-width: 720px;
-  margin: 2rem auto 0;
+.menu-bar { display: block; height: 2px; background: currentColor; border-radius: 1px; }
+body.menu-drawer-open { overflow: hidden; }
+.room-shell { padding: 0 clamp(20px, 4vw, 32px); }
+.room-header-new {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-8);
+  padding-top: var(--sp-4);
 }
-.profile-page h1 {
-  font-size: 1.5rem;
-  margin: 0;
+.room-name-display, .room-focus-name {
+  font-family: var(--font-serif);
+  font-size: var(--fs-display);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  margin: var(--sp-2) 0 0;
 }
+.room-focus-name {
+  font-size: 1.0625rem;
+  font-style: italic;
+  font-weight: 500;
+  color: var(--muted);
+}
+.room-title-row { display: flex; align-items: center; gap: var(--sp-3); }
+.room-rename-trigger {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  width: 2rem;
+  height: 2rem;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.room-rename-form { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
+.room-eyebrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.room-desk-grid { grid-template-columns: 1fr 400px; gap: 48px; align-items: start; }
+.room-timer-column { display: grid; gap: var(--sp-4); }
+.ready-card { text-align: center; padding: var(--sp-8) var(--sp-6); }
+.room-ready-time {
+  font-family: var(--font-mono);
+  font-size: 3.5rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  margin: var(--sp-4) 0;
+}
+.room-ready-hint { font-size: var(--fs-small); margin-top: var(--sp-4); }
+.room-details { margin: 0; }
+.big-action { width: 100%; max-width: 280px; }
+.room-focus-shell {
+  min-height: calc(100vh - 68px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-8) var(--sp-5);
+  text-align: center;
+}
+.participant-avatars {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.participant-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+}
+.participant-avatars-sm .participant-avatar { width: 28px; height: 28px; font-size: 0.7rem; }
+.room-members-meta { text-align: right; display: grid; gap: var(--sp-2); justify-items: end; }
+.copy-chip, .room-share-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  text-transform: uppercase;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--sp-1) var(--sp-3);
+  color: var(--accent);
+  cursor: pointer;
+  min-height: 0;
+}
+.room-share.is-copied .copy-chip, .room-share.is-copied .room-share-code {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.room-share-feedback { font-size: var(--fs-small); font-weight: 600; color: var(--accent); }
+.settings { display: grid; gap: var(--sp-3); }
+.settings label { display: grid; gap: var(--sp-2); font-size: var(--fs-small); font-weight: 600; }
+.profile-page { max-width: 720px; margin: var(--sp-8) auto 0; padding: var(--sp-6); }
+.profile-page h1 { font-size: var(--fs-card-title); margin: 0; }
 .profile-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .5rem;
-  margin-bottom: 1rem;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
 .profile-stats div {
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: .75rem;
-  background: var(--surface);
+  padding: var(--sp-4);
+  background: var(--surface-2);
 }
-.profile-stats strong,
-.profile-stats span {
-  display: block;
-}
-.profile-stats strong {
-  font-size: 1.25rem;
-  line-height: 1;
-}
-.profile-stats span {
-  color: var(--muted);
-  font-size: .78rem;
-  margin-top: .25rem;
-}
-.profile-follow-stub {
-  margin-top: 1rem;
-  font-size: .86rem;
-}
-body.menu-drawer-open {
-  overflow: hidden;
-}
-.heatmap-chart {
-  width: 100%;
-}
-.heatmap-summary {
-  color: var(--muted);
-  font-size: .88rem;
-  margin: 0 0 .75rem;
-}
-.heatmap-layout {
-  display: flex;
-  gap: .35rem;
-  width: 100%;
-}
+.profile-stats strong { font-family: var(--font-serif); font-size: 2rem; display: block; line-height: 1; }
+.profile-stats span { color: var(--muted); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.1em; }
+.profile-follow-stub { margin-top: var(--sp-4); font-size: var(--fs-small); }
+.heatmap-chart { width: 100%; }
+.heatmap-summary { color: var(--muted); font-size: var(--fs-small); margin: 0 0 var(--sp-3); }
+.heatmap-layout { display: flex; gap: var(--sp-2); width: 100%; }
 .heatmap-dow {
   display: grid;
   grid-template-rows: repeat(7, 1fr);
   gap: 3px;
-  font-size: .65rem;
+  font-size: 0.65rem;
   color: var(--muted);
   padding-top: 1.15rem;
   width: 1.75rem;
-  flex-shrink: 0;
 }
-.heatmap-dow span {
-  display: flex;
-  align-items: center;
-  line-height: 1;
-}
-.heatmap-main {
-  flex: 1;
-  min-width: 0;
-}
+.heatmap-main { flex: 1; min-width: 0; }
 .heatmap-months {
   display: grid;
   grid-template-columns: repeat(var(--weeks), minmax(0, 1fr));
   gap: 3px;
-  font-size: .68rem;
+  font-size: 0.68rem;
   color: var(--muted);
   margin-bottom: 4px;
-  min-height: 1rem;
 }
-.heatmap-month {
-  grid-column: calc(var(--col) + 1);
-}
-.heatmap-wrap {
-  overflow-x: auto;
-  width: 100%;
-  padding-bottom: .25rem;
-}
+.heatmap-wrap { overflow-x: auto; width: 100%; }
 .heatmap {
   display: grid;
   grid-template-rows: repeat(7, minmax(0, 1fr));
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   gap: 3px;
-  width: 100%;
   min-height: 108px;
 }
 .heatmap-legend {
   display: flex;
   align-items: center;
-  gap: .25rem;
+  gap: var(--sp-2);
   justify-content: flex-end;
-  margin-top: .65rem;
-  font-size: .68rem;
+  margin-top: var(--sp-3);
+  font-size: 0.68rem;
   color: var(--muted);
-}
-.heatmap-legend .cell {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
 }
 .cell {
   aspect-ratio: 1;
   width: 100%;
-  border-radius: var(--radius);
-  background: var(--heatmap-0);
-}
-.cell-empty {
-  visibility: hidden;
-}
-.cell.l0 { background: var(--heatmap-0); }
-.cell.l1 { background: var(--heatmap-1); }
-.cell.l2 { background: var(--heatmap-2); }
-.cell.l3 { background: var(--heatmap-3); }
-.cell.l4 { background: var(--heatmap-4); }
-.circle-timer-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  justify-content: center;
-  padding: 1.5rem 0 2.5rem;
-  margin-bottom: 0;
-}
-.desk-grid .circle-timer-wrap {
-  padding: 1rem 0;
-}
-.desk-shell {
-  display: flex;
-  flex-direction: column;
-  min-height: calc(100vh - 10rem);
-}
-.desk-shell-focus .focus-desk {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.desk-room-bar {
-  flex-shrink: 0;
-  display: flex;
-  justify-content: center;
-  padding: 0 0 .75rem;
-}
-.room-membership-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: .45rem;
-  padding: .35rem .75rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--muted);
-  text-decoration: none;
-  font-size: .82rem;
-  font-weight: 600;
-  line-height: 1.2;
-}
-.room-membership-pill:hover {
-  color: var(--deep);
-  border-color: color-mix(in srgb, var(--green) 45%, var(--line));
-}
-.room-membership-label {
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  font-size: .68rem;
-  font-weight: 800;
-  color: var(--green);
-}
-.room-membership-name {
-  color: var(--ink);
-  font-weight: 700;
-  max-width: 16rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.room-membership-more {
-  color: var(--muted);
-  font-size: .78rem;
-  font-weight: 700;
-}
-.desk-grid {
-  flex: 1 1 auto;
-  align-items: center;
-  min-height: 0;
-}
-.desk-todos-panel {
-  display: flex;
-  flex-direction: column;
-  height: min(32rem, calc(100vh - 10rem));
-  margin-bottom: 0;
-}
-.desk-todos-panel .panel-title,
-.desk-todos-panel .inline-form {
-  flex-shrink: 0;
-}
-.desk-todos-head {
-  align-items: center;
-  overflow: visible;
-}
-.desk-todos-switch {
-  position: relative;
-  min-width: 0;
-  z-index: 2;
-}
-.desk-todos-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: .35rem;
-  padding: .2rem .45rem;
-  margin: -.2rem 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--paper);
-  color: var(--ink);
-  font: inherit;
-  font-weight: 700;
-  font-size: 1rem;
-  line-height: 1.2;
-  cursor: pointer;
-}
-.desk-todos-mode:hover {
-  background: color-mix(in srgb, var(--muted) 10%, var(--paper));
-}
-.desk-todos-chevron {
-  width: .9rem;
-  height: .9rem;
-  flex-shrink: 0;
-  color: var(--muted);
-}
-.desk-todos-menu {
-  position: absolute;
-  top: calc(100% + .35rem);
-  left: 0;
-  z-index: 20;
-  min-width: 11rem;
-  max-width: min(18rem, 70vw);
-  padding: .25rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--paper);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 12%, transparent);
-  display: grid;
-  gap: .15rem;
-}
-.desk-todos-menu[hidden] {
-  display: none !important;
-}
-.desk-todos-menu button {
-  display: block;
-  width: 100%;
-  padding: .45rem .55rem;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: .9rem;
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.desk-todos-menu button:hover {
-  background: color-mix(in srgb, var(--muted) 12%, transparent);
-}
-.desk-todos-menu button.is-active {
-  background: color-mix(in srgb, var(--mint) 45%, transparent);
-  font-weight: 700;
-}
-.desk-todos-hint {
-  color: var(--muted);
-  font-size: .9rem;
-  flex-shrink: 0;
-}
-.desk-todos-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.desk-todos-view[hidden] {
-  display: none !important;
-}
-.desk-todos-panel .todo-groups {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  margin-top: 0.5rem;
-}
-.desk-todos-panel .todo-group .todo-list {
-  overflow: visible;
-}
-.timer-cancel {
-  background: var(--red);
-  color: var(--btn-text);
-  border: 0;
-  font-weight: 700;
-  font-size: .95rem;
-  padding: .65rem 1.25rem;
-}
-.timer-cancel:hover {
-  color: var(--btn-text);
-  filter: brightness(1.08);
-}
-.work-map-collapsible {
-  position: relative;
-  flex-shrink: 0;
-  margin-top: auto;
-  margin-bottom: 0;
-  z-index: 5;
-}
-.work-map-collapsible .work-map-panel {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
-  margin-top: 0;
-  margin-bottom: .75rem;
-  max-height: min(55vh, 28rem);
-  overflow-y: auto;
-}
-.work-map-link {
-  display: inline-block;
-  cursor: pointer;
-  color: var(--muted);
-  font-weight: 700;
-  font-size: .92rem;
-  list-style: none;
-}
-.work-map-collapsible summary {
-  list-style: none;
-}
-.work-map-collapsible summary::-webkit-details-marker {
-  display: none;
-}
-.work-map-link:hover {
-  color: var(--deep);
-}
-.circle-timer {
-  position: relative;
-  width: min(300px, 82vw);
-  aspect-ratio: 1;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  font: inherit;
-  color: inherit;
-  overflow: visible;
-}
-.circle-timer.idle:hover .circle-timer-progress { stroke: var(--deep); }
-.circle-timer-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  transform: rotate(-90deg);
-}
-.circle-timer-track {
-  stroke: var(--line);
-}
-.circle-timer-progress {
-  stroke: var(--green);
-  stroke-linecap: round;
-  transition: stroke-dashoffset .35s ease, stroke .2s ease;
-}
-.circle-timer.running .circle-timer-progress { stroke: var(--deep); }
-.circle-timer.running { cursor: default; }
-.circle-timer-core {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  overflow: visible;
-}
-.circle-timer-time {
-  display: grid;
-  justify-items: center;
-  pointer-events: auto;
-  overflow: visible;
-}
-.circle-timer-time input {
-  width: 3.5ch;
-  min-width: 3.5ch;
-  text-align: center;
-  font-size: clamp(2rem, 8vw, 2.6rem);
-  font-weight: 950;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -.04em;
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: var(--ink);
-  overflow: visible;
-  -moz-appearance: textfield;
-}
-.circle-timer-time.digits-3 input {
-  font-size: clamp(1.7rem, 6.5vw, 2.1rem);
-  letter-spacing: -.03em;
-}
-.circle-timer-time input::-webkit-outer-spin-button,
-.circle-timer-time input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.circle-timer-suffix {
-  font-size: .78rem;
-  color: var(--muted);
-  font-weight: 600;
-  letter-spacing: .04em;
-}
-.circle-timer-countdown {
-  font-variant-numeric: tabular-nums;
-  font-size: clamp(2rem, 9vw, 2.6rem);
-  font-weight: 950;
-  letter-spacing: -.06em;
-  line-height: 1;
-}
-.circle-timer-step {
-  width: 2.1rem;
-  height: 2.1rem;
-  padding: 0;
-  border-radius: var(--radius);
-  background: var(--mint);
-  color: var(--deep);
-  font-size: 1.2rem;
-  line-height: 1;
-  font-weight: 800;
-  pointer-events: auto;
-  flex-shrink: 0;
-}
-.circle-timer-step:hover { filter: brightness(1.04); }
-.circle-timer-hint {
-  position: absolute;
-  bottom: -1.75rem;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: .78rem;
-  color: var(--muted);
-  letter-spacing: .02em;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.timer-card {
-  padding: clamp(1.25rem, 4vw, 2rem);
-  margin-bottom: 1rem;
-  position: relative;
-  overflow: hidden;
-}
-.timer-card.focus {
-  background: radial-gradient(circle at top right, var(--focus-glow), transparent 36%), var(--card);
-}
-.timer-card.break {
-  background: radial-gradient(circle at top right, var(--break-glow), transparent 36%), var(--card);
-}
-.countdown {
-  font-variant-numeric: tabular-nums;
-  font-size: clamp(4rem, 18vw, 11rem);
-  line-height: .9;
-  letter-spacing: -.08em;
-  font-weight: 950;
-}
-.settings {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: .7rem;
-  align-items: end;
-}
-.settings label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  font-weight: 600;
-}
-.settings input {
-  box-sizing: border-box;
-  height: 2.5rem;
-  padding: 0.5rem 1rem;
-}
-.settings button {
-  height: 2.5rem;
-  padding: 0.5rem 1rem;
-}
-.big-action { margin-top: 1rem; background: var(--green); }
-.danger { background: var(--red); }
-.focus-shell {
-  min-height: calc(100vh - 10rem);
-  display: grid;
-  align-content: center;
-}
-.focus-desk {
-  position: relative;
-  min-height: calc(100vh - 10rem);
-  display: grid;
-  place-items: center;
-}
-.focus-desk-main {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.focus-todos-toggle {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 21;
-  padding: .65rem .45rem;
-  border: 1px solid var(--line);
-  border-right: 0;
-  border-radius: var(--radius) 0 0 var(--radius);
-  background: var(--card);
-  color: var(--muted);
-  font-size: .78rem;
-  font-weight: 700;
-  letter-spacing: .04em;
-  cursor: pointer;
-  transition: right .25s ease, color .15s ease;
-}
-.focus-todos-toggle.is-open {
-  right: min(320px, 85vw);
-  color: var(--deep);
-}
-.focus-todos-toggle:hover {
-  color: var(--deep);
-}
-.focus-todos-panel {
-  position: fixed;
-  top: 25vh;
-  right: 0;
-  height: 50vh;
-  max-height: calc(100vh - 2rem);
-  width: min(320px, 85vw);
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-right: none;
-  border-radius: var(--radius) 0 0 var(--radius);
-  box-shadow: -4px 0 24px var(--shadow);
-  padding: 1.25rem;
-  overflow: hidden;
-  transform: translateX(100%);
-  transition: transform .25s ease;
-}
-.focus-todos-panel .panel-title {
-  flex-shrink: 0;
-}
-.focus-todos-panel .todo-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  margin-top: 0;
-}
-@media (max-height: 520px) {
-  .focus-todos-panel {
-    top: 1rem;
-    height: calc(100vh - 2rem);
+  min-width: 8px;
+  border-radius: 2.5px;
+  background: var(--heat-0);
+}
+.cell-empty { visibility: hidden; }
+.cell.l0 { background: var(--heat-0); }
+.cell.l1 { background: var(--heat-1); }
+.cell.l2 { background: var(--heat-2); }
+.cell.l3 { background: var(--heat-3); }
+.cell.l4 { background: var(--heat-4); }
+.heatmap-legend .cell { width: 10px; height: 10px; flex-shrink: 0; }
+@media (max-width: 720px) {
+  .topbar { min-height: 60px; }
+  .desk-grid, .room-desk-grid, .grid.two { grid-template-columns: 1fr; gap: var(--sp-6); padding-left: 20px; padding-right: 20px; }
+  .circle-timer.idle { width: min(250px, 88vw); }
+  .circle-timer.running, .room-focus-ring { width: min(260px, 92vw); }
+  .circle-timer-step { width: 44px; height: 44px; }
+  .focus-todos-toggle {
+    top: auto;
+    bottom: 0;
+    transform: none;
+    writing-mode: horizontal-tb;
+    border-right: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    width: auto;
+    left: 50%;
+    right: auto;
+    translate: -50% 0;
   }
-}
-.focus-todos-panel.is-open {
-  transform: translateX(0);
-}
-.focus-message {
-  text-align: center;
-  color: var(--muted);
-}
-@media (max-width: 760px) {
-  .dashboard-hero, .room-header, .grid.two, .settings, .desk-grid {
-    grid-template-columns: 1fr;
-  }
-  .room-create, .room-join, .inline-form:not(.todo-add-form) {
-    flex-direction: column;
-  }
-  .panel-title {
-    display: block;
-  }
+  .room-header-new { flex-direction: column; }
+  .room-members-meta { text-align: left; justify-items: start; }
+  .timer-cancel, .btn-ghost.timer-cancel { width: 100%; }
 }
 @media (max-width: 480px) {
-  .inline-form.todo-add-form {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .inline-form.todo-add-form .todo-add-plus {
-    align-self: flex-start;
-  }
+  .auth-card { margin: 20px 20px 0; padding: var(--sp-6); }
+  .inline-form.todo-add-form { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {
-  * { scroll-behavior: auto !important; }
-  .menu-drawer { transition: none; }
-  .focus-todos-panel { transition: none; }
-  .focus-todos-toggle { transition: none; }
+  *, body { transition: none !important; animation: none !important; }
+  .menu-drawer, .focus-todos-panel, .focus-todos-toggle, .circle-timer-progress { transition: none !important; }
 }
 `
