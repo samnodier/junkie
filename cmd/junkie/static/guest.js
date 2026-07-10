@@ -35,6 +35,12 @@
       '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' +
     '</svg>';
 
+  const restoreIconSVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M9 14 4 9l5-5"/>' +
+      '<path d="M4 9h11a5 5 0 0 1 0 10h-3"/>' +
+    '</svg>';
+
   const sortTodos = (todos) => {
     const active = [];
     const removed = [];
@@ -500,7 +506,8 @@
     const todoItems = todos.length
       ? sortTodos(todos).map((todo) => {
           const actionBtn = todo.removed
-            ? '<button type="button" class="todo-action todo-delete guest-delete" title="Delete permanently" aria-label="Delete permanently">' + deleteIconSVG + '</button>'
+            ? '<button type="button" class="todo-action todo-restore guest-restore" title="Bring back" aria-label="Bring back">' + restoreIconSVG + '</button>' +
+              '<button type="button" class="todo-action todo-delete guest-delete" title="Delete permanently" aria-label="Delete permanently">' + deleteIconSVG + '</button>'
             : '<button type="button" class="todo-action todo-remove guest-remove" title="Remove" aria-label="Remove">' + removeIconSVG + '</button>';
           return (
             '<li class="' + todoRowClass(todo) + '" data-id="' + todo.id + '">' +
@@ -517,7 +524,7 @@
       '<section class="grid two desk-grid">' +
         idleTimerHTML() +
         '<article class="panel desk-todos-panel">' +
-          '<div class="panel-title"><h2>Private todos</h2><span class="label">Only on this device</span></div>' +
+          '<div class="panel-title"><h2>Private todos</h2></div>' +
           '<form class="inline-form todo-add-form" id="guest-todo-form">' +
             '<input name="text" placeholder="What do you need to do?" required>' +
             '<button type="submit" class="todo-add-plus" aria-label="Add task">+</button>' +
@@ -575,6 +582,8 @@
         next = next.map((todo) => (todo.id === id ? { ...todo, done: !todo.done } : todo));
       } else if (event.target.closest('.guest-remove')) {
         next = next.map((todo) => (todo.id === id ? { ...todo, removed: true } : todo));
+      } else if (event.target.closest('.guest-restore')) {
+        next = next.map((todo) => (todo.id === id ? { ...todo, removed: false } : todo));
       } else if (event.target.closest('.guest-delete')) {
         next = next.filter((todo) => todo.id !== id);
       } else {
