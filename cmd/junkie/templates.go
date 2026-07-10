@@ -260,6 +260,7 @@ const layoutTemplates = `
                 if (roomSync && window.junkieReconcileRoomTimer) {
                   window.junkieReconcileRoomTimer('countdown');
                 } else {
+                  window.junkieStashTypedTodo?.();
                   location.reload();
                 }
               }, 400);
@@ -649,6 +650,7 @@ const layoutTemplates = `
           const server = await response.json();
           if (!sameRoomStatus(roomStatusFromElement(el), server)) {
             roomStatusReloading = true;
+            window.junkieStashTypedTodo?.();
             location.reload();
           }
         }).catch(() => {
@@ -696,7 +698,10 @@ const layoutTemplates = `
         const dismiss = () => {
           backdrop.remove();
           const onRoomPage = document.querySelector('[data-room-page]')?.dataset.roomSync === code;
-          if (onRoomPage || deskTodosViewingRoom(code)) location.reload();
+          if (onRoomPage || deskTodosViewingRoom(code)) {
+            window.junkieStashTypedTodo?.();
+            location.reload();
+          }
         };
         backdrop.querySelector('[data-dismiss]')?.addEventListener('click', dismiss);
         backdrop.addEventListener('click', (event) => {
@@ -712,6 +717,7 @@ const layoutTemplates = `
           if (left === 0) {
             clearInterval(interval);
             backdrop.remove();
+            window.junkieStashTypedTodo?.();
             location.reload();
           }
         };
@@ -741,7 +747,10 @@ const layoutTemplates = `
         if (type === 'timer-lobby' && !document.querySelector('.room-focus-shell')) {
           if (event?.starterUserId === document.body.dataset.userId) {
             if (document.querySelector('[data-room-page]') || deskTodosViewingRoom(code)) {
-              setTimeout(() => location.reload(), 100);
+              setTimeout(() => {
+                window.junkieStashTypedTodo?.();
+                location.reload();
+              }, 100);
             }
             return;
           }
@@ -765,7 +774,10 @@ const layoutTemplates = `
         } else if (!onRoomPage && !deskTodosViewingRoom(code)) {
           return;
         }
-        setTimeout(() => location.reload(), 200);
+        setTimeout(() => {
+          window.junkieStashTypedTodo?.();
+          location.reload();
+        }, 200);
       };
 
       const wireDeskRoomWS = () => {
@@ -828,6 +840,53 @@ const layoutTemplates = `
         });
       };
       wireTodoGroupCollapse();
+
+      // Server-backed todo forms navigate on submit, and room pages reload on
+      // WebSocket broadcasts, so adding a task normally throws the cursor (and
+      // any half-typed text) out of the add box. Stash a short-lived per-tab
+      // draft around those reloads and restore it afterwards so tasks can be
+      // entered back to back. The guest form has no action attribute: it adds
+      // todos without navigating and refocuses itself in guest.js.
+      const todoDraftKey = 'junkie:todoDraft';
+      let todoFormSubmitting = false;
+      const stashTodoDraft = (form, value) => {
+        const action = form?.getAttribute('action');
+        if (!action) return;
+        try {
+          sessionStorage.setItem(todoDraftKey, JSON.stringify({ action, value, ts: Date.now() }));
+        } catch (_) {}
+      };
+      // The submit stash must survive until navigation: the server broadcasts
+      // the new todo before responding, so this tab's own WebSocket reload can
+      // fire while the just-submitted text is still in the input.
+      window.junkieStashTypedTodo = () => {
+        if (todoFormSubmitting) return;
+        const input = document.activeElement;
+        if (input?.name === 'text') stashTodoDraft(input.closest?.('.todo-add-form[action]'), input.value);
+      };
+      document.addEventListener('submit', (event) => {
+        const form = event.target.closest?.('.todo-add-form[action]');
+        if (!form) return;
+        todoFormSubmitting = true;
+        stashTodoDraft(form, '');
+      }, true);
+
+      const restoreTodoDraft = () => {
+        let draft = null;
+        try {
+          draft = JSON.parse(sessionStorage.getItem(todoDraftKey) || 'null');
+          sessionStorage.removeItem(todoDraftKey);
+        } catch (_) {}
+        if (!draft?.action || Date.now() - (draft.ts || 0) > 15000) return;
+        const form = Array.from(document.querySelectorAll('.todo-add-form[action]'))
+          .find((el) => el.getAttribute('action') === draft.action);
+        const input = form?.querySelector('input[name="text"]');
+        if (!input || input.closest('[hidden]')) return;
+        input.value = draft.value || '';
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      };
+      restoreTodoDraft();
 
       const copyText = async (text) => {
         try {

@@ -191,6 +191,38 @@ func TestDashboardRendersIdleRoomStart(t *testing.T) {
 	}
 }
 
+func TestTodoAddFormsKeepFocusAcrossReloads(t *testing.T) {
+	rm := room{Code: "JUNK-IES", Name: "junkies"}
+	for name, data := range map[string]pageData{
+		"dashboard": {
+			Title:         "Dashboard",
+			User:          user{ID: "user-id", DisplayName: "Sam"},
+			Rooms:         []room{rm},
+			DeskRoomTodos: []roomTodosGroup{{Room: rm}},
+		},
+		"room": {
+			Title: "junkies",
+			User:  user{ID: "user-id", DisplayName: "Sam"},
+			Room:  rm,
+		},
+	} {
+		var output bytes.Buffer
+		if err := parseTemplates().ExecuteTemplate(&output, name, data); err != nil {
+			t.Fatalf("render %s: %v", name, err)
+		}
+		html := output.String()
+		for _, expected := range []string{
+			`'junkie:todoDraft'`,
+			`window.junkieStashTypedTodo = () => {`,
+			`restoreTodoDraft();`,
+		} {
+			if !strings.Contains(html, expected) {
+				t.Errorf("%s output missing todo refocus script %q", name, expected)
+			}
+		}
+	}
+}
+
 func TestRequestedRoomFocusMinutes(t *testing.T) {
 	tests := []struct {
 		name     string
