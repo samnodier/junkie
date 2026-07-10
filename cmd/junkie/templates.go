@@ -1688,6 +1688,8 @@ const layoutTemplates = `
         <div id="guest-profile-work-map"></div>
         <script src="/assets/guest.js"></script>
       {{else}}
+        {{if .Error}}<p class="notice-error" role="alert">{{.Error}}</p>{{end}}
+        {{if .Notice}}<p class="notice-ok" role="status">{{.Notice}}</p>{{end}}
         <div class="profile-stats">
           <div>
             <strong>{{focusHours .ActivityTotalMinutes}}</strong>
@@ -1709,6 +1711,18 @@ const layoutTemplates = `
             <span aria-hidden="true"></span>
           </label>
         </div>
+        <div class="profile-preference profile-password">
+          <div>
+            <strong>Change password</strong>
+            <p class="muted">Updating your password signs out all other devices, so anyone else using your account loses access.</p>
+          </div>
+        </div>
+        <form class="profile-password-form" method="post" action="/profile/password">
+          <label>Current password <input type="password" name="current_password" autocomplete="current-password" required></label>
+          <label>New password <input type="password" name="new_password" autocomplete="new-password" required minlength="4"></label>
+          <label>Confirm new password <input type="password" name="confirm_password" autocomplete="new-password" required minlength="4"></label>
+          <button type="submit" class="btn-primary btn-compact">Update password</button>
+        </form>
         <p class="muted profile-follow-stub">Follow friends — coming soon</p>
       {{end}}
     </section>
@@ -2287,6 +2301,14 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 8%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.notice-ok {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: var(--radius);
   padding: var(--sp-3) var(--sp-4);
   margin-bottom: var(--sp-4);
@@ -3133,6 +3155,21 @@ body.menu-drawer-open { overflow: hidden; }
 .profile-stats strong { font-family: var(--font-serif); font-size: 2rem; display: block; line-height: 1; }
 .profile-stats span { color: var(--muted); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.1em; }
 .profile-follow-stub { margin-top: var(--sp-4); font-size: var(--fs-small); }
+.profile-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 340px;
+  margin-top: var(--sp-3);
+}
+.profile-password-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.profile-password-form button { align-self: flex-start; }
 .heatmap-chart { width: 100%; }
 .heatmap-summary { color: var(--muted); font-size: var(--fs-small); margin: 0 0 var(--sp-3); }
 .heatmap-layout { display: flex; gap: var(--sp-2); width: 100%; }
