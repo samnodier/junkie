@@ -25,7 +25,7 @@
 
   function onTimerEnd(phase) {
     if (phase === 'break') {
-      notify("Break's over", 'Focus block starting');
+      notify("Break's over", 'Ready for your next focus block');
     } else {
       notify('Focus session complete', 'Time for a break');
     }

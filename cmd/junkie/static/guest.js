@@ -12,6 +12,13 @@
   const CIRC = 2 * Math.PI * 88;
   const clampMinutes = (n) => Math.min(180, Math.max(5, n));
 
+  const breakMinutesForFocus = (focusMinutes) => {
+    if (focusMinutes < 30) return 5;
+    if (focusMinutes < 120) return 10;
+    if (focusMinutes < 180) return 20;
+    return 30;
+  };
+
   const load = (key, fallback) => {
     try {
       return JSON.parse(localStorage.getItem(key)) ?? fallback;
@@ -73,16 +80,39 @@
     save(keys.activity, activity);
   };
 
-  const finishTimerIfNeeded = () => {
-    const timer = load(keys.timer, null);
+  const normalizeTimer = () => {
+    let timer = load(keys.timer, null);
     if (!timer) return null;
-    const endsAt = new Date(timer.endsAt).getTime();
-    if (Date.now() >= endsAt) {
-      recordFocus(timer.focusMinutes);
-      save(keys.timer, null);
-      return null;
+
+    if (!timer.phase) timer.phase = 'focus';
+
+    if (timer.phase === 'focus') {
+      const endsAt = new Date(timer.endsAt).getTime();
+      if (Date.now() >= endsAt) {
+        if (!timer.focusRecorded) {
+          recordFocus(timer.focusMinutes);
+          timer.focusRecorded = true;
+        }
+        timer.phase = 'break_offer';
+        timer.breakMinutes = breakMinutesForFocus(timer.focusMinutes);
+        delete timer.endsAt;
+        save(keys.timer, timer);
+      }
+      return timer;
     }
-    return timer;
+
+    if (timer.phase === 'break_offer') return timer;
+
+    if (timer.phase === 'break') {
+      if (Date.now() >= new Date(timer.endsAt).getTime()) {
+        save(keys.timer, null);
+        return null;
+      }
+      return timer;
+    }
+
+    save(keys.timer, null);
+    return null;
   };
 
   const secondsLeft = (timer) => {
@@ -243,7 +273,7 @@
     profileMap.innerHTML = heatmapChartHTML(true);
   };
 
-  const runningTimerHTML = (timer) => {
+  const focusTimerHTML = (timer) => {
     const total = timer.focusMinutes * 60;
     const left = secondsLeft(timer);
     return (
@@ -258,6 +288,40 @@
           '</div>' +
         '</div>' +
         '<button type="button" class="btn-ghost timer-cancel" id="guest-timer-cancel">End early</button>' +
+      '</article>'
+    );
+  };
+
+  const breakOfferHTML = (timer) =>
+    '<p class="label label-warn">' + timer.breakMinutes + ' min break</p>' +
+    '<article class="circle-timer-wrap">' +
+      '<div class="circle-timer break-offer breather" role="timer" aria-label="Break ready">' +
+        ringSVG() +
+        '<div class="circle-timer-core">' +
+          '<div class="circle-timer-countdown" id="guest-countdown" aria-live="polite">' +
+            formatCountdown(timer.breakMinutes * 60) +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<button type="button" class="btn-primary timer-cancel" id="guest-break-start">Start break</button>' +
+      '<button type="button" class="btn-ghost timer-cancel" id="guest-break-skip">Skip break</button>' +
+    '</article>';
+
+  const breakRunningHTML = (timer) => {
+    const total = timer.breakMinutes * 60;
+    const left = secondsLeft(timer);
+    return (
+      '<p class="label label-warn">' + timer.breakMinutes + ' min break</p>' +
+      '<article class="circle-timer-wrap">' +
+        '<div class="circle-timer break-running breather" role="timer" aria-label="Break countdown">' +
+          ringSVG() +
+          '<div class="circle-timer-core">' +
+            '<div class="circle-timer-countdown" id="guest-countdown" aria-live="polite" data-total="' + total + '">' +
+              formatCountdown(left) +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<button type="button" class="btn-ghost timer-cancel" id="guest-break-skip">Skip break</button>' +
       '</article>'
     );
   };
@@ -454,20 +518,51 @@
     return true;
   };
 
-  const render = () => {
-    if (!deskRoot) return;
-    const timer = finishTimerIfNeeded();
-    const todos = load(keys.todos, []);
-    const inFocus = Boolean(timer);
-
+  const clearFocusDeskTimers = () => {
     if (tickHandle) {
       clearInterval(tickHandle);
       tickHandle = null;
     }
+  };
 
-    if (inFocus) {
-      setFocusActive(true);
-      deskRoot.innerHTML = '<div class="desk-shell desk-shell-focus">' + focusDeskHTML(runningTimerHTML(timer), todos) + '</div>';
+  const wireFocusDeskTodos = (todos) => {
+    document.getElementById('guest-focus-todos')?.addEventListener('click', (event) => {
+      if (!event.target.closest('.guest-toggle')) return;
+      const item = event.target.closest('[data-id]');
+      if (!item) return;
+      const id = item.dataset.id;
+      const next = load(keys.todos, []).map((todo) =>
+        todo.id === id ? { ...todo, done: !todo.done } : todo
+      );
+      save(keys.todos, next);
+      render();
+    });
+
+    if (!focusPeekPulseDone) {
+      focusPeekPulseDone = true;
+      localStorage.setItem('junkie:peekSeen', '1');
+      const toggle = document.querySelector('.focus-todos-toggle');
+      toggle?.classList.add('peek-pulse');
+      setTimeout(() => toggle?.classList.remove('peek-pulse'), 2400);
+    }
+    if (focusTodosPeekOpen) scheduleFocusPeekDismiss();
+  };
+
+  const showFocusDesk = (mainHTML, todos) => {
+    setFocusActive(true);
+    deskRoot.innerHTML = '<div class="desk-shell desk-shell-focus">' + focusDeskHTML(mainHTML, todos) + '</div>';
+    wireFocusDeskTodos(todos);
+  };
+
+  const render = () => {
+    if (!deskRoot) return;
+    const prevTimer = load(keys.timer, null);
+    const timer = normalizeTimer();
+    const todos = load(keys.todos, []);
+    clearFocusDeskTimers();
+
+    if (timer?.phase === 'focus') {
+      showFocusDesk(focusTimerHTML(timer), todos);
 
       document.getElementById('guest-timer-cancel')?.addEventListener('click', () => {
         if (!confirm("End this focus session? It won't count toward your map.")) return;
@@ -482,36 +577,70 @@
         render();
       });
 
-      document.getElementById('guest-focus-todos')?.addEventListener('click', (event) => {
-        if (!event.target.closest('.guest-toggle')) return;
-        const item = event.target.closest('[data-id]');
-        if (!item) return;
-        const id = item.dataset.id;
-        const next = load(keys.todos, []).map((todo) =>
-          todo.id === id ? { ...todo, done: !todo.done } : todo
-        );
-        save(keys.todos, next);
-        render();
-      });
-
-      if (!focusPeekPulseDone) {
-        focusPeekPulseDone = true;
-        localStorage.setItem('junkie:peekSeen', '1');
-        const toggle = document.querySelector('.focus-todos-toggle');
-        toggle?.classList.add('peek-pulse');
-        setTimeout(() => toggle?.classList.remove('peek-pulse'), 2400);
-      }
-      if (focusTodosPeekOpen) scheduleFocusPeekDismiss();
-
       const running = deskRoot.querySelector('.circle-timer.running');
       const total = timer.focusMinutes * 60;
       setRing(running, secondsLeft(timer) / total);
 
       tickHandle = setInterval(() => {
         const hadTimer = load(keys.timer, null);
-        const active = finishTimerIfNeeded();
+        const active = normalizeTimer();
+        if (!active || active.phase !== 'focus') {
+          if (hadTimer?.phase === 'focus') window.junkieNotify?.onTimerEnd('focus');
+          render();
+          return;
+        }
+        const box = document.getElementById('guest-countdown');
+        const left = secondsLeft(active);
+        if (box) {
+          box.textContent = formatCountdown(left);
+          setRing(running, left / total);
+        }
+      }, 1000);
+      return;
+    }
+
+    if (timer?.phase === 'break_offer') {
+      if (prevTimer?.phase === 'focus') window.junkieNotify?.onTimerEnd('focus');
+      showFocusDesk(breakOfferHTML(timer), todos);
+
+      const offer = deskRoot.querySelector('.circle-timer.break-offer');
+      setRing(offer, 1);
+
+      document.getElementById('guest-break-start')?.addEventListener('click', () => {
+        const current = load(keys.timer, null);
+        if (!current || current.phase !== 'break_offer') return;
+        current.phase = 'break';
+        current.endsAt = new Date(Date.now() + current.breakMinutes * 60 * 1000).toISOString();
+        save(keys.timer, current);
+        render();
+      });
+
+      document.getElementById('guest-break-skip')?.addEventListener('click', () => {
+        save(keys.timer, null);
+        setFocusActive(false);
+        render();
+      });
+      return;
+    }
+
+    if (timer?.phase === 'break') {
+      showFocusDesk(breakRunningHTML(timer), todos);
+
+      document.getElementById('guest-break-skip')?.addEventListener('click', () => {
+        save(keys.timer, null);
+        setFocusActive(false);
+        render();
+      });
+
+      const running = deskRoot.querySelector('.circle-timer.break-running');
+      const total = timer.breakMinutes * 60;
+      setRing(running, secondsLeft(timer) / total);
+
+      tickHandle = setInterval(() => {
+        const hadTimer = load(keys.timer, null);
+        const active = normalizeTimer();
         if (!active) {
-          if (hadTimer) window.junkieNotify?.onTimerEnd('focus');
+          if (hadTimer?.phase === 'break') window.junkieNotify?.onTimerEnd('break');
           render();
           return;
         }
@@ -623,7 +752,7 @@
       const minutes = Number(new FormData(event.target).get('focus_minutes')) || 50;
       const focusMinutes = clampMinutes(minutes);
       const endsAt = new Date(Date.now() + focusMinutes * 60 * 1000).toISOString();
-      save(keys.timer, { endsAt, focusMinutes });
+      save(keys.timer, { phase: 'focus', endsAt, focusMinutes });
       render();
     });
   };

@@ -48,6 +48,7 @@ func parseTemplates() *template.Template {
 			}
 			return m, nil
 		},
+		"soloBreakPending": soloBreakPending,
 	}
 	return template.Must(template.New("junkie").Funcs(funcs).Parse(layoutTemplates))
 }
@@ -165,6 +166,7 @@ const layoutTemplates = `
         const card = box.closest('.timer-card');
         if (card?.classList.contains('break')) return 'break';
         if (card?.classList.contains('focus')) return 'focus';
+        if (box.closest('.circle-timer.break-running')) return 'break';
         if (box.closest('.circle-timer.running')) return 'focus';
         return 'focus';
       };
@@ -174,6 +176,7 @@ const layoutTemplates = `
         const total = Number(box.dataset.total || left) || 1;
         const timer = box.closest('.circle-timer');
         const phase = timerPhase(box);
+        const soloTimer = box.closest('.solo-timer');
         let notified = false;
         const paint = () => {
           const m = String(Math.floor(left / 60)).padStart(2, '0');
@@ -185,6 +188,7 @@ const layoutTemplates = `
           if (left <= 0 && !notified) {
             notified = true;
             window.junkieNotify?.onTimerEnd(phase);
+            if (soloTimer) setTimeout(() => location.reload(), 400);
           }
           if (left > 0) left -= 1;
         };
@@ -1004,8 +1008,9 @@ const layoutTemplates = `
     {{else}}
     {{if .SoloTimer}}
     <div class="desk-shell desk-shell-focus">
-    <section class="focus-desk">
+    <section class="focus-desk solo-timer">
       <div class="focus-desk-main">
+        {{if eq .SoloTimer.Phase "focus"}}
         <p class="label label-accent">{{.SoloTimer.FocusMinutes}} min focus</p>
         <article class="circle-timer-wrap">
           <div class="circle-timer running" role="timer" aria-label="Focus countdown">
@@ -1021,6 +1026,42 @@ const layoutTemplates = `
             <button type="submit" class="btn-ghost timer-cancel">End early</button>
           </form>
         </article>
+        {{else if soloBreakPending .SoloTimer}}
+        <p class="label label-warn">{{.SoloTimer.BreakMinutes}} min break</p>
+        <article class="circle-timer-wrap">
+          <div class="circle-timer break-offer breather" role="timer" aria-label="Break ready">
+            <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0" style="stroke-dashoffset: 0"/>
+            </svg>
+            <div class="circle-timer-core">
+              <div class="circle-timer-countdown countdown" aria-live="polite">{{printf "%02d:%02d" .SoloTimer.BreakMinutes 0}}</div>
+            </div>
+          </div>
+          <form method="post" action="/solo/break/start">
+            <button type="submit" class="btn-primary timer-cancel">Start break</button>
+          </form>
+          <form method="post" action="/solo/break/skip">
+            <button type="submit" class="btn-ghost timer-cancel">Skip break</button>
+          </form>
+        </article>
+        {{else}}
+        <p class="label label-warn">{{.SoloTimer.BreakMinutes}} min break</p>
+        <article class="circle-timer-wrap">
+          <div class="circle-timer break-running breather" role="timer" aria-label="Break countdown">
+            <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+            </svg>
+            <div class="circle-timer-core">
+              <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.BreakMinutes 60}}">--:--</div>
+            </div>
+          </div>
+          <form method="post" action="/solo/break/skip">
+            <button type="submit" class="btn-ghost timer-cancel">Skip break</button>
+          </form>
+        </article>
+        {{end}}
       </div>
       <div class="focus-todos-backdrop" hidden></div>
       <button type="button" class="focus-todos-toggle" aria-expanded="false" aria-controls="focus-todos-panel">Todos</button>
@@ -1986,7 +2027,20 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .room-focus-ring .circle-timer-track,
 .room-focus-ring .circle-timer-progress,
 .room-active-ring .circle-timer-track,
-.room-active-ring .circle-timer-progress { stroke-width: 5; }
+.room-active-ring .circle-timer-progress,
+.circle-timer.break-offer .circle-timer-track,
+.circle-timer.break-offer .circle-timer-progress,
+.circle-timer.break-running .circle-timer-track,
+.circle-timer.break-running .circle-timer-progress { stroke-width: 5; }
+.circle-timer.break-offer,
+.circle-timer.break-running { width: min(340px, 90vw); cursor: default; }
+.circle-timer.break-offer .circle-timer-progress,
+.circle-timer.break-running .circle-timer-progress { stroke: var(--warn); }
+.circle-timer.breather { animation: breather 4s ease-in-out infinite; }
+@keyframes breather {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.015); opacity: 0.94; }
+}
 .circle-timer-progress {
   stroke: var(--accent);
   stroke-linecap: round;
