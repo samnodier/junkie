@@ -2165,6 +2165,12 @@ body.menu-drawer-open { overflow: hidden; }
   color: var(--muted);
   padding-top: 1.15rem;
   width: 1.75rem;
+  flex-shrink: 0;
+}
+.heatmap-dow span {
+  display: flex;
+  align-items: center;
+  line-height: 1;
 }
 .heatmap-main { flex: 1; min-width: 0; }
 .heatmap-months {
@@ -2174,6 +2180,10 @@ body.menu-drawer-open { overflow: hidden; }
   font-size: 0.68rem;
   color: var(--muted);
   margin-bottom: 4px;
+  min-height: 1rem;
+}
+.heatmap-month {
+  grid-column: calc(var(--col) + 1);
 }
 .heatmap-wrap { overflow-x: auto; width: 100%; }
 .heatmap {
@@ -2182,6 +2192,7 @@ body.menu-drawer-open { overflow: hidden; }
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   gap: 3px;
+  width: 100%;
   min-height: 108px;
 }
 .heatmap-legend {
