@@ -1807,8 +1807,6 @@ const layoutTemplates = `
             <form method="post" action="/r/{{.Room.Code}}/delete" onsubmit="return confirm('Delete \'{{.Room.Name}}\'? This removes it for all {{.MemberCount}} members.')">
               <button type="submit" class="btn-danger">Delete room</button>
             </form>
-            {{else}}
-            <p class="muted">Only the room's creator can delete this room.</p>
             {{end}}
           </details>
           {{end}}
