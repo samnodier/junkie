@@ -1277,7 +1277,7 @@ const layoutTemplates = `
       <p class="eyebrow">403 · Forbidden</p>
       <h1>Access denied</h1>
       <p class="muted">{{.ForbiddenMessage}}</p>
-      <a href="/" class="btn-primary">Return to junkie</a>
+      <a href="/" class="btn btn-primary">Return to junkie</a>
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .Error}}<p class="context-banner context-banner-dismiss" role="status">{{.Error}} <button type="button" class="banner-dismiss" aria-label="Dismiss">×</button></p>{{end}}
@@ -1770,12 +1770,19 @@ a:hover { color: var(--accent-hover); }
 button, input, select, textarea {
   font: inherit;
 }
-button {
+button, .btn {
   border: 0;
   border-radius: var(--radius);
   cursor: pointer;
   font-weight: 600;
   font-size: 0.9375rem;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  text-decoration: none;
 }
 button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible {
   outline: 2px solid var(--accent);
@@ -1789,6 +1796,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 }
 .btn-primary:hover, button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(.todo-action):not(.circle-timer-step):hover {
   background: var(--accent-hover);
+  color: var(--accent-ink);
 }
 .btn-compact { min-height: 44px; padding: 0 18px; font-size: 0.875rem; }
 .btn-ghost, .ghost {
@@ -2887,7 +2895,8 @@ body.menu-drawer-open { overflow: hidden; }
 .role-admin, .status-active { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-soft-border); }
 .role-owner { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); }
 .forbidden-card { text-align: center; }
-.forbidden-card .btn-primary { display: inline-block; margin-top: var(--sp-3); text-decoration: none; }
+.forbidden-card .muted { margin-bottom: 0; }
+.forbidden-card .btn { margin-top: var(--sp-5); }
 @media (max-width: 720px) {
   .topbar { min-height: 60px; }
   .desk-grid, .room-desk-grid, .grid.two { grid-template-columns: 1fr; gap: var(--sp-6); padding-left: 20px; padding-right: 20px; }
@@ -2918,6 +2927,7 @@ body.menu-drawer-open { overflow: hidden; }
 }
 @media (max-width: 480px) {
   .auth-card { margin: 20px 20px 0; padding: var(--sp-6); }
+  .forbidden-card .btn { width: 100%; }
   .inline-form.todo-add-form { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {
