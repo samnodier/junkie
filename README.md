@@ -99,6 +99,30 @@ Managed PostgreSQL products such as Neon, Supabase, and Fly Managed Postgres are
 
 Guest mode remains entirely in that browser's `localStorage`. A hosted database only persists signed-in account data across devices.
 
+### Containerized deployment
+
+A `Dockerfile` builds a self-contained image (binary plus `migrations/`), and the compose file has an optional `app` service:
+
+```sh
+cp .env.example .env   # then set a strong POSTGRES_PASSWORD
+docker compose --profile app up -d --build
+```
+
+The app listens on `127.0.0.1:8080` and Postgres on `127.0.0.1:5432`, so neither is reachable from other hosts directly — put a reverse proxy (Caddy, nginx, or your host's ingress) in front for TLS.
+
+`GET /healthz` returns `200 ok` when the app can reach the database; point uptime checks and container health probes at it.
+
+### Running behind a reverse proxy
+
+junkie marks session cookies `Secure` when the request arrived over TLS or with `X-Forwarded-Proto: https`. Make sure your proxy sets `X-Forwarded-Proto` (and `X-Forwarded-For`, which the sign-in rate limiter uses to tell clients apart); Caddy and most platform routers do this by default.
+
+### Security measures
+
+- All state-changing requests are rejected when they originate from another site (`http.CrossOriginProtection`), and WebSocket handshakes enforce same-origin.
+- Sign-in is rate limited per IP and per username; signups are rate limited per IP.
+- Session cookies are `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS, and only a SHA-256 hash of the token is stored in PostgreSQL. Expired sessions are swept hourly.
+- Responses carry a Content-Security-Policy plus `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and (over HTTPS) `Strict-Transport-Security`. All scripts are served from the app itself.
+
 ## Admin and owner access
 
 Every account has one database-backed role:

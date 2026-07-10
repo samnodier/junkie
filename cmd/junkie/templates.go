@@ -92,7 +92,7 @@ const layoutTemplates = `
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,wght@0,600;1,500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="/assets/htmx.min.js"></script>
   <script src="/assets/notifications.js"></script>
 </head>
 <body{{if or .SoloTimer .FocusMode}} class="focus-active"{{end}}{{if .User.ID}} data-user-id="{{.User.ID}}"{{end}}>

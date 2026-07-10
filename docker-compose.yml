@@ -3,10 +3,11 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: junkie
-      POSTGRES_PASSWORD: junkie
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-junkie}
       POSTGRES_DB: junkie
     ports:
-      - "5432:5432"
+      # Bound to loopback so the database is never reachable from other hosts.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +15,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Containerized app for deployment. Not started by default; run with:
+  #   docker compose --profile app up -d --build
+  # Local dev keeps using `go run ./cmd/junkie` against the postgres service.
+  app:
+    build: .
+    profiles: ["app"]
+    environment:
+      DATABASE_URL: postgres://junkie:${POSTGRES_PASSWORD:-junkie}@postgres:5432/junkie?sslmode=disable
+      ADDR: :8080
+      JUNKIE_OWNER_USERNAME: ${JUNKIE_OWNER_USERNAME:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres-data:

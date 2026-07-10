@@ -31,6 +31,10 @@
 
   const uid = () => Math.random().toString(36).slice(2, 10);
 
+  const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]));
+
   const removeIconSVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
       '<path d="M18 6 6 18M6 6l12 12"/>' +
@@ -400,7 +404,7 @@
           '<li class="' +
           todoRowClass(todo) +
           '" data-id="' +
-          todo.id +
+          escapeHTML(todo.id) +
           '">' +
           '<button type="button" class="check guest-toggle" aria-label="' +
           (todo.done ? 'Mark incomplete' : 'Mark complete') +
@@ -408,7 +412,7 @@
           (todo.done ? '✓' : '○') +
           '</button>' +
           '<span>' +
-          todo.text +
+          escapeHTML(todo.text) +
           '</span>' +
           '</li>'
       )
@@ -628,9 +632,9 @@
               '<button type="button" class="todo-action todo-delete guest-delete" title="Delete permanently" aria-label="Delete permanently">' + deleteIconSVG + '</button>'
             : '<button type="button" class="todo-action todo-remove guest-remove" title="Remove" aria-label="Remove">' + removeIconSVG + '</button>';
           return (
-            '<li class="' + todoRowClass(todo) + '" data-id="' + todo.id + '">' +
+            '<li class="' + todoRowClass(todo) + '" data-id="' + escapeHTML(todo.id) + '">' +
               '<button type="button" class="check guest-toggle" aria-label="' + (todo.done ? 'Mark incomplete' : 'Mark complete') + '">' + (todo.done ? '✓' : '○') + '</button>' +
-              '<span>' + todo.text + '</span>' +
+              '<span>' + escapeHTML(todo.text) + '</span>' +
               actionBtn +
             '</li>'
           );
