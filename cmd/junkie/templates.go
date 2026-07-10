@@ -1240,14 +1240,14 @@ const layoutTemplates = `
     <section class="room-shell">
       <div class="room-header-new">
         <div class="room-header-main">
-          <p class="label label-accent room-eyebrow">
-            Room ·
+          <div class="label label-accent room-eyebrow">
+            <span class="room-eyebrow-label">Room ·</span>
             <span class="room-share" data-room-path="/r/{{.Room.Code}}">
               <button type="button" class="copy-chip mono room-share-code" data-copy="code" data-room-code="{{.Room.Code}}" aria-label="Copy room code {{.Room.Code}}" title="Copy room code">{{.Room.Code}}</button>
               <button type="button" class="room-share-copy room-share-copy-icon" aria-label="Copy invite link" title="Copy invite link">{{template "copy-icon" .}}</button>
               <span class="room-share-feedback" aria-live="polite"></span>
             </span>
-          </p>
+          </div>
           <div class="room-title-row">
             <h1 class="room-name-display" id="room-name-display">{{.Room.Name}}</h1>
             <button type="button" class="room-rename-trigger" aria-label="Rename room"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
@@ -2374,7 +2374,15 @@ body.menu-drawer-open { overflow: hidden; }
   place-items: center;
 }
 .room-rename-form { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
-.room-eyebrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.room-eyebrow { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-2); }
+.room-eyebrow-label { flex-shrink: 0; }
+.room-share {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.room-share-block { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .room-desk-grid { grid-template-columns: 1fr 400px; gap: 48px; align-items: start; }
 .room-timer-column { display: grid; gap: var(--sp-4); }
 .ready-card { text-align: center; padding: var(--sp-8) var(--sp-6); }
