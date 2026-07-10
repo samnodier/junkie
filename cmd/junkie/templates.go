@@ -565,7 +565,11 @@ const layoutTemplates = `
 
 {{define "todo-row"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
+    {{if .ReadOnly}}
+    <span class="check check-readonly" aria-hidden="true">{{if .Done}}✓{{else}}○{{end}}</span>
+    {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
+    {{end}}
     <span>{{if and .DisplayName (not .HideAuthor)}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
     {{if .Removed}}
       <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
@@ -584,11 +588,15 @@ const layoutTemplates = `
 
 {{define "todo-row-desk-room"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
+    {{if .ReadOnly}}
+    <span class="check check-readonly" aria-hidden="true">{{if .Done}}✓{{else}}○{{end}}</span>
+    {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle">
       <input type="hidden" name="desk" value="1">
       <input type="hidden" name="room" value="{{.RoomCode}}">
       <button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button>
     </form>
+    {{end}}
     <span>{{if and .DisplayName (not .HideAuthor)}}<strong>{{.DisplayName}}</strong> — {{end}}{{.Text}}</span>
     {{if .Removed}}
       <form method="post" action="/todo/{{.ID}}/delete">
@@ -1652,6 +1660,11 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   background: var(--accent-btn);
   border-color: var(--accent-btn);
   color: var(--accent-ink);
+}
+.check-readonly {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.85;
 }
 .todo-action {
   background: transparent;

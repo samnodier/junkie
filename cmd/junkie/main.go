@@ -53,6 +53,7 @@ type todo struct {
 	DisplayName string
 	UserID      string
 	HideAuthor  bool
+	ReadOnly    bool
 	RoomCode    string
 	CreatedAt   time.Time
 }
@@ -80,6 +81,7 @@ func groupRoomTodos(todos []todo, userID string) roomTodosSplit {
 			t.HideAuthor = true
 			split.Mine = append(split.Mine, t)
 		} else {
+			t.ReadOnly = true
 			split.Others = append(split.Others, t)
 		}
 	}
@@ -381,7 +383,11 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 	_ = a.db.QueryRow(r.Context(), `SELECT COALESCE(r.code, '') FROM todos t LEFT JOIN rooms r ON r.id = t.room_id WHERE t.id = $1`, id).Scan(&roomCode)
 	switch action {
 	case "toggle":
-		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET done = NOT done, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
+		tag, err := a.db.Exec(r.Context(), `UPDATE todos SET done = NOT done, updated_at = now() WHERE id = $1 AND user_id = $2`, id, u.ID)
+		if err != nil || tag.RowsAffected() == 0 {
+			a.todoActionDenied(w, r, roomCode, "You can only complete your own todos.")
+			return
+		}
 	case "remove":
 		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = true, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
 	case "delete":
@@ -404,6 +410,23 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/dashboard?todos=private", http.StatusSeeOther)
+}
+
+func (a *app) todoActionDenied(w http.ResponseWriter, r *http.Request, roomCode, message string) {
+	errMsg := url.QueryEscape(message)
+	if roomCode != "" {
+		if r.FormValue("desk") == "1" {
+			code := strings.TrimSpace(r.FormValue("room"))
+			if code == "" {
+				code = roomCode
+			}
+			http.Redirect(w, r, "/dashboard?todos=room&room="+url.QueryEscape(code)+"&error="+errMsg, http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/r/"+roomCode+"?error="+errMsg, http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/dashboard?todos=private&error="+errMsg, http.StatusSeeOther)
 }
 
 func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
@@ -530,7 +553,7 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
 	memberCount, _ := a.roomMemberCount(r.Context(), rm.ID)
-	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount})
+	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount, Error: r.URL.Query().Get("error")})
 }
 
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
