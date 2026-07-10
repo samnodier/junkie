@@ -645,6 +645,9 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 		if timer != nil && timer.Participant {
 			_, _ = a.db.Exec(r.Context(), `DELETE FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2`, timer.ID, u.ID)
+			if a.endTimerIfNoParticipants(r.Context(), timer.ID) {
+				action = "timer-end"
+			}
 		}
 	default:
 		http.NotFound(w, r)
@@ -703,6 +706,10 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		return nil, nil
 	}
 	timer.Participants, _ = a.timerParticipants(ctx, timer.ID)
+	if len(timer.Participants) == 0 {
+		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID)
+		return nil, nil
+	}
 	return timer, nil
 }
 
@@ -784,6 +791,15 @@ func (a *app) activeTimer(ctx context.Context, roomID, userID string) (*timerRun
 	}
 	t.Participants, _ = a.timerParticipants(ctx, t.ID)
 	return &t, nil
+}
+
+func (a *app) endTimerIfNoParticipants(ctx context.Context, runID string) bool {
+	var count int
+	if err := a.db.QueryRow(ctx, `SELECT COUNT(*) FROM timer_participants WHERE timer_run_id = $1`, runID).Scan(&count); err != nil || count > 0 {
+		return false
+	}
+	_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND ended_at IS NULL`, runID)
+	return true
 }
 
 func (a *app) timerParticipants(ctx context.Context, runID string) ([]string, error) {

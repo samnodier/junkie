@@ -1227,8 +1227,8 @@ const layoutTemplates = `
           <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}" data-total="{{mul .Timer.FocusMinutes 60}}">--:--</div>
         </div>
       </div>
-      {{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" false}}
-      <p class="label">{{len .Timer.Participants}} focusing</p>
+      {{if gt (len .Timer.Participants) 1}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" false}}{{end}}
+      <p class="label">{{if eq (len .Timer.Participants) 1}}Focusing solo{{else}}{{len .Timer.Participants}} focusing{{end}}</p>
       {{if .Timer.Participant}}
       <form method="post" action="/r/{{.Room.Code}}/timer-leave">
         <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
@@ -1259,9 +1259,7 @@ const layoutTemplates = `
           </form>
         </div>
         <div class="room-members-meta">
-          <div class="participant-avatars participant-avatars-sm">
-            {{if .Timer}}{{range .Timer.Participants}}<span class="participant-avatar">{{initial .}}</span>{{end}}{{end}}
-          </div>
+          {{if and .Timer (gt (len .Timer.Participants) 1)}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
           <span class="label">{{if .MemberCount}}{{.MemberCount}}{{else}}0{{end}} members</span>
         </div>
       </div>
@@ -1295,15 +1293,15 @@ const layoutTemplates = `
             <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
             {{end}}
             {{end}}
-            {{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}
-            <p class="label">{{len .Timer.Participants}} focusing</p>
+            {{if gt (len .Timer.Participants) 1}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
+            <p class="label">{{if eq (len .Timer.Participants) 1}}Focusing solo{{else}}{{len .Timer.Participants}} focusing{{end}}</p>
           </article>
           {{else}}
           <article class="timer-card panel idle ready-card">
             <p class="label label-accent">Ready · {{.Room.AutoSessions}} × {{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</p>
             <div class="room-ready-time mono">{{.Room.FocusMinutes}}:00</div>
             <form method="post" action="/r/{{.Room.Code}}/timer-start" data-room-name="{{.Room.Name}}"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
-            <p class="muted room-ready-hint">Room members get a prompt to join when you start.</p>
+            <p class="muted room-ready-hint">Start alone or with others — members get a join prompt when you start.</p>
           </article>
           <details class="room-details panel" data-room-section="settings">
             <summary><span class="label">Timer settings · {{.Room.AutoSessions}}×{{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
