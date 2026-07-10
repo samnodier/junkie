@@ -541,15 +541,42 @@ const layoutTemplates = `
       };
       window.junkieShowFocusJoinPrompt = showFocusJoinPrompt;
 
+      const deskTodosViewingRoom = (code) => {
+        const panel = document.querySelector('.desk-todos-panel[data-has-rooms="true"]');
+        if (!panel) return false;
+        const mode = sessionStorage.getItem('junkie:deskTodosMode') || 'room';
+        if (mode !== 'room') return false;
+        const room = sessionStorage.getItem('junkie:deskTodosRoom') || panel.querySelector('.desk-todos-view[data-mode="room"]')?.dataset.room || '';
+        return room === code;
+      };
+
+      window.junkieOnRoomWSMessage = (code, msg, roomName) => {
+        if (msg === 'timer-start' && !document.querySelector('.room-focus-shell')) {
+          showFocusJoinPrompt(code, roomName);
+          return;
+        }
+        if (msg === 'deleted') {
+          if (document.querySelector('.room-shell') || document.querySelector('.room-focus-page')) {
+            window.location = '/';
+          }
+          return;
+        }
+        const onRoomPage = document.querySelector('.room-shell') || document.querySelector('.room-focus-page');
+        if (msg === 'todos') {
+          if (!onRoomPage && !deskTodosViewingRoom(code)) return;
+        } else if (!onRoomPage) {
+          return;
+        }
+        setTimeout(() => location.reload(), 200);
+      };
+
       const wireDeskRoomWS = () => {
         document.querySelectorAll('[data-room-ws]').forEach((el) => {
           const code = el.dataset.roomWs;
           const name = el.dataset.roomName;
           if (!code) return;
           const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + code);
-          ws.onmessage = (event) => {
-            if (event.data === 'timer-start') showFocusJoinPrompt(code, name);
-          };
+          ws.onmessage = (event) => window.junkieOnRoomWSMessage(code, event.data, name);
         });
       };
       wireDeskRoomWS();
@@ -1383,13 +1410,7 @@ const layoutTemplates = `
         });
 
         const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + code);
-        ws.onmessage = (event) => {
-          if (event.data === 'timer-start' && !document.querySelector('.room-focus-shell')) {
-            window.junkieShowFocusJoinPrompt?.(code, '{{.Room.Name}}');
-            return;
-          }
-          setTimeout(() => location.reload(), 200);
-        };
+        ws.onmessage = (event) => window.junkieOnRoomWSMessage?.(code, event.data, '{{.Room.Name}}');
       })();
     </script>
   {{end}}
