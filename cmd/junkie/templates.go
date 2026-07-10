@@ -355,6 +355,7 @@ const layoutTemplates = `
             const active = options.find((opt) => opt.dataset.mode === 'room' && opt.dataset.room === room);
             label.textContent = active?.textContent.trim() || 'Room todos';
             hint.textContent = 'Public to the room';
+            hint?.removeAttribute('hidden');
             hint?.classList.add('label-warn');
             hint?.classList.remove('label-accent');
             views.forEach((view) => {
@@ -424,16 +425,14 @@ const layoutTemplates = `
       };
       wireTodoGroupCollapse();
 
-      const copyRoomInvite = async (path) => {
-        const cleanPath = path.startsWith('http') ? new URL(path).pathname : path;
-        const message = 'Join my focus room on junkie: ' + location.origin + cleanPath;
+      const copyText = async (text) => {
         try {
-          await navigator.clipboard.writeText(message);
+          await navigator.clipboard.writeText(text);
           return true;
         } catch {
           try {
             const ta = document.createElement('textarea');
-            ta.value = message;
+            ta.value = text;
             ta.setAttribute('readonly', '');
             ta.style.position = 'fixed';
             ta.style.left = '-9999px';
@@ -443,9 +442,14 @@ const layoutTemplates = `
             document.body.removeChild(ta);
             if (ok) return true;
           } catch {}
-          window.prompt('Copy this invite:', message);
+          window.prompt('Copy this text:', text);
           return false;
         }
+      };
+
+      const roomInviteMessage = (path) => {
+        const cleanPath = path.startsWith('http') ? new URL(path).pathname : path;
+        return 'Join my focus room on junkie: ' + location.origin + cleanPath;
       };
 
       document.querySelectorAll('.room-share').forEach((share) => {
@@ -453,9 +457,7 @@ const layoutTemplates = `
         if (!path) return;
         const feedback = share.querySelector('.room-share-feedback');
         let copiedTimer = null;
-        const triggerCopy = async (event) => {
-          event.preventDefault();
-          if (!(await copyRoomInvite(path))) return;
+        const showCopied = () => {
           share.classList.add('is-copied');
           if (feedback) feedback.textContent = 'COPIED ✓';
           if (copiedTimer) clearTimeout(copiedTimer);
@@ -465,8 +467,22 @@ const layoutTemplates = `
             copiedTimer = null;
           }, 1500);
         };
-        share.querySelectorAll('.room-share-code, .room-share-copy').forEach((btn) => {
-          btn.addEventListener('click', triggerCopy);
+        const wireCopy = (btn, getText) => {
+          btn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            const text = typeof getText === 'function' ? getText() : getText;
+            if (!(await copyText(text))) return;
+            showCopied();
+          });
+        };
+        share.querySelectorAll('.room-share-copy').forEach((btn) => {
+          wireCopy(btn, () => roomInviteMessage(path));
+        });
+        share.querySelectorAll('.room-share-code[data-copy="code"]').forEach((btn) => {
+          wireCopy(btn, () => btn.dataset.roomCode || btn.textContent.trim());
+        });
+        share.querySelectorAll('.room-share-code:not([data-copy="code"])').forEach((btn) => {
+          wireCopy(btn, () => roomInviteMessage(path));
         });
       });
 
@@ -887,7 +903,7 @@ const layoutTemplates = `
             {{else}}
             <h2>Private todos</h2>
             {{end}}
-            <span class="label desk-todos-hint{{if .DeskRoomTodos}} label-warn{{end}}">{{if .DeskRoomTodos}}Public to the room{{else}}Only on this device{{end}}</span>
+            {{if .DeskRoomTodos}}<span class="label desk-todos-hint label-warn">Public to the room</span>{{end}}
           </div>
           <div class="desk-todos-view" data-mode="private"{{if .DeskRoomTodos}} hidden{{end}}>
             <form class="inline-form todo-add-form" method="post" action="/todos">
@@ -993,9 +1009,10 @@ const layoutTemplates = `
       <div class="room-header-new">
         <div class="room-header-main">
           <p class="label label-accent room-eyebrow">
-            Room · <span class="mono">{{.Room.Code}}</span>
+            Room ·
             <span class="room-share" data-room-path="/r/{{.Room.Code}}">
-              <button type="button" class="copy-chip room-share-code">Copy link</button>
+              <button type="button" class="copy-chip mono room-share-code" data-copy="code" data-room-code="{{.Room.Code}}" aria-label="Copy room code {{.Room.Code}}" title="Copy room code">{{.Room.Code}}</button>
+              <button type="button" class="room-share-copy room-share-copy-icon" aria-label="Copy invite link" title="Copy invite link">{{template "copy-icon" .}}</button>
               <span class="room-share-feedback" aria-live="polite"></span>
             </span>
           </p>
@@ -1271,7 +1288,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.btn-primary, button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(.todo-action):not(.circle-timer-step):not(.theme-toggle):not(.menu-drawer-close):not(.menu-drawer-trigger):not(.desk-todos-mode):not(.todo-group-toggle):not(.todo-add-plus):not(.room-share-code):not(.copy-chip):not(.room-rename-trigger):not(.focus-todos-pin):not(.banner-dismiss) {
+.btn-primary, button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(.todo-action):not(.circle-timer-step):not(.theme-toggle):not(.menu-drawer-close):not(.menu-drawer-trigger):not(.desk-todos-mode):not(.todo-group-toggle):not(.todo-add-plus):not(.room-share-code):not(.room-share-copy-icon):not(.copy-chip):not(.room-rename-trigger):not(.focus-todos-pin):not(.banner-dismiss) {
   min-height: 48px;
   padding: 0 24px;
   background: var(--accent-btn);
@@ -1574,8 +1591,8 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   height: min(32rem, calc(100vh - 10rem));
   margin-bottom: 0;
 }
-.desk-todos-head { align-items: center; overflow: visible; }
-.desk-todos-switch { position: relative; z-index: 2; min-width: 0; }
+.desk-todos-head { align-items: center; overflow: visible; min-width: 0; gap: var(--sp-3); }
+.desk-todos-switch { position: relative; z-index: 2; flex: 1 1 auto; min-width: 0; }
 .desk-todos-mode {
   display: inline-flex;
   align-items: center;
@@ -1588,8 +1605,16 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-weight: 600;
   font-size: var(--fs-body);
   min-height: 44px;
+  max-width: 100%;
+  white-space: nowrap;
 }
-.desk-todos-chevron { width: 0.9rem; height: 0.9rem; color: var(--muted); }
+.desk-todos-mode-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.desk-todos-chevron { flex-shrink: 0; width: 0.9rem; height: 0.9rem; color: var(--muted); }
 .desk-todos-menu {
   position: absolute;
   top: calc(100% + var(--sp-2));
@@ -1621,6 +1646,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-todos-menu button.is-active { background: var(--accent-soft); font-weight: 600; }
 .desk-todos-menu button .mono { color: var(--faint); margin-left: var(--sp-2); }
 .desk-todos-hint { flex-shrink: 0; }
+.desk-todos-hint[hidden] { display: none !important; }
 .desk-todos-view { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .desk-todos-view[hidden] { display: none !important; }
 .desk-todos-panel .todo-groups { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
@@ -2090,10 +2116,24 @@ body.menu-drawer-open { overflow: hidden; }
   cursor: pointer;
   min-height: 0;
 }
-.room-share.is-copied .copy-chip, .room-share.is-copied .room-share-code {
+.room-share.is-copied .copy-chip, .room-share.is-copied .room-share-code, .room-share.is-copied .room-share-copy-icon {
   border-color: var(--accent);
   color: var(--accent);
 }
+.room-share-copy-icon {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  width: 2rem;
+  height: 2rem;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.room-share-copy-icon svg { width: 1rem; height: 1rem; }
 .room-share-feedback { font-size: var(--fs-small); font-weight: 600; color: var(--accent); }
 .settings { display: grid; gap: var(--sp-3); }
 .settings label { display: grid; gap: var(--sp-2); font-size: var(--fs-small); font-weight: 600; }
