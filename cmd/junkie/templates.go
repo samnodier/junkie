@@ -418,6 +418,7 @@ const layoutTemplates = `
         const views = panel.querySelectorAll('.desk-todos-view');
         const options = menu ? Array.from(menu.querySelectorAll('[data-mode]')) : [];
         const membershipPill = document.querySelector('.room-membership-pill');
+        const membershipBar = membershipPill?.closest('.desk-room-bar');
         const membershipName = membershipPill?.querySelector('.room-membership-name');
         const roomCodes = options.filter((opt) => opt.dataset.mode === 'room').map((opt) => opt.dataset.room);
         const defaultRoom = roomCodes[0] || '';
@@ -446,10 +447,11 @@ const layoutTemplates = `
         const apply = () => {
           let activeRoom = null;
           if (mode === 'private') {
-            label.textContent = 'Private todos';
+            label.textContent = 'Private';
             hint.textContent = '';
             hint?.setAttribute('hidden', '');
             hint?.classList.remove('label-warn', 'label-accent');
+            membershipBar?.setAttribute('hidden', '');
             views.forEach((view) => {
               view.hidden = view.dataset.mode !== 'private';
             });
@@ -463,6 +465,7 @@ const layoutTemplates = `
             hint?.removeAttribute('hidden');
             hint?.classList.add('label-warn');
             hint?.classList.remove('label-accent');
+            membershipBar?.removeAttribute('hidden');
             views.forEach((view) => {
               view.hidden = !(view.dataset.mode === 'room' && view.dataset.room === room);
             });
@@ -471,10 +474,10 @@ const layoutTemplates = `
             });
           }
 
-          const contextRoom = mode === 'room' ? room : membershipPill?.dataset.membershipRoom;
+          const contextRoom = mode === 'room' ? room : '';
           const contextName = mode === 'room'
             ? (activeRoom?.dataset.roomName || activeRoom?.textContent.trim() || room)
-            : membershipPill?.dataset.membershipName;
+            : '';
           if (membershipPill && contextRoom) {
             membershipPill.href = '/r/' + encodeURIComponent(contextRoom);
             if (membershipName && contextName) membershipName.textContent = contextName;
@@ -801,7 +804,7 @@ const layoutTemplates = `
   </a>
 </div>
 {{else if and .Rooms (not .SoloTimer)}}
-<div class="desk-room-bar">
+<div class="desk-room-bar" hidden>
   <a class="room-membership-pill" href="/r/{{(index .Rooms 0).Code}}" data-membership-room="{{(index .Rooms 0).Code}}" data-membership-name="{{(index .Rooms 0).Name}}">
     <span class="room-membership-dot" aria-hidden="true"></span>
     <span class="label room-membership-label">In room</span>
@@ -1284,7 +1287,7 @@ const layoutTemplates = `
                 <svg class="desk-todos-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
               </button>
               <div class="desk-todos-menu" hidden role="listbox">
-                <button type="button" role="option" data-mode="private">Private todos</button>
+                <button type="button" role="option" data-mode="private">Private</button>
                 {{range .DeskRoomTodos}}
                 <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}" data-room-name="{{.Room.Name}}">{{.Room.Name}}</button>
                 {{end}}
@@ -1939,6 +1942,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   justify-content: center;
   padding: 2px 0 var(--sp-3);
 }
+.desk-room-bar[hidden] { display: none !important; }
 .room-membership-pill {
   display: inline-flex;
   align-items: center;
