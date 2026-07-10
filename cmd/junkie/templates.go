@@ -127,9 +127,12 @@ const layoutTemplates = `
       };
 
       const wireIdleTimer = (form) => {
+        if (!form || form.dataset.timerWired === 'true') return;
         const timer = form.querySelector('.circle-timer.idle');
         const input = form.querySelector('input[name="focus_minutes"]');
         if (!timer || !input) return;
+        form.dataset.timerWired = 'true';
+        timer.tabIndex = 0;
 
         const syncDigits = () => {
           const label = input.closest('.circle-timer-time');
@@ -143,18 +146,62 @@ const layoutTemplates = `
           setRing(timer, minutes / 180);
         };
 
+        const isReadOnly = () => input.readOnly || timer.classList.contains('room-desk-timer');
+        const adjustMinutes = (delta) => {
+          if (isReadOnly()) return;
+          input.value = clampMinutes((Number(input.value) || 50) + delta);
+          syncRing();
+        };
+
         timer.querySelectorAll('.circle-timer-step').forEach((btn) => {
           btn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            input.value = clampMinutes(Number(input.value) + Number(btn.dataset.delta));
-            syncRing();
+            adjustMinutes(Number(btn.dataset.delta));
           });
         });
 
         input.addEventListener('click', (event) => event.stopPropagation());
         input.addEventListener('input', syncRing);
         input.addEventListener('change', syncRing);
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            if (isReadOnly()) return;
+            event.preventDefault();
+            event.stopPropagation();
+            adjustMinutes(event.key === 'ArrowUp' ? 1 : -1);
+            return;
+          }
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            event.stopPropagation();
+            form.requestSubmit();
+          }
+        });
+
+        timer.addEventListener('keydown', (event) => {
+          if (event.target !== timer) return;
+          if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            if (isReadOnly()) return;
+            event.preventDefault();
+            adjustMinutes(event.key === 'ArrowUp' ? 1 : -1);
+            return;
+          }
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            form.requestSubmit();
+          }
+        });
+
+        let lastWheelAt = 0;
+        timer.addEventListener('wheel', (event) => {
+          if (isReadOnly() || event.deltaY === 0) return;
+          event.preventDefault();
+          const now = performance.now();
+          if (now - lastWheelAt < 80) return;
+          lastWheelAt = now;
+          adjustMinutes(event.deltaY < 0 ? 1 : -1);
+        }, { passive: false });
 
         timer.addEventListener('click', () => form.requestSubmit());
         syncRing();
@@ -509,7 +556,7 @@ const layoutTemplates = `
             step.removeAttribute('disabled');
           });
           input?.removeAttribute('readonly');
-          if (hint) hint.textContent = hint.dataset.hintPrivate || 'Set minutes · tap ring to focus';
+          if (hint) hint.textContent = hint.dataset.hintPrivate || 'Scroll ±1 · buttons ±5 · tap ring to focus';
           idleRing?.classList.remove('room-desk-timer');
         };
 
@@ -1169,7 +1216,7 @@ const layoutTemplates = `
               </div>
             </div>
           </form>
-          <p class="label desk-ring-hint" data-hint-private="Set minutes · tap ring to focus">Set minutes · tap ring to focus</p>
+          <p class="label desk-ring-hint" data-hint-private="Scroll ±1 · buttons ±5 · tap ring to focus">Scroll ±1 · buttons ±5 · tap ring to focus</p>
         </article>
         </div>
 
@@ -2111,6 +2158,8 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   width: 3.5ch;
   min-width: 3.5ch;
   min-height: 0;
+  appearance: textfield;
+  -moz-appearance: textfield;
   text-align: center;
   font-family: var(--font-mono);
   font-size: 3.75rem;
@@ -2122,6 +2171,11 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   padding: 0;
   color: var(--ink);
   box-shadow: none;
+}
+.circle-timer-time input::-webkit-inner-spin-button,
+.circle-timer-time input::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
 }
 .circle-timer-time input:focus { box-shadow: none; border: none; }
 .circle-timer-time.digits-3 input { font-size: 3rem; }

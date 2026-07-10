@@ -342,41 +342,8 @@
         '</div>' +
       '</form>' +
     '</article>' +
-    '<p class="label desk-ring-hint">Set minutes · tap ring to focus</p>' +
+    '<p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to focus</p>' +
     '</div>';
-
-  const wireIdleTimer = (form) => {
-    const timer = form.querySelector('.circle-timer.idle');
-    const input = form.querySelector('input[name="focus_minutes"]');
-    if (!timer || !input) return;
-
-    const syncDigits = () => {
-      const label = input.closest('.circle-timer-time');
-      label?.classList.toggle('digits-3', String(input.value).length >= 3);
-    };
-
-    const syncRing = () => {
-      const minutes = clampMinutes(Number(input.value) || 50);
-      input.value = minutes;
-      syncDigits();
-      setRing(timer, minutes / 180);
-    };
-
-    timer.querySelectorAll('.circle-timer-step').forEach((btn) => {
-      btn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        input.value = clampMinutes(Number(input.value) + Number(btn.dataset.delta));
-        syncRing();
-      });
-    });
-
-    input.addEventListener('click', (event) => event.stopPropagation());
-    input.addEventListener('input', syncRing);
-    input.addEventListener('change', syncRing);
-    timer.addEventListener('click', () => form.requestSubmit());
-    syncRing();
-  };
 
   let tickHandle = null;
   let focusTodosPeekOpen = false;
@@ -745,7 +712,7 @@
     });
 
     const timerForm = document.getElementById('guest-timer-form');
-    wireIdleTimer(timerForm);
+    window.junkieCircleTimer?.wireIdleTimer(timerForm);
     timerForm?.addEventListener('submit', (event) => {
       event.preventDefault();
       window.junkieNotify?.requestPermission();
