@@ -91,6 +91,7 @@ func groupRoomTodos(todos []todo, userID string) roomTodosSplit {
 type roomTodosGroup struct {
 	Room    room
 	Grouped roomTodosSplit
+	Timer   *timerRun
 }
 
 type timerRun struct {
@@ -104,6 +105,7 @@ type timerRun struct {
 	PhaseEndsAt    time.Time
 	Participant    bool
 	Participants   []string
+	Transitioned   bool
 }
 
 type pageData struct {
@@ -332,7 +334,11 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 		for i := range roomTodoList {
 			roomTodoList[i].RoomCode = rm.Code
 		}
-		deskRoomTodos = append(deskRoomTodos, roomTodosGroup{Room: rm, Grouped: groupRoomTodos(roomTodoList, u.ID)})
+		roomTimer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+		if transitioned {
+			a.hub.broadcast(rm.Code, "timer-phase")
+		}
+		deskRoomTodos = append(deskRoomTodos, roomTodosGroup{Room: rm, Grouped: groupRoomTodos(roomTodoList, u.ID), Timer: roomTimer})
 	}
 	a.render(w, "dashboard", pageData{
 		Title:         "Dashboard",
@@ -570,7 +576,10 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 		a.render(w, "room-invite", pageData{Title: "Join room", User: u, Room: rm})
 		return
 	}
-	timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+	timer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+	if transitioned {
+		a.hub.broadcast(rm.Code, "timer-phase")
+	}
 	todos, _ := a.roomTodos(r.Context(), rm.ID)
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
@@ -628,21 +637,18 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/r/"+code, http.StatusSeeOther)
 		return
 	case "timer-start":
-		if active, _ := a.activeTimer(r.Context(), rm.ID, u.ID); active == nil || active.Phase == "ended" {
-			ends := time.Now().Add(time.Duration(rm.FocusMinutes) * time.Minute)
-			var runID string
-			err := a.db.QueryRow(r.Context(), `INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at) VALUES ($1, $2, 'focus', $3, $4, $5, $6) RETURNING id`, rm.ID, u.ID, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, ends).Scan(&runID)
-			if err == nil {
-				_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, runID, u.ID)
-			}
+		if _, err := a.startRoomTimer(r.Context(), rm, u.ID); err != nil {
+			log.Printf("start room timer %s: %v", rm.Code, err)
+			http.Error(w, "could not start timer", http.StatusInternalServerError)
+			return
 		}
 	case "timer-join":
-		timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+		timer, _, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 		if timer != nil && (timer.Phase == "break" || timer.Phase == "focus") {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, u.ID)
 		}
 	case "timer-leave":
-		timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+		timer, _, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 		if timer != nil && timer.Participant {
 			_, _ = a.db.Exec(r.Context(), `DELETE FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2`, timer.ID, u.ID)
 			if a.endTimerIfNoParticipants(r.Context(), timer.ID) {
@@ -654,6 +660,10 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.hub.broadcast(code, action)
+	if next := strings.TrimSpace(r.FormValue("next")); next != "" {
+		http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/r/"+code, http.StatusSeeOther)
 }
 
@@ -673,44 +683,145 @@ func (a *app) roomWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timerRun, error) {
-	timer, err := a.activeTimer(ctx, roomID, userID)
-	if err != nil || timer == nil {
-		return timer, err
+func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return nil, false, err
 	}
+	defer tx.Rollback(ctx)
+
+	var timer timerRun
+	err = tx.QueryRow(ctx, `
+		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session,
+			tr.phase_started_at, tr.phase_ends_at,
+			EXISTS (SELECT 1 FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2)
+		FROM timer_runs tr
+		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
+		ORDER BY tr.created_at DESC
+		LIMIT 1
+		FOR UPDATE`, roomID, userID).Scan(
+		&timer.ID, &timer.Phase, &timer.FocusMinutes, &timer.BreakMinutes, &timer.TotalSessions,
+		&timer.CurrentSession, &timer.PhaseStartedAt, &timer.PhaseEndsAt, &timer.Participant,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
 	now := time.Now()
 	for timer.Phase != "ended" && now.After(timer.PhaseEndsAt) {
 		if timer.Phase == "focus" {
-			_, _ = a.db.Exec(ctx, `
+			if _, err = tx.Exec(ctx, `
 				INSERT INTO activity (user_id, activity_date, focus_minutes)
 				SELECT user_id, CURRENT_DATE, $1 FROM timer_participants WHERE timer_run_id = $2
 				ON CONFLICT (user_id, activity_date)
-				DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, timer.FocusMinutes, timer.ID)
+				DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, timer.FocusMinutes, timer.ID); err != nil {
+				return nil, false, err
+			}
 			if timer.CurrentSession >= timer.TotalSessions {
-				_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID)
+				if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID); err != nil {
+					return nil, false, err
+				}
+				timer.Phase = "ended"
+				timer.Transitioned = true
 				break
 			}
 			timer.Phase = "break"
 			timer.PhaseStartedAt = now
 			timer.PhaseEndsAt = now.Add(time.Duration(timer.BreakMinutes) * time.Minute)
-			_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $2 WHERE id = $3`, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID)
+			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $2 WHERE id = $3`, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
+				return nil, false, err
+			}
+			timer.Transitioned = true
 		} else if timer.Phase == "break" {
 			timer.Phase = "focus"
 			timer.CurrentSession++
 			timer.PhaseStartedAt = now
 			timer.PhaseEndsAt = now.Add(time.Duration(timer.FocusMinutes) * time.Minute)
-			_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'focus', current_session = $1, phase_started_at = $2, phase_ends_at = $3 WHERE id = $4`, timer.CurrentSession, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID)
+			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'focus', current_session = $1, phase_started_at = $2, phase_ends_at = $3 WHERE id = $4`, timer.CurrentSession, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
+				return nil, false, err
+			}
+			timer.Transitioned = true
 		}
 	}
 	if timer.Phase == "ended" {
-		return nil, nil
+		if err = tx.Commit(ctx); err != nil {
+			return nil, false, err
+		}
+		return nil, true, nil
 	}
-	timer.Participants, _ = a.timerParticipants(ctx, timer.ID)
+	rows, err := tx.Query(ctx, `SELECT u.display_name FROM timer_participants tp JOIN users u ON u.id = tp.user_id WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, timer.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			rows.Close()
+			return nil, false, err
+		}
+		timer.Participants = append(timer.Participants, name)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, false, err
+	}
 	if len(timer.Participants) == 0 {
-		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID)
-		return nil, nil
+		if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID); err != nil {
+			return nil, false, err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return nil, false, err
+		}
+		return nil, true, nil
 	}
-	return timer, nil
+	if err = tx.Commit(ctx); err != nil {
+		return nil, false, err
+	}
+	return &timer, timer.Transitioned, nil
+}
+
+func (a *app) startRoomTimer(ctx context.Context, rm room, userID string) (bool, error) {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Serialize starts for this room. The partial unique index remains the final
+	// invariant even if another code path attempts an insert.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, rm.ID); err != nil {
+		return false, err
+	}
+	var exists bool
+	if err = tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM timer_runs
+			WHERE room_id = $1 AND ended_at IS NULL AND phase <> 'ended'
+		)`, rm.ID).Scan(&exists); err != nil {
+		return false, err
+	}
+	if exists {
+		return false, tx.Commit(ctx)
+	}
+
+	ends := time.Now().Add(time.Duration(rm.FocusMinutes) * time.Minute)
+	var runID string
+	if err = tx.QueryRow(ctx, `
+		INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at)
+		VALUES ($1, $2, 'focus', $3, $4, $5, $6)
+		RETURNING id`, rm.ID, userID, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, ends).Scan(&runID); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2)`, runID, userID); err != nil {
+		return false, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func soloBreakMinutes(focusMinutes int) int {
@@ -780,7 +891,7 @@ func (a *app) activeTimer(ctx context.Context, roomID, userID string) (*timerRun
 		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session, tr.phase_started_at, tr.phase_ends_at,
 			EXISTS (SELECT 1 FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2)
 		FROM timer_runs tr
-		WHERE tr.room_id = $1 AND tr.ended_at IS NULL
+		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
 		ORDER BY tr.created_at DESC
 		LIMIT 1`, roomID, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.Participant)
 	if errors.Is(err, pgx.ErrNoRows) {

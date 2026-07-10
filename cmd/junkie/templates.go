@@ -234,8 +234,11 @@ const layoutTemplates = `
           setRing(timer, left / total);
           if (left <= 0 && !notified) {
             notified = true;
-            window.junkieNotify?.onTimerEnd(phase);
-            if (soloTimer) setTimeout(() => location.reload(), 400);
+            const deskView = box.closest('.desk-timer-view');
+            if (!deskView || !deskView.hidden) {
+              window.junkieNotify?.onTimerEnd(phase);
+              setTimeout(() => location.reload(), 400);
+            }
           }
           if (left > 0) left -= 1;
         };
@@ -526,67 +529,22 @@ const layoutTemplates = `
 
       const wireDeskTimerMode = () => {
         const panel = document.querySelector('.desk-todos-panel[data-has-rooms="true"]');
-        const form = document.querySelector('.circle-timer-form');
         const column = document.querySelector('.desk-ring-column');
-        if (!panel || !form || !column) return;
+        if (!panel || !column) return;
 
-        const hint = column.querySelector('.desk-ring-hint');
-        const idleRing = form.querySelector('.circle-timer.idle');
-        const steps = form.querySelectorAll('.circle-timer-step');
-        const input = form.querySelector('input[name="focus_minutes"]');
+        const views = Array.from(column.querySelectorAll('.desk-timer-view'));
         const modeKey = 'junkie:deskTodosMode';
         const roomKey = 'junkie:deskTodosRoom';
-
-        const roomMeta = (context) => {
-          const room = context?.room || sessionStorage.getItem(roomKey) || panel.querySelector('.desk-todos-view[data-mode="room"]')?.dataset.room || '';
-          const menuOpt = panel.querySelector('.desk-todos-menu [data-mode="room"][data-room="' + room + '"]');
-          const meta = column.querySelector('[data-room-focus="' + room + '"]');
-          return {
-            room,
-            name: context?.roomName || meta?.dataset.roomName || menuOpt?.dataset.roomName || menuOpt?.textContent.trim() || room,
-            focusMinutes: Number(meta?.dataset.focusMinutes || 50),
-          };
-        };
-
-        const applySolo = () => {
-          form.action = '/solo/start';
-          form.removeAttribute('data-room-name');
-          steps.forEach((step) => {
-            step.removeAttribute('hidden');
-            step.removeAttribute('disabled');
-          });
-          input?.removeAttribute('readonly');
-          if (hint) hint.textContent = hint.dataset.hintPrivate || 'Scroll ±1 · buttons ±5 · tap ring to focus';
-          idleRing?.classList.remove('room-desk-timer');
-        };
-
-        const applyRoom = (context) => {
-          const { room, name, focusMinutes } = roomMeta(context);
-          if (!room) {
-            applySolo();
-            return;
-          }
-          form.action = '/r/' + room + '/timer-start';
-          form.dataset.roomName = name;
-          if (input) {
-            input.value = focusMinutes;
-            input.setAttribute('readonly', 'readonly');
-            input.closest('.circle-timer-time')?.classList.toggle('digits-3', String(focusMinutes).length >= 3);
-          }
-          window.junkieCircleTimer?.setRing(idleRing, focusMinutes / 180);
-          steps.forEach((step) => {
-            step.removeAttribute('hidden');
-            step.setAttribute('disabled', '');
-          });
-          if (hint) hint.textContent = 'Room focus · ' + name;
-          idleRing?.classList.add('room-desk-timer');
-        };
 
         const sync = (event) => {
           const context = event?.detail;
           const mode = context?.mode || sessionStorage.getItem(modeKey) || 'room';
-          if (mode === 'room') applyRoom(context);
-          else applySolo();
+          const room = context?.room || sessionStorage.getItem(roomKey) || panel.querySelector('.desk-todos-view[data-mode="room"]')?.dataset.room || '';
+          views.forEach((view) => {
+            view.hidden = mode === 'private'
+              ? view.dataset.mode !== 'private'
+              : !(view.dataset.mode === 'room' && view.dataset.room === room);
+          });
         };
 
         panel.addEventListener('desk-todos-mode-change', sync);
@@ -631,6 +589,10 @@ const layoutTemplates = `
 
       window.junkieOnRoomWSMessage = (code, msg, roomName) => {
         if (msg === 'timer-start' && !document.querySelector('.room-focus-shell')) {
+          if (deskTodosViewingRoom(code)) {
+            setTimeout(() => location.reload(), 100);
+            return;
+          }
           showFocusJoinPrompt(code, roomName);
           return;
         }
@@ -643,7 +605,7 @@ const layoutTemplates = `
         const onRoomPage = document.querySelector('.room-shell') || document.querySelector('.room-focus-page');
         if (msg === 'todos') {
           if (!onRoomPage && !deskTodosViewingRoom(code)) return;
-        } else if (!onRoomPage) {
+        } else if (!onRoomPage && !deskTodosViewingRoom(code)) {
           return;
         }
         setTimeout(() => location.reload(), 200);
@@ -994,6 +956,118 @@ const layoutTemplates = `
 <div class="auth-brand"><span class="brand-mark">j</span></div>
 {{end}}
 
+{{define "desk-private-timer"}}
+<div class="desk-timer-view" data-mode="private"{{if .Rooms}} hidden{{end}}>
+  {{if .SoloTimer}}
+  <article class="timer-card panel {{.SoloTimer.Phase}} solo-timer">
+    {{if eq .SoloTimer.Phase "focus"}}
+    <p class="label label-accent">Private focus</p>
+    <div class="circle-timer running" role="timer" aria-label="Private focus countdown">
+      <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+        <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+      </svg>
+      <div class="circle-timer-core">
+        <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.FocusMinutes 60}}">--:--</div>
+      </div>
+    </div>
+    <form method="post" action="/solo/cancel" onsubmit="return confirm('End this focus session? It won\'t count toward your map.')">
+      <button type="submit" class="btn-ghost timer-cancel">End early</button>
+    </form>
+    {{else if soloBreakPending .SoloTimer}}
+    <p class="label label-warn">Private break ready</p>
+    <div class="room-ready-time mono">{{.SoloTimer.BreakMinutes}}:00</div>
+    <form method="post" action="/solo/break/start"><button type="submit" class="btn-primary">Start break</button></form>
+    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
+    {{else}}
+    <p class="label label-warn">Private break</p>
+    <div class="circle-timer break-running breather" role="timer" aria-label="Private break countdown">
+      <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+        <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+      </svg>
+      <div class="circle-timer-core">
+        <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.BreakMinutes 60}}">--:--</div>
+      </div>
+    </div>
+    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
+    {{end}}
+  </article>
+  {{else}}
+  <article class="circle-timer-wrap">
+    <form class="circle-timer-form" method="post" action="/solo/start">
+      <div class="circle-timer idle" role="group" aria-label="Set private focus duration">
+        <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+          <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+        </svg>
+        <div class="circle-timer-core">
+          <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
+          <label class="circle-timer-time"><input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes"></label>
+          <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
+        </div>
+      </div>
+    </form>
+    <p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to focus</p>
+  </article>
+  {{end}}
+</div>
+{{end}}
+
+{{define "desk-room-timer"}}
+<div class="desk-timer-view" data-mode="room" data-room="{{.Room.Code}}" hidden>
+  {{if .Timer}}
+  <article class="timer-card panel {{.Timer.Phase}}">
+    <p class="label {{if eq .Timer.Phase "focus"}}label-accent{{else}}label-warn{{end}}">
+      {{if eq .Timer.Phase "focus"}}Focus{{else}}Break{{end}} · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}
+    </p>
+    <div class="circle-timer {{if eq .Timer.Phase "focus"}}running{{else}}break-running breather{{end}}" role="timer" aria-label="{{.Timer.Phase}} countdown">
+      <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+        <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+      </svg>
+      <div class="circle-timer-core">
+        <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}" data-total="{{if eq .Timer.Phase "focus"}}{{mul .Timer.FocusMinutes 60}}{{else}}{{mul .Timer.BreakMinutes 60}}{{end}}">--:--</div>
+      </div>
+    </div>
+    {{if and (eq .Timer.Phase "focus") (not .Timer.Participant)}}
+    <p class="label label-warn">Watching · join on next break</p>
+    {{else if and (eq .Timer.Phase "break") (not .Timer.Participant)}}
+    <form method="post" action="/r/{{.Room.Code}}/timer-join">
+      <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+      <button type="submit" class="btn-primary">Join this block</button>
+    </form>
+    {{else if .Timer.Participant}}
+    <form method="post" action="/r/{{.Room.Code}}/timer-leave">
+      <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+      <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
+    </form>
+    {{end}}
+    {{if gt (len .Timer.Participants) 1}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
+    <p class="label">{{if .Timer.Participant}}Participating{{else}}Watching{{end}} · {{len .Timer.Participants}} focusing</p>
+  </article>
+  {{else}}
+  <article class="circle-timer-wrap">
+    <form class="circle-timer-form" method="post" action="/r/{{.Room.Code}}/timer-start" data-room-name="{{.Room.Name}}">
+      <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+      <div class="circle-timer idle room-desk-timer" role="group" aria-label="Start {{.Room.Name}} focus timer">
+        <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+          <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+        </svg>
+        <div class="circle-timer-core">
+          <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Room duration is fixed" disabled>−</button>
+          <label class="circle-timer-time"><input type="number" name="focus_minutes" value="{{.Room.FocusMinutes}}" readonly aria-label="Room focus minutes"></label>
+          <button type="button" class="circle-timer-step" data-delta="5" aria-label="Room duration is fixed" disabled>+</button>
+        </div>
+      </div>
+    </form>
+    <p class="label desk-ring-hint">Room focus · {{.Room.Name}} · {{.Room.AutoSessions}} × {{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</p>
+  </article>
+  {{end}}
+</div>
+{{end}}
+
 {{define "login"}}{{template "shell" .}}{{end}}
 {{define "dashboard"}}{{template "shell" .}}{{end}}
 {{define "profile"}}{{template "shell" .}}{{end}}
@@ -1112,7 +1186,7 @@ const layoutTemplates = `
     <div id="guest-desk" class="desk-shell"></div>
     <script src="/assets/guest.js"></script>
     {{else}}
-    {{if .SoloTimer}}
+    {{if and .SoloTimer (not .SoloTimer)}}
     <div class="desk-shell desk-shell-focus">
     <section class="focus-desk solo-timer">
       <div class="focus-desk-main">
@@ -1197,27 +1271,8 @@ const layoutTemplates = `
     {{range .Rooms}}<span hidden data-room-ws="{{.Code}}" data-room-name="{{.Name}}"></span>{{end}}
       <section class="grid two desk-grid">
         <div class="desk-ring-column">
-        {{range .DeskRoomTodos}}
-        <span hidden class="desk-room-focus-meta" data-room-focus="{{.Room.Code}}" data-focus-minutes="{{.Room.FocusMinutes}}" data-room-name="{{.Room.Name}}"></span>
-        {{end}}
-        <article class="circle-timer-wrap">
-          <form class="circle-timer-form" method="post" action="/solo/start">
-            <div class="circle-timer idle" role="group" aria-label="Set focus duration">
-              <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-                <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
-                <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
-              </svg>
-              <div class="circle-timer-core">
-                <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease 5 minutes">−</button>
-                <label class="circle-timer-time">
-                  <input type="number" name="focus_minutes" min="5" max="180" value="50" aria-label="Focus minutes">
-                </label>
-                <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase 5 minutes">+</button>
-              </div>
-            </div>
-          </form>
-          <p class="label desk-ring-hint" data-hint-private="Scroll ±1 · buttons ±5 · tap ring to focus">Scroll ±1 · buttons ±5 · tap ring to focus</p>
-        </article>
+        {{template "desk-private-timer" .}}
+        {{range .DeskRoomTodos}}{{template "desk-room-timer" .}}{{end}}
         </div>
 
         <article class="panel desk-todos-panel"{{if .DeskRoomTodos}} data-has-rooms="true"{{end}}>
