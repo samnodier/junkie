@@ -22,6 +22,19 @@ func parseTemplates() *template.Template {
 		"rfc3339Nano": func(t time.Time) string {
 			return t.UTC().Format(time.RFC3339Nano)
 		},
+		"timerSeconds": func(t *timerRun) int {
+			if t == nil {
+				return 0
+			}
+			if t.PausedRemainingSeconds != nil {
+				return *t.PausedRemainingSeconds
+			}
+			seconds := int(time.Until(t.PhaseEndsAt).Seconds())
+			if seconds < 0 {
+				return 0
+			}
+			return seconds
+		},
 		"focusHours": func(minutes int) int {
 			return (minutes + 30) / 60
 		},
@@ -82,7 +95,7 @@ const layoutTemplates = `
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="/assets/notifications.js"></script>
 </head>
-<body{{if or .SoloTimer .FocusMode}} class="focus-active"{{end}}>
+<body{{if or .SoloTimer .FocusMode}} class="focus-active"{{end}}{{if .User.ID}} data-user-id="{{.User.ID}}"{{end}}>
   {{$menu := or (eq .Title "Dashboard") (eq .Title "Profile") (and (ne .Room.Code "") (ne .Title "Join room"))}}
   <header class="topbar">
     <a class="brand" href="/" aria-label="junkie home">
@@ -214,6 +227,7 @@ const layoutTemplates = `
 
       const timerPhase = (box) => {
         const card = box.closest('.timer-card');
+        if (card?.classList.contains('lobby')) return 'lobby';
         if (card?.classList.contains('break')) return 'break';
         if (card?.classList.contains('focus')) return 'focus';
         if (box.closest('.circle-timer.break-running')) return 'break';
@@ -224,6 +238,7 @@ const layoutTemplates = `
       document.querySelectorAll('[data-seconds]').forEach((box) => {
         let left = Number(box.dataset.seconds || 0);
         const total = Number(box.dataset.total || left) || 1;
+        const paused = box.dataset.paused === 'true';
         const timer = box.closest('.circle-timer');
         const phase = timerPhase(box);
         const soloTimer = box.closest('.solo-timer');
@@ -239,7 +254,7 @@ const layoutTemplates = `
             notified = true;
             const deskView = box.closest('.desk-timer-view');
             if (!deskView || !deskView.hidden) {
-              window.junkieNotify?.onTimerEnd(phase);
+              if (phase !== 'lobby') window.junkieNotify?.onTimerEnd(phase);
               const roomSync = box.closest('[data-room-sync]');
               setTimeout(() => {
                 if (roomSync && window.junkieReconcileRoomTimer) {
@@ -250,7 +265,7 @@ const layoutTemplates = `
               }, 400);
             }
           }
-          if (left > 0) left -= 1;
+          if (left > 0 && !paused) left -= 1;
         };
         paint();
         setInterval(paint, 1000);
@@ -265,6 +280,18 @@ const layoutTemplates = `
           }
         });
       });
+
+      document.querySelectorAll('form[action="/rooms"], form[action="/rooms/join"], form[action="/join/confirm"]').forEach((form) => {
+        form.addEventListener('submit', () => window.junkieNotify?.requestPermission());
+      });
+
+      const roomInviteToggle = document.getElementById('room-invite-notifications');
+      if (roomInviteToggle) {
+        roomInviteToggle.checked = window.junkieNotify?.roomInvitesEnabled() !== false;
+        roomInviteToggle.addEventListener('change', () => {
+          window.junkieNotify?.setRoomInvitesEnabled(roomInviteToggle.checked);
+        });
+      }
 
       window.junkieCircleTimer = { CIRC, clampMinutes, setRing, wireIdleTimer };
 
@@ -573,6 +600,8 @@ const layoutTemplates = `
         totalSessions: Number(el?.dataset.totalSessions || 0),
         participant: el?.dataset.participant === 'true',
         participantCount: Number(el?.dataset.participantCount || 0),
+        paused: el?.dataset.paused === 'true',
+        pausedRemainingSeconds: Number(el?.dataset.pausedRemaining || 0),
       });
 
       const selectedRoomTimer = () => {
@@ -590,7 +619,9 @@ const layoutTemplates = `
           current.currentSession === Number(server.currentSession || 0) &&
           current.totalSessions === Number(server.totalSessions || 0) &&
           current.participant === Boolean(server.participant) &&
-          current.participantCount === Number(server.participantCount || 0);
+          current.participantCount === Number(server.participantCount || 0) &&
+          current.paused === Boolean(server.paused) &&
+          current.pausedRemainingSeconds === Number(server.pausedRemainingSeconds || 0);
       };
 
       let roomStatusRequest = null;
@@ -635,29 +666,57 @@ const layoutTemplates = `
         if (document.visibilityState === 'visible') reconcileRoomTimer('periodic');
       }, 45000);
 
-      const showFocusJoinPrompt = (code, roomName) => {
+      const escapeHTML = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[char]));
+
+      const showFocusJoinPrompt = (code, roomName, starterName, lobbyDeadline) => {
         if (document.getElementById('focus-join-prompt')) return;
         if (document.querySelector('.room-focus-shell')) return;
 
+        const deadline = Date.parse(lobbyDeadline || '') || Date.now() + 10000;
         const backdrop = document.createElement('div');
         backdrop.id = 'focus-join-prompt';
         backdrop.className = 'join-prompt-backdrop';
         backdrop.innerHTML =
           '<div class="join-prompt-card panel" role="dialog" aria-labelledby="join-prompt-title">' +
-            '<p class="label label-accent">Focus block</p>' +
-            '<h2 id="join-prompt-title">Join ' + roomName.replace(/</g, '&lt;') + ' focus block?</h2>' +
+            '<p class="label label-accent">Starting · join now</p>' +
+            '<h2 id="join-prompt-title">' + escapeHTML(starterName) + ' is starting a focus block in ' + escapeHTML(roomName) + '. Join?</h2>' +
+            '<p class="join-prompt-countdown mono" aria-live="polite">00:10</p>' +
             '<div class="join-prompt-actions">' +
-              '<form method="post" action="/r/' + code + '/timer-join">' +
+              '<form method="post" action="/r/' + encodeURIComponent(code) + '/timer-join">' +
                 '<button type="submit" class="btn-primary">Join</button>' +
               '</form>' +
               '<button type="button" class="btn-ghost" data-dismiss>Not now</button>' +
             '</div>' +
           '</div>';
-        backdrop.querySelector('[data-dismiss]')?.addEventListener('click', () => backdrop.remove());
+        const dismiss = () => {
+          backdrop.remove();
+          const onRoomPage = document.querySelector('[data-room-page]')?.dataset.roomSync === code;
+          if (onRoomPage || deskTodosViewingRoom(code)) location.reload();
+        };
+        backdrop.querySelector('[data-dismiss]')?.addEventListener('click', dismiss);
         backdrop.addEventListener('click', (event) => {
-          if (event.target === backdrop) backdrop.remove();
+          if (event.target === backdrop) dismiss();
         });
         document.body.appendChild(backdrop);
+        backdrop.querySelector('.btn-primary')?.focus();
+
+        const countdown = backdrop.querySelector('.join-prompt-countdown');
+        const paint = () => {
+          const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+          countdown.textContent = '00:' + String(left).padStart(2, '0');
+          if (left === 0) {
+            clearInterval(interval);
+            backdrop.remove();
+            location.reload();
+          }
+        };
+        const interval = setInterval(paint, 250);
+        paint();
+        window.junkieNotify?.onRoomInvite(starterName, roomName, () => {
+          backdrop.querySelector('.btn-primary')?.focus();
+        });
       };
       window.junkieShowFocusJoinPrompt = showFocusJoinPrompt;
 
@@ -671,22 +730,34 @@ const layoutTemplates = `
       };
 
       window.junkieOnRoomWSMessage = (code, msg, roomName) => {
-        if (msg === 'timer-start' && !document.querySelector('.room-focus-shell')) {
-          if (deskTodosViewingRoom(code)) {
-            setTimeout(() => location.reload(), 100);
+        let event = null;
+        if (typeof msg === 'string' && msg.startsWith('{')) {
+          try { event = JSON.parse(msg); } catch (_) {}
+        }
+        const type = event?.type || msg;
+        if (type === 'timer-lobby' && !document.querySelector('.room-focus-shell')) {
+          if (event?.starterUserId === document.body.dataset.userId) {
+            if (document.querySelector('[data-room-page]') || deskTodosViewingRoom(code)) {
+              setTimeout(() => location.reload(), 100);
+            }
             return;
           }
-          showFocusJoinPrompt(code, roomName);
+          showFocusJoinPrompt(
+            event?.roomCode || code,
+            event?.roomName || roomName,
+            event?.starterName || 'A room member',
+            event?.lobbyDeadline || ''
+          );
           return;
         }
-        if (msg === 'deleted') {
+        if (type === 'deleted') {
           if (document.querySelector('.room-shell') || document.querySelector('.room-focus-page')) {
             window.location = '/';
           }
           return;
         }
         const onRoomPage = document.querySelector('.room-shell') || document.querySelector('.room-focus-page');
-        if (msg === 'todos') {
+        if (type === 'todos') {
           if (!onRoomPage && !deskTodosViewingRoom(code)) return;
         } else if (!onRoomPage && !deskTodosViewingRoom(code)) {
           return;
@@ -951,7 +1022,7 @@ const layoutTemplates = `
   </li>
 {{end}}
 
-{{define "room-timer-status-attrs"}}data-room-sync="{{.Room.Code}}" {{if .Timer}}data-run-id="{{.Timer.ID}}" data-phase="{{.Timer.Phase}}" data-ends-at="{{rfc3339Nano .Timer.PhaseEndsAt}}" data-current-session="{{.Timer.CurrentSession}}" data-total-sessions="{{.Timer.TotalSessions}}" data-participant="{{if .Timer.Participant}}true{{else}}false{{end}}" data-participant-count="{{len .Timer.Participants}}"{{else}}data-run-id="" data-phase="idle" data-ends-at="" data-current-session="0" data-total-sessions="0" data-participant="false" data-participant-count="0"{{end}}{{end}}
+{{define "room-timer-status-attrs"}}data-room-sync="{{.Room.Code}}" {{if .Timer}}data-run-id="{{.Timer.ID}}" data-phase="{{.Timer.Phase}}" data-ends-at="{{rfc3339Nano .Timer.PhaseEndsAt}}" data-current-session="{{.Timer.CurrentSession}}" data-total-sessions="{{.Timer.TotalSessions}}" data-participant="{{if .Timer.Participant}}true{{else}}false{{end}}" data-participant-count="{{len .Timer.Participants}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}" data-paused-remaining="{{timerSeconds .Timer}}"{{else}}data-run-id="" data-phase="idle" data-ends-at="" data-current-session="0" data-total-sessions="0" data-participant="false" data-participant-count="0" data-paused="false" data-paused-remaining="0"{{end}}{{end}}
 
 {{define "todo-row-focus"}}
   <li class="{{if .Done}}done{{end}}">
@@ -1127,35 +1198,42 @@ const layoutTemplates = `
 <div class="desk-timer-view" data-mode="room" data-room="{{.Room.Code}}" {{template "room-timer-status-attrs" .}} hidden>
   {{if .Timer}}
   <article class="timer-card panel desk-timer-card {{.Timer.Phase}}">
-    <p class="label {{if eq .Timer.Phase "focus"}}label-accent{{else}}label-warn{{end}}">
-      {{if eq .Timer.Phase "focus"}}Focus{{else}}Break{{end}} · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}
+    <p class="label {{if or (eq .Timer.Phase "focus") (eq .Timer.Phase "lobby")}}label-accent{{else}}label-warn{{end}}">
+      {{if eq .Timer.Phase "lobby"}}Starting · join now{{else if eq .Timer.Phase "focus"}}Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{else if .Timer.PausedAt}}Break paused{{else}}Break · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{end}}
     </p>
-    <div class="circle-timer {{if eq .Timer.Phase "focus"}}running{{else}}break-running breather{{end}}" role="timer" aria-label="{{.Timer.Phase}} countdown">
+    <div class="circle-timer {{if or (eq .Timer.Phase "focus") (eq .Timer.Phase "lobby")}}running{{else}}break-running breather{{end}}" role="timer" aria-label="{{.Timer.Phase}} countdown">
       <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
         <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
         <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
       </svg>
       <div class="circle-timer-core">
-        <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}" data-total="{{if eq .Timer.Phase "focus"}}{{mul .Timer.FocusMinutes 60}}{{else}}{{mul .Timer.BreakMinutes 60}}{{end}}">--:--</div>
+        <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="{{if eq .Timer.Phase "lobby"}}10{{else if eq .Timer.Phase "focus"}}{{mul .Timer.FocusMinutes 60}}{{else}}{{mul .Timer.BreakMinutes 60}}{{end}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}">--:--</div>
       </div>
     </div>
     {{if and (eq .Timer.Phase "focus") (not .Timer.Participant)}}
     <p class="label label-warn">Watching · join on next break</p>
     {{end}}
     <footer class="desk-timer-footer">
-      {{if and (eq .Timer.Phase "break") (not .Timer.Participant)}}
+      {{if and (or (eq .Timer.Phase "lobby") (eq .Timer.Phase "break")) (not .Timer.Participant)}}
       <form method="post" action="/r/{{.Room.Code}}/timer-join">
         <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
         <button type="submit" class="btn-primary">Join this block</button>
       </form>
-      {{else if .Timer.Participant}}
-      <form method="post" action="/r/{{.Room.Code}}/timer-leave">
+      {{end}}
+      {{if eq .Timer.Phase "break"}}
+      <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
         <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
-        <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
+        <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
       </form>
       {{end}}
-      {{if gt (len .Timer.Participants) 1}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
-      <p class="label">{{if .Timer.Participant}}Participating{{else}}Watching{{end}} · {{len .Timer.Participants}} focusing</p>
+      {{if .Timer.Participant}}
+      <form method="post" action="/r/{{.Room.Code}}/timer-leave">
+        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+        <button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button>
+      </form>
+      {{end}}
+      {{if gt (len .Timer.Participants) 0}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
+      <p class="label">{{if .Timer.Participant}}Participating{{else}}Watching{{end}} · {{len .Timer.Participants}} joined</p>
     </footer>
   </article>
   {{else}}
@@ -1559,6 +1637,16 @@ const layoutTemplates = `
           </div>
         </div>
         {{template "heatmap" .}}
+        <div class="profile-preference">
+          <div>
+            <strong>Room invite notifications</strong>
+            <p class="muted">Notify me when a room starts a focus lobby while junkie is in the background.</p>
+          </div>
+          <label class="toggle-control">
+            <input type="checkbox" id="room-invite-notifications" aria-label="Room invite notifications">
+            <span aria-hidden="true"></span>
+          </label>
+        </div>
         <p class="muted profile-follow-stub">Follow friends — coming soon</p>
       {{end}}
     </section>
@@ -1635,7 +1723,23 @@ const layoutTemplates = `
         <div class="room-timer-column">
           {{if .Timer}}
           <article class="timer-card panel {{.Timer.Phase}}">
-            {{if eq .Timer.Phase "focus"}}
+            {{if eq .Timer.Phase "lobby"}}
+            <p class="label label-accent">Starting · join now</p>
+            <div class="circle-timer running room-active-ring" role="timer" aria-label="Focus lobby countdown">
+              <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+                <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+                <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+              </svg>
+              <div class="circle-timer-core">
+                <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="10">--:--</div>
+              </div>
+            </div>
+            {{if not .Timer.Participant}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
+            {{else}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-leave"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
+            {{end}}
+            {{else if eq .Timer.Phase "focus"}}
             <p class="label label-accent">Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}</p>
             <div class="circle-timer running room-active-ring" role="timer">
               <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
@@ -1654,14 +1758,20 @@ const layoutTemplates = `
             </form>
             {{end}}
             {{else}}
-            <p class="label label-warn">Break · next block in <span class="countdown mono" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}">--:--</span></p>
+            <p class="label label-warn">{{if .Timer.PausedAt}}Break paused{{else}}Break · next block in{{end}} <span class="countdown mono" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}">--:--</span></p>
             <div class="room-ready-time mono">{{.Timer.FocusMinutes}}:00</div>
             {{if not .Timer.Participant}}
             <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
             {{end}}
+            <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
+              <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
+            </form>
+            {{if .Timer.Participant}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-leave"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
             {{end}}
-            {{if gt (len .Timer.Participants) 1}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
-            <p class="label">{{if eq (len .Timer.Participants) 1}}Focusing solo{{else}}{{len .Timer.Participants}} focusing{{end}}</p>
+            {{end}}
+            {{if gt (len .Timer.Participants) 0}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
+            <p class="label">{{if eq .Timer.Phase "lobby"}}{{len .Timer.Participants}} joined{{else if eq (len .Timer.Participants) 1}}Focusing solo{{else}}{{len .Timer.Participants}} focusing{{end}}</p>
           </article>
           {{else}}
           <article class="timer-card panel idle ready-card">
@@ -2530,6 +2640,12 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-size: var(--fs-title);
   font-weight: 600;
 }
+.join-prompt-countdown {
+  margin: calc(-1 * var(--sp-3)) 0 var(--sp-5);
+  color: var(--accent);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
 .join-prompt-actions {
   display: flex;
   gap: var(--sp-3);
@@ -2903,6 +3019,41 @@ body.menu-drawer-open { overflow: hidden; }
 .settings label { display: grid; gap: var(--sp-2); font-size: var(--fs-small); font-weight: 600; }
 .profile-page { max-width: 720px; margin: var(--sp-8) auto 0; padding: var(--sp-6); }
 .profile-page h1 { font-size: var(--fs-card-title); margin: 0; }
+.profile-preference {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--border);
+}
+.profile-preference strong { display: block; margin-bottom: var(--sp-1); }
+.profile-preference p { margin: 0; }
+.toggle-control { flex: 0 0 auto; cursor: pointer; }
+.toggle-control input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.toggle-control span {
+  display: block;
+  width: 3rem;
+  height: 1.65rem;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  transition: background 150ms ease;
+}
+.toggle-control span::after {
+  content: "";
+  display: block;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 150ms ease, background 150ms ease;
+}
+.toggle-control input:checked + span { background: var(--accent-soft); border-color: var(--accent); }
+.toggle-control input:checked + span::after { transform: translateX(1.3rem); background: var(--accent); }
+.toggle-control input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .profile-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

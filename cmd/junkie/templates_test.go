@@ -59,7 +59,7 @@ func TestDashboardRendersIndependentSoloAndRoomTimers(t *testing.T) {
 		`class="timer-card panel desk-timer-card break"`,
 		`<footer class="desk-timer-footer">`,
 		`Break · session 2 of 3`,
-		`Watching · 1 focusing`,
+		`Watching · 1 joined`,
 		`action="/r/JUNK-IES/timer-join"`,
 		`data-room-sync="JUNK-IES"`,
 		`data-run-id="room-timer-id"`,
@@ -70,6 +70,89 @@ func TestDashboardRendersIndependentSoloAndRoomTimers(t *testing.T) {
 	} {
 		if !strings.Contains(html, expected) {
 			t.Errorf("dashboard output missing %q", expected)
+		}
+	}
+}
+
+func TestDashboardRendersRoomLobby(t *testing.T) {
+	now := time.Now()
+	rm := room{Code: "JUNK-IES", Name: "junkies", FocusMinutes: 50, BreakMinutes: 10, AutoSessions: 3}
+	data := pageData{
+		Title: "Dashboard",
+		User:  user{ID: "starter-id", DisplayName: "Sam"},
+		Rooms: []room{rm},
+		DeskRoomTodos: []roomTodosGroup{{
+			Room: rm,
+			Timer: &timerRun{
+				ID:             "lobby-id",
+				Phase:          "lobby",
+				FocusMinutes:   50,
+				BreakMinutes:   10,
+				TotalSessions:  3,
+				CurrentSession: 1,
+				PhaseEndsAt:    now.Add(10 * time.Second),
+				Participant:    true,
+				Participants:   []string{"Sam"},
+			},
+		}},
+	}
+
+	var output bytes.Buffer
+	if err := parseTemplates().ExecuteTemplate(&output, "dashboard", data); err != nil {
+		t.Fatalf("render dashboard: %v", err)
+	}
+	html := output.String()
+	for _, expected := range []string{
+		`Starting · join now`,
+		`class="timer-card panel desk-timer-card lobby"`,
+		`data-total="10"`,
+		`data-phase="lobby"`,
+		`data-user-id="starter-id"`,
+		`is starting a focus block in`,
+	} {
+		if !strings.Contains(html, expected) {
+			t.Errorf("dashboard lobby output missing %q", expected)
+		}
+	}
+}
+
+func TestRoomRendersPausedBreakControls(t *testing.T) {
+	now := time.Now()
+	remaining := 137
+	data := pageData{
+		Title: "Study room",
+		User:  user{ID: "user-id", DisplayName: "Sam"},
+		Room:  room{Code: "JUNK-IES", Name: "Study room"},
+		Timer: &timerRun{
+			ID:                     "timer-id",
+			Phase:                  "break",
+			FocusMinutes:           50,
+			BreakMinutes:           10,
+			TotalSessions:          3,
+			CurrentSession:         1,
+			PhaseEndsAt:            now.Add(time.Minute),
+			PausedAt:               &now,
+			PausedRemainingSeconds: &remaining,
+			Participant:            true,
+			Participants:           []string{"Sam"},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := parseTemplates().ExecuteTemplate(&output, "room", data); err != nil {
+		t.Fatalf("render room: %v", err)
+	}
+	html := output.String()
+	for _, expected := range []string{
+		`Break paused`,
+		`data-seconds="137" data-paused="true"`,
+		`action="/r/JUNK-IES/timer-resume"`,
+		`Resume break`,
+		`Leave this focus block`,
+		`data-paused="true" data-paused-remaining="137"`,
+	} {
+		if !strings.Contains(html, expected) {
+			t.Errorf("paused break output missing %q", expected)
 		}
 	}
 }

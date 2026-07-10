@@ -98,27 +98,33 @@ type roomTodosGroup struct {
 }
 
 type timerRun struct {
-	ID             string
-	Phase          string
-	FocusMinutes   int
-	BreakMinutes   int
-	TotalSessions  int
-	CurrentSession int
-	PhaseStartedAt time.Time
-	PhaseEndsAt    time.Time
-	Participant    bool
-	Participants   []string
-	Transitioned   bool
+	ID                     string
+	Phase                  string
+	FocusMinutes           int
+	BreakMinutes           int
+	TotalSessions          int
+	CurrentSession         int
+	PhaseStartedAt         time.Time
+	PhaseEndsAt            time.Time
+	PausedAt               *time.Time
+	PausedRemainingSeconds *int
+	Participant            bool
+	Participants           []string
+	Transitioned           bool
 }
 
 type timerStatus struct {
-	RunID            string `json:"runId"`
-	Phase            string `json:"phase"`
-	EndsAt           string `json:"endsAt"`
-	CurrentSession   int    `json:"currentSession"`
-	TotalSessions    int    `json:"totalSessions"`
-	Participant      bool   `json:"participant"`
-	ParticipantCount int    `json:"participantCount"`
+	RunID                  string `json:"runId"`
+	Phase                  string `json:"phase"`
+	EndsAt                 string `json:"endsAt"`
+	LobbyDeadline          string `json:"lobbyDeadline,omitempty"`
+	Paused                 bool   `json:"paused"`
+	PausedAt               string `json:"pausedAt,omitempty"`
+	PausedRemainingSeconds int    `json:"pausedRemainingSeconds,omitempty"`
+	CurrentSession         int    `json:"currentSession"`
+	TotalSessions          int    `json:"totalSessions"`
+	Participant            bool   `json:"participant"`
+	ParticipantCount       int    `json:"participantCount"`
 }
 
 type pageData struct {
@@ -642,6 +648,16 @@ func (a *app) roomTimerStatus(w http.ResponseWriter, r *http.Request) {
 			Participant:      timer.Participant,
 			ParticipantCount: len(timer.Participants),
 		}
+		if timer.Phase == "lobby" {
+			status.LobbyDeadline = status.EndsAt
+		}
+		if timer.PausedAt != nil {
+			status.Paused = true
+			status.PausedAt = timer.PausedAt.UTC().Format(time.RFC3339Nano)
+			if timer.PausedRemainingSeconds != nil {
+				status.PausedRemainingSeconds = *timer.PausedRemainingSeconds
+			}
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -705,15 +721,42 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if _, err := a.startRoomTimer(r.Context(), rm, u.ID, focusMinutes); err != nil {
+		created, err := a.startRoomTimer(r.Context(), rm, u.ID, focusMinutes)
+		if err != nil {
 			log.Printf("start room timer %s: %v", rm.Code, err)
 			http.Error(w, "could not start timer", http.StatusInternalServerError)
 			return
 		}
+		if created {
+			timer, _ := a.activeTimer(r.Context(), rm.ID, u.ID)
+			if timer != nil {
+				a.hub.broadcastJSON(rm.Code, map[string]interface{}{
+					"type": "timer-lobby", "roomCode": rm.Code, "roomName": rm.Name,
+					"runId": timer.ID, "lobbyDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
+					"starterName": u.DisplayName, "starterUserId": u.ID,
+				})
+				a.scheduleLobbyDeadline(rm, u.ID, timer.PhaseEndsAt)
+			}
+		}
+		action = ""
 	case "timer-join":
 		timer, _, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
-		if timer != nil && (timer.Phase == "break" || timer.Phase == "focus") {
+		if timer != nil && (timer.Phase == "lobby" || timer.Phase == "break") {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, u.ID)
+		}
+	case "timer-pause":
+		if _, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
+			http.Error(w, "could not pause break", http.StatusInternalServerError)
+			return
+		} else if !changed {
+			action = ""
+		}
+	case "timer-resume":
+		if _, changed, err := a.resumeRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
+			http.Error(w, "could not resume break", http.StatusInternalServerError)
+			return
+		} else if !changed {
+			action = ""
 		}
 	case "timer-leave":
 		timer, _, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
@@ -727,7 +770,9 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	a.hub.broadcast(code, action)
+	if action != "" {
+		a.hub.broadcast(code, action)
+	}
 	if next := strings.TrimSpace(r.FormValue("next")); next != "" {
 		http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
 		return
@@ -771,7 +816,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	var timer timerRun
 	err = tx.QueryRow(ctx, `
 		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session,
-			tr.phase_started_at, tr.phase_ends_at,
+			tr.phase_started_at, tr.phase_ends_at, tr.paused_at, tr.paused_remaining_seconds,
 			EXISTS (SELECT 1 FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2)
 		FROM timer_runs tr
 		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
@@ -779,7 +824,8 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		LIMIT 1
 		FOR UPDATE`, roomID, userID).Scan(
 		&timer.ID, &timer.Phase, &timer.FocusMinutes, &timer.BreakMinutes, &timer.TotalSessions,
-		&timer.CurrentSession, &timer.PhaseStartedAt, &timer.PhaseEndsAt, &timer.Participant,
+		&timer.CurrentSession, &timer.PhaseStartedAt, &timer.PhaseEndsAt, &timer.PausedAt,
+		&timer.PausedRemainingSeconds, &timer.Participant,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
@@ -789,8 +835,16 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	}
 
 	now := time.Now()
-	for timer.Phase != "ended" && now.After(timer.PhaseEndsAt) {
-		if timer.Phase == "focus" {
+	for timer.Phase != "ended" && timer.PausedAt == nil && !now.Before(timer.PhaseEndsAt) {
+		if timer.Phase == "lobby" {
+			timer.Phase = "focus"
+			timer.PhaseStartedAt = now
+			timer.PhaseEndsAt = now.Add(time.Duration(timer.FocusMinutes) * time.Minute)
+			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'focus', phase_started_at = $1, phase_ends_at = $2 WHERE id = $3`, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
+				return nil, false, err
+			}
+			timer.Transitioned = true
+		} else if timer.Phase == "focus" {
 			if _, err = tx.Exec(ctx, `
 				INSERT INTO activity (user_id, activity_date, focus_minutes)
 				SELECT user_id, CURRENT_DATE, $1 FROM timer_participants WHERE timer_run_id = $2
@@ -809,7 +863,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			timer.Phase = "break"
 			timer.PhaseStartedAt = now
 			timer.PhaseEndsAt = now.Add(time.Duration(timer.BreakMinutes) * time.Minute)
-			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $2 WHERE id = $3`, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $2, paused_at = NULL, paused_remaining_seconds = NULL WHERE id = $3`, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
 				return nil, false, err
 			}
 			timer.Transitioned = true
@@ -818,7 +872,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			timer.CurrentSession++
 			timer.PhaseStartedAt = now
 			timer.PhaseEndsAt = now.Add(time.Duration(timer.FocusMinutes) * time.Minute)
-			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'focus', current_session = $1, phase_started_at = $2, phase_ends_at = $3 WHERE id = $4`, timer.CurrentSession, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'focus', current_session = $1, phase_started_at = $2, phase_ends_at = $3, paused_at = NULL, paused_remaining_seconds = NULL WHERE id = $4`, timer.CurrentSession, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
 				return nil, false, err
 			}
 			timer.Transitioned = true
@@ -900,11 +954,11 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 		return false, tx.Commit(ctx)
 	}
 
-	ends := time.Now().Add(time.Duration(focusMinutes) * time.Minute)
+	ends := time.Now().Add(10 * time.Second)
 	var runID string
 	if err = tx.QueryRow(ctx, `
 		INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at)
-		VALUES ($1, $2, 'focus', $3, $4, $5, $6)
+		VALUES ($1, $2, 'lobby', $3, $4, $5, $6)
 		RETURNING id`, rm.ID, userID, focusMinutes, rm.BreakMinutes, rm.AutoSessions, ends).Scan(&runID); err != nil {
 		return false, err
 	}
@@ -915,6 +969,65 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 		return false, err
 	}
 	return true, nil
+}
+
+func (a *app) scheduleLobbyDeadline(rm room, userID string, deadline time.Time) {
+	delay := time.Until(deadline)
+	if delay < 0 {
+		delay = 0
+	}
+	time.AfterFunc(delay, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, transitioned, err := a.normalizeTimer(ctx, rm.ID, userID); err != nil {
+			log.Printf("normalize room lobby %s: %v", rm.Code, err)
+		} else if transitioned {
+			a.hub.broadcast(rm.Code, "timer-phase")
+		}
+	})
+}
+
+func (a *app) pauseRoomBreak(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
+	if _, _, err := a.normalizeTimer(ctx, roomID, userID); err != nil {
+		return nil, false, err
+	}
+	var runID string
+	err := a.db.QueryRow(ctx, `
+		UPDATE timer_runs
+		SET paused_at = now(),
+			paused_remaining_seconds = GREATEST(0, CEIL(EXTRACT(EPOCH FROM (phase_ends_at - now())))::integer)
+		WHERE room_id = $1 AND ended_at IS NULL AND phase = 'break' AND paused_at IS NULL
+		RETURNING id`, roomID).Scan(&runID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		timer, readErr := a.activeTimer(ctx, roomID, userID)
+		return timer, false, readErr
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	timer, err := a.activeTimer(ctx, roomID, userID)
+	return timer, true, err
+}
+
+func (a *app) resumeRoomBreak(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
+	var runID string
+	err := a.db.QueryRow(ctx, `
+		UPDATE timer_runs
+		SET phase_started_at = now(),
+			phase_ends_at = now() + make_interval(secs => paused_remaining_seconds),
+			paused_at = NULL,
+			paused_remaining_seconds = NULL
+		WHERE room_id = $1 AND ended_at IS NULL AND phase = 'break' AND paused_at IS NOT NULL
+		RETURNING id`, roomID).Scan(&runID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		timer, readErr := a.activeTimer(ctx, roomID, userID)
+		return timer, false, readErr
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	timer, err := a.activeTimer(ctx, roomID, userID)
+	return timer, true, err
 }
 
 func soloBreakMinutes(focusMinutes int) int {
@@ -982,11 +1095,12 @@ func (a *app) activeTimer(ctx context.Context, roomID, userID string) (*timerRun
 	var t timerRun
 	err := a.db.QueryRow(ctx, `
 		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session, tr.phase_started_at, tr.phase_ends_at,
+			tr.paused_at, tr.paused_remaining_seconds,
 			EXISTS (SELECT 1 FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2)
 		FROM timer_runs tr
 		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
 		ORDER BY tr.created_at DESC
-		LIMIT 1`, roomID, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.Participant)
+		LIMIT 1`, roomID, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.PausedAt, &t.PausedRemainingSeconds, &t.Participant)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -1321,6 +1435,14 @@ func (h *hub) broadcast(code, msg string) {
 	for _, c := range conns {
 		_ = c.Write(ctx, websocket.MessageText, []byte(msg))
 	}
+}
+
+func (h *hub) broadcastJSON(code string, payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	h.broadcast(code, string(data))
 }
 
 func normalizeRoomCode(raw string) string {
