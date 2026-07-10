@@ -17,11 +17,12 @@ services:
       retries: 10
 
   # Containerized app for deployment. Not started by default; run with:
-  #   docker compose --profile app up -d --build
+  #   docker compose --profile app up -d --build     (app only, no TLS)
+  #   docker compose --profile prod up -d --build    (app + Caddy TLS proxy)
   # Local dev keeps using `go run ./cmd/junkie` against the postgres service.
   app:
     build: .
-    profiles: ["app"]
+    profiles: ["app", "prod"]
     environment:
       DATABASE_URL: postgres://junkie:${POSTGRES_PASSWORD:-junkie}@postgres:5432/junkie?sslmode=disable
       ADDR: :8080
@@ -33,5 +34,29 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # TLS-terminating reverse proxy for production (see DEPLOY.md). Caddy
+  # obtains and renews Let's Encrypt certificates for $DOMAIN automatically
+  # and forwards X-Forwarded-Proto/For, which the app already honors.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["prod"]
+    environment:
+      # Required in production; the localhost fallback only exists so the
+      # compose file stays valid for local runs without DOMAIN in .env.
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:
