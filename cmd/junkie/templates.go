@@ -872,7 +872,7 @@ const layoutTemplates = `
               <div class="desk-todos-menu" hidden role="listbox">
                 <button type="button" role="option" data-mode="private">Private todos</button>
                 {{range .DeskRoomTodos}}
-                <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}">{{.Room.Name}} <span class="mono">{{.Room.Code}}</span></button>
+                <button type="button" role="option" data-mode="room" data-room="{{.Room.Code}}">{{.Room.Name}}</button>
                 {{end}}
               </div>
             </div>
