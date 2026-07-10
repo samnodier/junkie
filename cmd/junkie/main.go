@@ -24,15 +24,17 @@ import (
 )
 
 type app struct {
-	db        *pgxpool.Pool
-	templates *template.Template
-	hub       *hub
+	db                  *pgxpool.Pool
+	templates           *template.Template
+	hub                 *hub
+	currentUserOverride func(*http.Request) (user, bool)
 }
 
 type user struct {
 	ID          string
 	Username    string
 	DisplayName string
+	Role        string
 }
 
 type room struct {
@@ -129,6 +131,8 @@ type pageData struct {
 	AuthSignup           bool
 	AuthBanner           string
 	MemberCount          int
+	Admin                adminPageData
+	ForbiddenMessage     string
 }
 
 type activityDay struct {
@@ -173,6 +177,9 @@ func main() {
 	if err := a.migrate(ctx); err != nil {
 		log.Fatal(err)
 	}
+	if err := a.bootstrapOwner(ctx, os.Getenv("JUNKIE_OWNER_USERNAME")); err != nil {
+		log.Fatal(err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /assets/app.css", a.css)
@@ -208,6 +215,9 @@ func main() {
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
+	mux.HandleFunc("GET /admin", a.requireAdmin(a.adminPage))
+	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
+	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
 
 	addr := getenv("ADDR", ":8080")
 	log.Printf("junkie listening on http://localhost%s", addr)
@@ -295,7 +305,8 @@ func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("junkie_session"); err == nil {
 		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token = $1`, cookie.Value)
 	}
-	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -986,15 +997,18 @@ func (a *app) roomMemberCount(ctx context.Context, roomID string) (int, error) {
 }
 
 func (a *app) currentUser(r *http.Request) (user, bool) {
+	if a.currentUserOverride != nil {
+		return a.currentUserOverride(r)
+	}
 	cookie, err := r.Cookie("junkie_session")
 	if err != nil {
 		return user{}, false
 	}
 	var u user
 	err = a.db.QueryRow(r.Context(), `
-		SELECT u.id, u.username, u.display_name
+		SELECT u.id, u.username, u.display_name, u.role
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token = $1 AND s.expires_at > now()`, cookie.Value).Scan(&u.ID, &u.Username, &u.DisplayName)
+		WHERE s.token = $1 AND s.expires_at > now()`, cookie.Value).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role)
 	return u, err == nil
 }
 
@@ -1026,7 +1040,8 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request, userID strin
 	token := randomHex(32)
 	expires := time.Now().Add(30 * 24 * time.Hour)
 	_, _ = a.db.Exec(r.Context(), `INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)`, token, userID, expires)
-	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Value: token, Path: "/", Expires: expires, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Value: token, Path: "/", Expires: expires, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
 }
 
 func (a *app) findRoom(ctx context.Context, code string) (room, bool) {

@@ -1078,6 +1078,8 @@ const layoutTemplates = `
 {{define "dashboard"}}{{template "shell" .}}{{end}}
 {{define "profile"}}{{template "shell" .}}{{end}}
 {{define "room"}}{{template "shell" .}}{{end}}
+{{define "admin"}}{{template "shell" .}}{{end}}
+{{define "forbidden"}}{{template "shell" .}}{{end}}
 
 {{define "room-invite"}}{{template "shell" .}}{{end}}
 
@@ -1185,6 +1187,97 @@ const layoutTemplates = `
       </form>
       <p class="muted auth-switch">New here? <a href="/login?mode=signup{{if .Next}}&amp;next={{.Next}}{{end}}">Create an account</a></p>
       {{end}}
+    </section>
+  {{else if eq .Title "Admin"}}
+    <div class="admin-shell">
+      <header class="admin-header">
+        <div>
+          <p class="eyebrow">Platform operations</p>
+          <h1>Admin space</h1>
+          <p class="muted">Operational metadata only. Private todos and detailed activity are never shown here.</p>
+        </div>
+        <a href="/" class="btn-ghost btn-compact">Back to app</a>
+      </header>
+      {{if .Error}}<p class="notice notice-error" role="alert">{{.Error}}</p>{{end}}
+      <section class="admin-stats" aria-label="Platform overview">
+        <article class="panel"><span class="label">Users</span><strong>{{.Admin.Overview.Users}}</strong></article>
+        <article class="panel"><span class="label">Rooms</span><strong>{{.Admin.Overview.Rooms}}</strong></article>
+        <article class="panel"><span class="label">Active room timers</span><strong>{{.Admin.Overview.ActiveRoomTimers}}</strong></article>
+        <article class="panel"><span class="label">Total focus minutes</span><strong>{{.Admin.Overview.TotalFocusMinutes}}</strong></article>
+      </section>
+      <section class="panel admin-section">
+        <div class="panel-title">
+          <div><p class="eyebrow">Accounts</p><h2>Users</h2></div>
+          <span class="role-badge role-{{.User.Role}}">{{.User.Role}}</span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Joined</th><th scope="col">Rooms</th>{{if .Admin.IsOwner}}<th scope="col">Focus summary</th><th scope="col">Role action</th>{{end}}</tr></thead>
+            <tbody>
+            {{range .Admin.Users}}
+              <tr>
+                <td><strong>{{.Username}}</strong></td>
+                <td><span class="role-badge role-{{.Role}}">{{.Role}}</span></td>
+                <td><time datetime="{{.JoinedAt.Format "2006-01-02"}}">{{.JoinedAt.Format "Jan 2, 2006"}}</time></td>
+                <td>{{.RoomsCount}}</td>
+                {{if $.Admin.IsOwner}}
+                  <td>{{.FocusMinutes}} min{{if .LastActivityAt}} · last {{.LastActivityAt.Format "Jan 2, 2006"}}{{else}} · no activity{{end}}</td>
+                  <td>
+                    {{if eq .Role "user"}}
+                    <form method="post" action="/admin/users/{{.ID}}/role" onsubmit="return confirm('Promote {{.Username}} to admin?')">
+                      <input type="hidden" name="role" value="admin">
+                      <button type="submit" class="btn-ghost btn-compact">Promote</button>
+                    </form>
+                    {{else if eq .Role "admin"}}
+                    <form method="post" action="/admin/users/{{.ID}}/role" onsubmit="return confirm('Demote {{.Username}} to user?')">
+                      <input type="hidden" name="role" value="user">
+                      <button type="submit" class="btn-ghost btn-compact">Demote</button>
+                    </form>
+                    {{else}}<span class="muted">Protected</span>{{end}}
+                  </td>
+                {{end}}
+              </tr>
+            {{else}}
+              <tr><td colspan="6" class="empty">No users found.</td></tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="panel admin-section">
+        <div class="panel-title"><div><p class="eyebrow">Collaboration</p><h2>Rooms</h2></div></div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th scope="col">Room</th><th scope="col">Code</th><th scope="col">Creator</th><th scope="col">Members</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Action</th></tr></thead>
+            <tbody>
+            {{range .Admin.Rooms}}
+              <tr>
+                <td><strong>{{.Name}}</strong></td>
+                <td><span class="mono">{{.Code}}</span></td>
+                <td>{{.Creator}}</td>
+                <td>{{.MembersCount}}</td>
+                <td>{{if .Active}}<span class="status-active">Active timer</span>{{else}}Idle{{end}}</td>
+                <td><time datetime="{{.CreatedAt.Format "2006-01-02"}}">{{.CreatedAt.Format "Jan 2, 2006"}}</time></td>
+                <td>
+                  <form method="post" action="/admin/rooms/{{.ID}}/delete" onsubmit="return confirm('Permanently delete room {{.Name}} and its room data?')">
+                    <button type="submit" class="btn-danger btn-compact">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {{else}}
+              <tr><td colspan="7" class="empty">No rooms found.</td></tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  {{else if eq .Title "Access denied"}}
+    <section class="auth-card forbidden-card">
+      <p class="eyebrow">403 · Forbidden</p>
+      <h1>Access denied</h1>
+      <p class="muted">{{.ForbiddenMessage}}</p>
+      <a href="/" class="btn-primary">Return to junkie</a>
     </section>
   {{else if eq .Title "Dashboard"}}
     {{if .Error}}<p class="context-banner context-banner-dismiss" role="status">{{.Error}} <button type="button" class="banner-dismiss" aria-label="Dismiss">×</button></p>{{end}}
@@ -2774,6 +2867,27 @@ body.menu-drawer-open { overflow: hidden; }
 .cell.l3 { background: var(--heat-3); }
 .cell.l4 { background: var(--heat-4); }
 .heatmap-legend .cell { width: 10px; height: 10px; flex-shrink: 0; }
+.admin-shell { width: min(1180px, calc(100% - 40px)); margin: var(--sp-8) auto 0; }
+.admin-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-6); margin-bottom: var(--sp-6); }
+.admin-header h1 { font-size: var(--fs-display); margin: var(--sp-1) 0 var(--sp-2); }
+.admin-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-4); }
+.admin-stats .panel { display: grid; gap: var(--sp-3); }
+.admin-stats strong { font-family: var(--font-serif); font-size: 2rem; line-height: 1; }
+.admin-section { margin-top: var(--sp-6); }
+.admin-section .panel-title > div { display: grid; gap: var(--sp-1); }
+.admin-section .panel-title .eyebrow { margin: 0; }
+.admin-table-wrap { width: 100%; overflow-x: auto; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: var(--fs-small); }
+.admin-table th, .admin-table td { padding: var(--sp-3); border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; white-space: nowrap; }
+.admin-table th { color: var(--faint); font-family: var(--font-mono); font-size: var(--fs-label); font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; }
+.admin-table tbody tr:last-child td { border-bottom: 0; }
+.admin-table form { margin: 0; }
+.role-badge, .status-active { display: inline-flex; align-items: center; padding: 3px var(--sp-2); border-radius: 999px; font-family: var(--font-mono); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.08em; }
+.role-badge { color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
+.role-admin, .status-active { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-soft-border); }
+.role-owner { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); }
+.forbidden-card { text-align: center; }
+.forbidden-card .btn-primary { display: inline-block; margin-top: var(--sp-3); text-decoration: none; }
 @media (max-width: 720px) {
   .topbar { min-height: 60px; }
   .desk-grid, .room-desk-grid, .grid.two { grid-template-columns: 1fr; gap: var(--sp-6); padding-left: 20px; padding-right: 20px; }
@@ -2799,6 +2913,8 @@ body.menu-drawer-open { overflow: hidden; }
   .room-header-new { flex-direction: column; }
   .room-members-meta { text-align: left; justify-items: start; }
   .timer-cancel, .btn-ghost.timer-cancel { width: 100%; }
+  .admin-header { flex-direction: column; }
+  .admin-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 480px) {
   .auth-card { margin: 20px 20px 0; padding: var(--sp-6); }
