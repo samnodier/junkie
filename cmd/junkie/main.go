@@ -195,6 +195,8 @@ func main() {
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
+	mux.HandleFunc("POST /solo/break/start", a.requireAuth(a.startSoloBreak))
+	mux.HandleFunc("POST /solo/break/skip", a.requireAuth(a.skipSoloBreak))
 	mux.HandleFunc("POST /todo/", a.requireAuth(a.todoAction))
 	mux.HandleFunc("POST /rooms", a.requireAuth(a.createRoom))
 	mux.HandleFunc("POST /rooms/join", a.requireAuth(a.joinRoom))
@@ -357,7 +359,25 @@ func (a *app) startSoloTimer(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) cancelSoloTimer(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
-	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL`, u.ID)
+	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'focus'`, u.ID)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (a *app) startSoloBreak(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	timer, _ := a.normalizeSoloTimer(r.Context(), u.ID)
+	if timer == nil || timer.Phase != "break" || !soloBreakPending(timer) {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		return
+	}
+	ends := time.Now().Add(time.Duration(timer.BreakMinutes) * time.Minute)
+	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase_started_at = now(), phase_ends_at = $1 WHERE id = $2`, ends, timer.ID)
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+func (a *app) skipSoloBreak(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'break'`, u.ID)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -613,12 +633,12 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			var runID string
 			err := a.db.QueryRow(r.Context(), `INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at) VALUES ($1, $2, 'focus', $3, $4, $5, $6) RETURNING id`, rm.ID, u.ID, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, ends).Scan(&runID)
 			if err == nil {
-				_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) SELECT $1, user_id FROM room_members WHERE room_id = $2 ON CONFLICT DO NOTHING`, runID, rm.ID)
+				_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, runID, u.ID)
 			}
 		}
 	case "timer-join":
 		timer, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
-		if timer != nil && timer.Phase == "break" {
+		if timer != nil && (timer.Phase == "break" || timer.Phase == "focus") {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, u.ID)
 		}
 	case "timer-leave":
@@ -686,17 +706,42 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	return timer, nil
 }
 
+func soloBreakMinutes(focusMinutes int) int {
+	switch {
+	case focusMinutes < 30:
+		return 5
+	case focusMinutes < 120:
+		return 10
+	case focusMinutes < 180:
+		return 20
+	default:
+		return 30
+	}
+}
+
+func soloBreakPending(t *timerRun) bool {
+	return t.Phase == "break" && !t.PhaseEndsAt.After(t.PhaseStartedAt)
+}
+
 func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun, error) {
 	timer, err := a.activeSoloTimer(ctx, userID)
 	if err != nil || timer == nil {
 		return timer, err
 	}
-	if time.Now().After(timer.PhaseEndsAt) {
+	now := time.Now()
+	if timer.Phase == "focus" && now.After(timer.PhaseEndsAt) {
+		breakMins := soloBreakMinutes(timer.FocusMinutes)
 		_, _ = a.db.Exec(ctx, `
 			INSERT INTO activity (user_id, activity_date, focus_minutes)
 			VALUES ($1, CURRENT_DATE, $2)
 			ON CONFLICT (user_id, activity_date)
 			DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, userID, timer.FocusMinutes)
+		timer.Phase = "break"
+		timer.BreakMinutes = breakMins
+		timer.PhaseStartedAt = now
+		timer.PhaseEndsAt = now
+		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'break', break_minutes = $1, phase_started_at = $2, phase_ends_at = $2 WHERE id = $3`, breakMins, now, timer.ID)
+	} else if timer.Phase == "break" && timer.PhaseEndsAt.After(timer.PhaseStartedAt) && now.After(timer.PhaseEndsAt) {
 		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID)
 		return nil, nil
 	}

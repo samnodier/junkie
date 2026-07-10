@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"html/template"
 	"strings"
 	"time"
@@ -26,6 +27,26 @@ func parseTemplates() *template.Template {
 				return strings.ToUpper(string(r))
 			}
 			return "?"
+		},
+		"avatarOverflow": func(total, max int) int {
+			if total <= max {
+				return 0
+			}
+			return total - max
+		},
+		"dict": func(vals ...interface{}) (map[string]interface{}, error) {
+			if len(vals)%2 != 0 {
+				return nil, fmt.Errorf("dict: odd number of arguments")
+			}
+			m := make(map[string]interface{}, len(vals)/2)
+			for i := 0; i < len(vals); i += 2 {
+				key, ok := vals[i].(string)
+				if !ok {
+					return nil, fmt.Errorf("dict: keys must be strings")
+				}
+				m[key] = vals[i+1]
+			}
+			return m, nil
 		},
 	}
 	return template.Must(template.New("junkie").Funcs(funcs).Parse(layoutTemplates))
@@ -172,7 +193,13 @@ const layoutTemplates = `
       });
 
       document.querySelectorAll('form[action="/solo/start"], form[action$="/timer-start"]').forEach((form) => {
-        form.addEventListener('submit', () => window.junkieNotify?.requestPermission());
+        form.addEventListener('submit', (event) => {
+          window.junkieNotify?.requestPermission();
+          const roomName = form.dataset.roomName;
+          if (roomName && !confirm('You\'re about to start a focus block for ' + roomName + '.')) {
+            event.preventDefault();
+          }
+        });
       });
 
       window.junkieCircleTimer = { CIRC, clampMinutes, setRing, wireIdleTimer };
@@ -388,6 +415,7 @@ const layoutTemplates = `
           }
           sessionStorage.setItem(modeKey, mode);
           if (mode === 'room') sessionStorage.setItem(roomKey, room);
+          panel.dispatchEvent(new CustomEvent('desk-todos-mode-change'));
         };
 
         trigger?.addEventListener('click', () => {
@@ -419,6 +447,108 @@ const layoutTemplates = `
         apply();
       };
       wireDeskTodosSwitcher();
+
+      const wireDeskTimerMode = () => {
+        const panel = document.querySelector('.desk-todos-panel[data-has-rooms="true"]');
+        const form = document.querySelector('.circle-timer-form');
+        const column = document.querySelector('.desk-ring-column');
+        if (!panel || !form || !column) return;
+
+        const hint = column.querySelector('.desk-ring-hint');
+        const idleRing = form.querySelector('.circle-timer.idle');
+        const steps = form.querySelectorAll('.circle-timer-step');
+        const input = form.querySelector('input[name="focus_minutes"]');
+        const modeKey = 'junkie:deskTodosMode';
+        const roomKey = 'junkie:deskTodosRoom';
+
+        const roomMeta = () => {
+          const room = sessionStorage.getItem(roomKey) || panel.querySelector('.desk-todos-view[data-mode="room"]')?.dataset.room || '';
+          const menuOpt = panel.querySelector('.desk-todos-menu [data-mode="room"][data-room="' + room + '"]');
+          const meta = column.querySelector('[data-room-focus="' + room + '"]');
+          return {
+            room,
+            name: meta?.dataset.roomName || menuOpt?.textContent.trim() || room,
+            focusMinutes: Number(meta?.dataset.focusMinutes || 50),
+          };
+        };
+
+        const applySolo = () => {
+          form.action = '/solo/start';
+          form.removeAttribute('data-room-name');
+          steps.forEach((step) => step.removeAttribute('hidden'));
+          input?.removeAttribute('readonly');
+          if (hint) hint.textContent = hint.dataset.hintPrivate || 'Set minutes · tap ring to focus';
+          idleRing?.classList.remove('room-desk-timer');
+        };
+
+        const applyRoom = () => {
+          const { room, name, focusMinutes } = roomMeta();
+          if (!room) {
+            applySolo();
+            return;
+          }
+          form.action = '/r/' + room + '/timer-start';
+          form.dataset.roomName = name;
+          if (input) {
+            input.value = focusMinutes;
+            input.setAttribute('readonly', 'readonly');
+            input.closest('.circle-timer-time')?.classList.toggle('digits-3', String(focusMinutes).length >= 3);
+          }
+          window.junkieCircleTimer?.setRing(idleRing, focusMinutes / 180);
+          steps.forEach((step) => step.setAttribute('hidden', ''));
+          if (hint) hint.textContent = 'Room focus · ' + name;
+          idleRing?.classList.add('room-desk-timer');
+        };
+
+        const sync = () => {
+          const mode = sessionStorage.getItem(modeKey) || 'room';
+          if (mode === 'room') applyRoom();
+          else applySolo();
+        };
+
+        panel.addEventListener('desk-todos-mode-change', sync);
+        sync();
+      };
+      wireDeskTimerMode();
+
+      const showFocusJoinPrompt = (code, roomName) => {
+        if (document.getElementById('focus-join-prompt')) return;
+        if (document.querySelector('.room-focus-shell')) return;
+
+        const backdrop = document.createElement('div');
+        backdrop.id = 'focus-join-prompt';
+        backdrop.className = 'join-prompt-backdrop';
+        backdrop.innerHTML =
+          '<div class="join-prompt-card panel" role="dialog" aria-labelledby="join-prompt-title">' +
+            '<p class="label label-accent">Focus block</p>' +
+            '<h2 id="join-prompt-title">Join ' + roomName.replace(/</g, '&lt;') + ' focus block?</h2>' +
+            '<div class="join-prompt-actions">' +
+              '<form method="post" action="/r/' + code + '/timer-join">' +
+                '<button type="submit" class="btn-primary">Join</button>' +
+              '</form>' +
+              '<button type="button" class="btn-ghost" data-dismiss>Not now</button>' +
+            '</div>' +
+          '</div>';
+        backdrop.querySelector('[data-dismiss]')?.addEventListener('click', () => backdrop.remove());
+        backdrop.addEventListener('click', (event) => {
+          if (event.target === backdrop) backdrop.remove();
+        });
+        document.body.appendChild(backdrop);
+      };
+      window.junkieShowFocusJoinPrompt = showFocusJoinPrompt;
+
+      const wireDeskRoomWS = () => {
+        document.querySelectorAll('[data-room-ws]').forEach((el) => {
+          const code = el.dataset.roomWs;
+          const name = el.dataset.roomName;
+          if (!code) return;
+          const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + code);
+          ws.onmessage = (event) => {
+            if (event.data === 'timer-start') showFocusJoinPrompt(code, name);
+          };
+        });
+      };
+      wireDeskRoomWS();
 
       const wireTodoGroupCollapse = () => {
         document.querySelectorAll('.todo-groups').forEach((groups) => {
@@ -590,7 +720,15 @@ const layoutTemplates = `
 {{define "profile-icon"}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{{end}}
 
 {{define "room-membership-pill"}}
-{{if and .Rooms (not .SoloTimer)}}
+{{if .Room.Code}}
+<div class="desk-room-bar">
+  <a class="room-membership-pill" href="/r/{{.Room.Code}}">
+    <span class="room-membership-dot" aria-hidden="true"></span>
+    <span class="label room-membership-label">In room</span>
+    <span class="room-membership-name">{{.Room.Name}}</span>
+  </a>
+</div>
+{{else if and .Rooms (not .SoloTimer)}}
 <div class="desk-room-bar">
   <a class="room-membership-pill" href="/r/{{(index .Rooms 0).Code}}">
     <span class="room-membership-dot" aria-hidden="true"></span>
@@ -599,6 +737,22 @@ const layoutTemplates = `
   </a>
 </div>
 {{end}}
+{{end}}
+
+{{define "participant-avatar-stack"}}
+{{$names := index . "Names"}}
+{{$small := index . "Small"}}
+{{$max := 5}}
+<div class="participant-avatars participant-avatars-stack{{if $small}} participant-avatars-sm{{end}}" aria-label="{{len $names}} focusing">
+  {{range $i, $name := $names}}
+    {{if lt $i $max}}
+    <span class="participant-avatar">{{initial $name}}</span>
+    {{end}}
+  {{end}}
+  {{if gt (len $names) $max}}
+  <span class="participant-avatar participant-avatar-overflow" title="{{len $names}} focusing">+{{avatarOverflow (len $names) $max}}</span>
+  {{end}}
+</div>
 {{end}}
 
 {{define "todo-row"}}
@@ -893,8 +1047,12 @@ const layoutTemplates = `
     {{else}}
     <div class="desk-shell">
     {{template "room-membership-pill" .}}
+    {{range .Rooms}}<span hidden data-room-ws="{{.Code}}" data-room-name="{{.Name}}"></span>{{end}}
       <section class="grid two desk-grid">
         <div class="desk-ring-column">
+        {{range .DeskRoomTodos}}
+        <span hidden class="desk-room-focus-meta" data-room-focus="{{.Room.Code}}" data-focus-minutes="{{.Room.FocusMinutes}}" data-room-name="{{.Room.Name}}"></span>
+        {{end}}
         <article class="circle-timer-wrap">
           <form class="circle-timer-form" method="post" action="/solo/start">
             <div class="circle-timer idle" role="group" aria-label="Set focus duration">
@@ -911,11 +1069,7 @@ const layoutTemplates = `
               </div>
             </div>
           </form>
-          {{if .DeskRoomTodos}}
-          <p class="label desk-ring-hint">Solo timer · rooms run their own</p>
-          {{else}}
-          <p class="label desk-ring-hint">Set minutes · tap ring to focus</p>
-          {{end}}
+          <p class="label desk-ring-hint" data-hint-private="Set minutes · tap ring to focus">Set minutes · tap ring to focus</p>
         </article>
         </div>
 
@@ -1018,6 +1172,8 @@ const layoutTemplates = `
     </section>
   {{else}}
     {{if .FocusMode}}
+    <div class="room-focus-page">
+    {{template "room-membership-pill" .}}
     <section class="room-focus-shell">
       <p class="label label-accent">Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}</p>
       <p class="room-focus-name">{{.Room.Name}}</p>
@@ -1030,14 +1186,15 @@ const layoutTemplates = `
           <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}" data-total="{{mul .Timer.FocusMinutes 60}}">--:--</div>
         </div>
       </div>
-      <div class="participant-avatars" aria-hidden="true">
-        {{range .Timer.Participants}}<span class="participant-avatar">{{initial .}}</span>{{end}}
-      </div>
+      {{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" false}}
       <p class="label">{{len .Timer.Participants}} focusing</p>
+      {{if .Timer.Participant}}
       <form method="post" action="/r/{{.Room.Code}}/timer-leave">
         <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
       </form>
+      {{end}}
     </section>
+    </div>
     {{else}}
     <section class="room-shell">
       <div class="room-header-new">
@@ -1084,7 +1241,11 @@ const layoutTemplates = `
               </div>
             </div>
             {{if not .Timer.Participant}}
-            <p class="label label-warn">Watching · join on the next break</p>
+            <p class="label label-warn">Watching · join on next break</p>
+            {{else}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-leave">
+              <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
+            </form>
             {{end}}
             {{else}}
             <p class="label label-warn">Break · next block in <span class="countdown mono" data-seconds="{{secondsUntil .Timer.PhaseEndsAt}}">--:--</span></p>
@@ -1093,16 +1254,15 @@ const layoutTemplates = `
             <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
             {{end}}
             {{end}}
-            <div class="participant-avatars participant-avatars-sm">
-              {{range .Timer.Participants}}<span class="participant-avatar">{{initial .}}</span>{{end}}
-            </div>
+            {{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}
+            <p class="label">{{len .Timer.Participants}} focusing</p>
           </article>
           {{else}}
           <article class="timer-card panel idle ready-card">
             <p class="label label-accent">Ready · {{.Room.AutoSessions}} × {{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</p>
             <div class="room-ready-time mono">{{.Room.FocusMinutes}}:00</div>
-            <form method="post" action="/r/{{.Room.Code}}/timer-start"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
-            <p class="muted room-ready-hint">Everyone in the room can join once it starts.</p>
+            <form method="post" action="/r/{{.Room.Code}}/timer-start" data-room-name="{{.Room.Name}}"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
+            <p class="muted room-ready-hint">Room members get a prompt to join when you start.</p>
           </article>
           <details class="room-details panel" data-room-section="settings">
             <summary><span class="label">Timer settings · {{.Room.AutoSessions}}×{{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
@@ -1184,7 +1344,13 @@ const layoutTemplates = `
         });
 
         const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/r/' + code);
-        ws.onmessage = () => setTimeout(() => location.reload(), 200);
+        ws.onmessage = (event) => {
+          if (event.data === 'timer-start' && !document.querySelector('.room-focus-shell')) {
+            window.junkieShowFocusJoinPrompt?.(code, '{{.Room.Name}}');
+            return;
+          }
+          setTimeout(() => location.reload(), 200);
+        };
       })();
     </script>
   {{end}}
@@ -1876,6 +2042,33 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   pointer-events: auto;
 }
 .circle-timer-step:hover { border-color: var(--border-strong); color: var(--ink); filter: none; }
+.circle-timer-step[hidden] { display: none; }
+.join-prompt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: var(--backdrop);
+}
+.join-prompt-card {
+  width: min(100%, 24rem);
+  text-align: center;
+}
+.join-prompt-card h2 {
+  margin: var(--sp-3) 0 var(--sp-6);
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+.join-prompt-actions {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.join-prompt-actions form { margin: 0; }
 .timer-cancel { margin-top: var(--sp-4); }
 .focus-desk {
   position: relative;
@@ -2141,6 +2334,19 @@ body.menu-drawer-open { overflow: hidden; }
 .room-ready-hint { font-size: var(--fs-small); margin-top: var(--sp-4); }
 .room-details { margin: 0; }
 .big-action { width: 100%; max-width: 280px; }
+.room-focus-page {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 68px);
+}
+.room-focus-page .desk-room-bar {
+  flex-shrink: 0;
+  padding-top: var(--sp-3);
+}
+.room-focus-page .room-focus-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .room-focus-shell {
   min-height: calc(100vh - 68px);
   display: flex;
@@ -2156,6 +2362,21 @@ body.menu-drawer-open { overflow: hidden; }
   gap: var(--sp-2);
   justify-content: center;
   flex-wrap: wrap;
+}
+.participant-avatars-stack {
+  flex-wrap: nowrap;
+  gap: 0;
+}
+.participant-avatars-stack .participant-avatar {
+  margin-left: -10px;
+  border: 2px solid var(--bg);
+  box-sizing: border-box;
+  position: relative;
+}
+.participant-avatars-stack .participant-avatar:first-child { margin-left: 0; }
+.participant-avatar-overflow {
+  background: var(--surface-2);
+  color: var(--muted);
 }
 .participant-avatar {
   width: 32px;
