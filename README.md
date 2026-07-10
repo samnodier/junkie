@@ -85,6 +85,9 @@ Override it with `DATABASE_URL` if needed.
 
 ## Deployment and PostgreSQL
 
+For a start-to-finish free hosting walkthrough (Oracle Cloud Always Free with
+the bundled Caddy TLS proxy, or Render + Neon), see [DEPLOY.md](DEPLOY.md).
+
 The server requires PostgreSQL. SQLite is not supported or bundled. People using a deployed junkie instance need only a browser; they do not need PostgreSQL or any local application installed.
 
 Set `DATABASE_URL` to the connection string for your hosted PostgreSQL database:
@@ -155,4 +158,3 @@ Admin mutations require same-origin browser requests, use `POST`, re-check actor
 
 - Terminal client using the same account and room API.
 - Discord sign-in and a small bot for notifications/link sharing.
-- Production deploy on a host that supports a long-running Go process and WebSockets, such as Fly.io or Railway.
