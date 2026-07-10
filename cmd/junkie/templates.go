@@ -962,7 +962,7 @@ const layoutTemplates = `
 {{define "desk-private-timer"}}
 <div class="desk-timer-view" data-mode="private"{{if .Rooms}} hidden{{end}}>
   {{if .SoloTimer}}
-  <article class="timer-card panel {{.SoloTimer.Phase}} solo-timer">
+  <article class="timer-card panel desk-timer-card {{.SoloTimer.Phase}} solo-timer">
     {{if eq .SoloTimer.Phase "focus"}}
     <p class="label label-accent">Private focus</p>
     <div class="circle-timer running" role="timer" aria-label="Private focus countdown">
@@ -997,7 +997,7 @@ const layoutTemplates = `
     {{end}}
   </article>
   {{else}}
-  <article class="circle-timer-wrap">
+  <article class="circle-timer-wrap timer-card panel idle desk-timer-card">
     <form class="circle-timer-form" method="post" action="/solo/start">
       <div class="circle-timer idle" role="group" aria-label="Set private focus duration">
         <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
@@ -1020,7 +1020,7 @@ const layoutTemplates = `
 {{define "desk-room-timer"}}
 <div class="desk-timer-view" data-mode="room" data-room="{{.Room.Code}}" hidden>
   {{if .Timer}}
-  <article class="timer-card panel {{.Timer.Phase}}">
+  <article class="timer-card panel desk-timer-card {{.Timer.Phase}}">
     <p class="label {{if eq .Timer.Phase "focus"}}label-accent{{else}}label-warn{{end}}">
       {{if eq .Timer.Phase "focus"}}Focus{{else}}Break{{end}} · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}
     </p>
@@ -1035,22 +1035,25 @@ const layoutTemplates = `
     </div>
     {{if and (eq .Timer.Phase "focus") (not .Timer.Participant)}}
     <p class="label label-warn">Watching · join on next break</p>
-    {{else if and (eq .Timer.Phase "break") (not .Timer.Participant)}}
-    <form method="post" action="/r/{{.Room.Code}}/timer-join">
-      <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
-      <button type="submit" class="btn-primary">Join this block</button>
-    </form>
-    {{else if .Timer.Participant}}
-    <form method="post" action="/r/{{.Room.Code}}/timer-leave">
-      <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
-      <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
-    </form>
     {{end}}
-    {{if gt (len .Timer.Participants) 1}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
-    <p class="label">{{if .Timer.Participant}}Participating{{else}}Watching{{end}} · {{len .Timer.Participants}} focusing</p>
+    <footer class="desk-timer-footer">
+      {{if and (eq .Timer.Phase "break") (not .Timer.Participant)}}
+      <form method="post" action="/r/{{.Room.Code}}/timer-join">
+        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+        <button type="submit" class="btn-primary">Join this block</button>
+      </form>
+      {{else if .Timer.Participant}}
+      <form method="post" action="/r/{{.Room.Code}}/timer-leave">
+        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+        <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
+      </form>
+      {{end}}
+      {{if gt (len .Timer.Participants) 1}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
+      <p class="label">{{if .Timer.Participant}}Participating{{else}}Watching{{end}} · {{len .Timer.Participants}} focusing</p>
+    </footer>
   </article>
   {{else}}
-  <article class="circle-timer-wrap">
+  <article class="circle-timer-wrap timer-card panel idle desk-timer-card">
     <form class="circle-timer-form" method="post" action="/r/{{.Room.Code}}/timer-start" data-room-name="{{.Room.Name}}">
       <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
       <div class="circle-timer idle room-desk-timer" role="group" aria-label="Start {{.Room.Name}} focus timer">
@@ -1966,8 +1969,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .room-membership-label { color: var(--accent); }
 .room-membership-name { color: var(--ink); font-weight: 500; }
 .desk-grid {
-  grid-template-columns: 1fr 400px;
-  gap: 48px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-8);
+  width: min(100%, 68rem);
+  margin: 0 auto;
   padding: 20px clamp(20px, 5vw, 64px) 0;
   align-items: center;
   flex: 1 1 auto;
@@ -1977,7 +1982,45 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   flex-direction: column;
   align-items: center;
   gap: var(--sp-4);
+  width: 100%;
+  min-width: 0;
 }
+.desk-timer-view { width: 100%; min-width: 0; }
+.desk-timer-view[hidden] { display: none !important; }
+.desk-timer-card,
+.desk-todos-panel {
+  width: 100%;
+  height: min(32rem, calc(100vh - 10rem));
+  margin-bottom: 0;
+}
+.desk-timer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+}
+.desk-timer-card > .label { margin: 0; text-align: center; }
+.desk-timer-card > form { margin: 0; }
+.desk-timer-card .circle-timer.running,
+.desk-timer-card .circle-timer.break-running {
+  width: min(18rem, 100%);
+  flex: 0 1 auto;
+}
+.desk-timer-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+}
+.desk-timer-footer form,
+.desk-timer-footer p { margin: 0; }
+.desk-timer-footer .timer-cancel { margin-top: 0; }
+.desk-timer-footer .label { width: 100%; text-align: center; }
 .desk-ring-hint { text-align: center; }
 .desk-join-link {
   margin: var(--sp-4) 0 0;
@@ -1986,8 +2029,6 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-todos-panel {
   display: flex;
   flex-direction: column;
-  height: min(32rem, calc(100vh - 10rem));
-  margin-bottom: 0;
 }
 .desk-todos-head { align-items: center; overflow: visible; min-width: 0; gap: var(--sp-3); }
 .desk-todos-switch { position: relative; z-index: 2; flex: 1 1 auto; min-width: 0; }
@@ -2736,6 +2777,10 @@ body.menu-drawer-open { overflow: hidden; }
 @media (max-width: 720px) {
   .topbar { min-height: 60px; }
   .desk-grid, .room-desk-grid, .grid.two { grid-template-columns: 1fr; gap: var(--sp-6); padding-left: 20px; padding-right: 20px; }
+  .desk-grid { width: 100%; }
+  .desk-timer-card,
+  .desk-todos-panel { height: auto; min-height: 28rem; }
+  .desk-timer-card { overflow: visible; }
   .circle-timer.idle { width: min(250px, 88vw); }
   .circle-timer.running, .room-focus-ring { width: min(260px, 92vw); }
   .circle-timer-step { width: 44px; height: 44px; }

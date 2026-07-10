@@ -55,6 +55,9 @@ func TestDashboardRendersIndependentSoloAndRoomTimers(t *testing.T) {
 	for _, expected := range []string{
 		`class="desk-timer-view" data-mode="private"`,
 		`data-mode="room" data-room="JUNK-IES"`,
+		`class="timer-card panel desk-timer-card focus solo-timer"`,
+		`class="timer-card panel desk-timer-card break"`,
+		`<footer class="desk-timer-footer">`,
 		`Break · session 2 of 3`,
 		`Watching · 1 focusing`,
 		`action="/r/JUNK-IES/timer-join"`,
@@ -90,6 +93,9 @@ func TestDashboardRendersIdleRoomStart(t *testing.T) {
 	}
 	if strings.Contains(html, `value="45" readonly`) {
 		t.Error("dashboard room focus input should be adjustable")
+	}
+	if got := strings.Count(html, `circle-timer-wrap timer-card panel idle desk-timer-card`); got != 2 {
+		t.Errorf("dashboard should render matching private and room idle timer cards, got %d", got)
 	}
 }
 
