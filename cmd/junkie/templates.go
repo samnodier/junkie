@@ -1017,8 +1017,10 @@ const layoutTemplates = `
     {{end}}
     <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
-      <form method="post" action="/todo/{{.ID}}/restore"><button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button></form>
-      <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
+      <div class="todo-actions">
+        <form method="post" action="/todo/{{.ID}}/restore"><button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button></form>
+        <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
+      </div>
     {{else}}
       <form method="post" action="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
     {{end}}
@@ -1047,16 +1049,18 @@ const layoutTemplates = `
     {{end}}
     <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
-      <form method="post" action="/todo/{{.ID}}/restore">
-        <input type="hidden" name="desk" value="1">
-        <input type="hidden" name="room" value="{{.RoomCode}}">
-        <button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button>
-      </form>
-      <form method="post" action="/todo/{{.ID}}/delete">
-        <input type="hidden" name="desk" value="1">
-        <input type="hidden" name="room" value="{{.RoomCode}}">
-        <button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button>
-      </form>
+      <div class="todo-actions">
+        <form method="post" action="/todo/{{.ID}}/restore">
+          <input type="hidden" name="desk" value="1">
+          <input type="hidden" name="room" value="{{.RoomCode}}">
+          <button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button>
+        </form>
+        <form method="post" action="/todo/{{.ID}}/delete">
+          <input type="hidden" name="desk" value="1">
+          <input type="hidden" name="room" value="{{.RoomCode}}">
+          <button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button>
+        </form>
+      </div>
     {{else}}
       <form method="post" action="/todo/{{.ID}}/remove">
         <input type="hidden" name="desk" value="1">
@@ -1383,7 +1387,7 @@ const layoutTemplates = `
           <h1>Admin space</h1>
           <p class="muted">Operational metadata only. Private todos and detailed activity are never shown here.</p>
         </div>
-        <a href="/" class="btn-ghost btn-compact">Back to app</a>
+        <a href="/" class="btn btn-ghost btn-compact">Back to app</a>
       </header>
       {{if .Error}}<p class="notice notice-error" role="alert">{{.Error}}</p>{{end}}
       <section class="admin-stats" aria-label="Platform overview">
@@ -1578,6 +1582,7 @@ const layoutTemplates = `
             </div>
             {{else}}
             <h2>Private todos</h2>
+            <p class="desk-join-link"><a href="#" data-open-join class="mono-link">Have a room code?</a></p>
             {{end}}
             {{if .DeskRoomTodos}}<span class="label desk-todos-hint label-warn">Public to the room</span>{{end}}
           </div>
@@ -1593,10 +1598,8 @@ const layoutTemplates = `
                 {{if not .DeskRoomTodos}}<li class="empty">Nothing yet. Add one thing worth finishing.</li>{{end}}
               {{end}}
             </ul>
-            {{if not .DeskRoomTodos}}
-            <p class="desk-join-link"><a href="#" data-open-join class="mono-link">Have a room code?</a></p>
-            {{else if not .Rooms}}
-            <p class="desk-join-link"><a href="#" class="btn-ghost btn-compact" onclick="document.querySelector('.menu-drawer-trigger')?.click();return false">Create a room</a></p>
+            {{if and .DeskRoomTodos (not .Rooms)}}
+            <p class="desk-join-link"><a href="#" class="btn btn-ghost btn-compact" onclick="document.querySelector('.menu-drawer-trigger')?.click();return false">Create a room</a></p>
             {{end}}
           </div>
           {{range .DeskRoomTodos}}
@@ -2011,6 +2014,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .btn-primary, button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(.todo-action):not(.circle-timer-step):not(.theme-toggle):not(.menu-drawer-close):not(.menu-drawer-trigger):not(.desk-todos-mode):not(.todo-group-toggle):not(.todo-add-plus):not(.room-share-code):not(.room-share-copy-icon):not(.copy-chip):not(.room-rename-trigger):not(.focus-todos-pin):not(.banner-dismiss) {
   min-height: 48px;
   padding: 0 24px;
+  border-radius: var(--radius);
   background: var(--accent-btn);
   color: var(--accent-ink);
 }
@@ -2295,7 +2299,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   width: min(100%, 68rem);
   margin: 0 auto;
   padding: 20px clamp(20px, 5vw, 64px) 0;
-  align-items: center;
+  align-items: stretch;
   flex: 1 1 auto;
 }
 .desk-ring-column {
@@ -2347,10 +2351,15 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   margin: var(--sp-4) 0 0;
   text-align: right;
 }
+.panel-title .desk-join-link { margin: 0; flex-shrink: 0; }
 .desk-todos-panel {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
+.desk-todos-panel .panel-title,
+.desk-todos-panel .todo-add-form { flex-shrink: 0; }
 .desk-todos-head { align-items: center; overflow: visible; min-width: 0; gap: var(--sp-3); }
 .desk-todos-switch { position: relative; z-index: 2; flex: 1 1 auto; min-width: 0; }
 .desk-todos-mode {
@@ -2409,7 +2418,8 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-todos-hint[hidden] { display: none !important; }
 .desk-todos-view { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .desk-todos-view[hidden] { display: none !important; }
-.desk-todos-panel .todo-groups { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.desk-todos-panel .todo-groups,
+.desk-todos-panel .todo-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .todo-list {
   list-style: none;
   margin: var(--sp-4) 0 0;
@@ -2431,7 +2441,24 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .todo-list li.done .todo-text,
 .todo-list li.done .todo-author { color: var(--faint); text-decoration: line-through; }
 .todo-list li.done .todo-sep { color: var(--faint); }
-.todo-list li.removed span { color: var(--danger); }
+.todo-list li.removed {
+  display: flex;
+  align-items: flex-start;
+}
+.todo-list li.removed > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--danger);
+}
+.todo-list li.removed .todo-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+}
+.todo-list li.removed .todo-actions form {
+  display: flex;
+  margin: 0;
+}
 .check {
   width: 18px;
   height: 18px;

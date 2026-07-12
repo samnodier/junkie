@@ -624,8 +624,10 @@
     const todoItems = todos.length
       ? sortTodos(todos).map((todo) => {
           const actionBtn = todo.removed
-            ? '<button type="button" class="todo-action todo-restore guest-restore" title="Bring back" aria-label="Bring back">' + restoreIconSVG + '</button>' +
-              '<button type="button" class="todo-action todo-delete guest-delete" title="Delete permanently" aria-label="Delete permanently">' + deleteIconSVG + '</button>'
+            ? '<div class="todo-actions">' +
+                '<button type="button" class="todo-action todo-restore guest-restore" title="Bring back" aria-label="Bring back">' + restoreIconSVG + '</button>' +
+                '<button type="button" class="todo-action todo-delete guest-delete" title="Delete permanently" aria-label="Delete permanently">' + deleteIconSVG + '</button>' +
+              '</div>'
             : '<button type="button" class="todo-action todo-remove guest-remove" title="Remove" aria-label="Remove">' + removeIconSVG + '</button>';
           return (
             '<li class="' + todoRowClass(todo) + '" data-id="' + todo.id + '">' +
@@ -642,13 +644,15 @@
       '<section class="grid two desk-grid">' +
         idleTimerHTML() +
         '<article class="panel desk-todos-panel">' +
-          '<div class="panel-title"><h2>Private todos</h2></div>' +
+          '<div class="panel-title desk-todos-head">' +
+            '<h2>Private todos</h2>' +
+            '<p class="desk-join-link"><a href="#" data-open-join class="mono-link">Have a room code?</a></p>' +
+          '</div>' +
           '<form class="inline-form todo-add-form" id="guest-todo-form">' +
             '<input name="text" placeholder="What do you need to do?" required>' +
             '<button type="submit" class="todo-add-plus" aria-label="Add task">+</button>' +
           '</form>' +
           '<ul class="todo-list" id="guest-todos">' + todoItems + '</ul>' +
-          '<p class="desk-join-link"><a href="#" data-open-join class="mono-link">Have a room code?</a></p>' +
         '</article>' +
       '</section></div>';
 
