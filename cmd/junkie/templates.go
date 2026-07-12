@@ -2205,7 +2205,10 @@ code {
   margin: 0 auto 4rem;
   padding: 0;
 }
-.page:has(.desk-shell) { max-width: none; }
+.page:has(.desk-shell) {
+  max-width: none;
+  margin-bottom: 0;
+}
 .context-banner {
   margin: var(--sp-3) clamp(20px, 4vw, 64px) 0;
   padding: var(--sp-3) var(--sp-4);
@@ -2347,6 +2350,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   flex-direction: column;
   min-height: calc(100vh - 68px);
 }
+.desk-shell:not(.desk-shell-focus) {
+  max-height: calc(100vh - 68px);
+  overflow: hidden;
+}
 .desk-shell-focus .focus-desk { flex: 1 1 auto; min-height: 0; }
 .desk-room-bar {
   display: flex;
@@ -2382,8 +2389,9 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   width: min(100%, 68rem);
   margin: 0 auto;
   padding: 20px clamp(20px, 5vw, 64px) 0;
-  align-items: stretch;
+  align-items: center;
   flex: 1 1 auto;
+  min-height: 0;
 }
 .desk-ring-column {
   display: flex;
@@ -2509,13 +2517,15 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   padding: 0;
   display: grid;
   gap: var(--sp-2);
+  align-content: start;
 }
 .todo-list li {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
   gap: var(--sp-3);
   min-height: 40px;
+  height: auto;
   padding: var(--sp-1) var(--sp-2);
   border-radius: var(--radius-sm);
 }
@@ -2524,19 +2534,25 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .todo-list li.done .todo-text,
 .todo-list li.done .todo-author { color: var(--faint); text-decoration: line-through; }
 .todo-list li.done .todo-sep { color: var(--faint); }
-.todo-list li.removed {
+.todo-list li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.todo-list li.removed > span { color: var(--danger); }
+.todo-list li > form:has(.check),
+.todo-list li > .check {
+  flex-shrink: 0;
+  margin: 0;
+}
+.todo-list li > form:has(.check) {
   display: flex;
   align-items: flex-start;
-}
-.todo-list li.removed > span {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--danger);
 }
 .todo-list li.removed .todo-actions {
   display: flex;
   flex-shrink: 0;
   align-items: flex-start;
+  gap: 0;
 }
 .todo-list li.removed .todo-actions form {
   display: flex;
@@ -2545,7 +2561,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .check {
   width: 18px;
   height: 18px;
-  min-height: 0;
+  min-width: 18px;
+  min-height: 18px;
+  flex-shrink: 0;
+  aspect-ratio: 1;
   padding: 0;
   border-radius: 50%;
   border: 1.5px solid var(--border-strong);
@@ -2554,6 +2573,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-size: 0.7rem;
   display: grid;
   place-items: center;
+  box-sizing: border-box;
 }
 .todo-list li.done .check {
   background: var(--accent-btn);
@@ -3287,6 +3307,11 @@ body.menu-drawer-open { overflow: hidden; }
   .topbar { min-height: 60px; }
   .desk-grid, .room-desk-grid, .grid.two { grid-template-columns: 1fr; gap: var(--sp-6); padding-left: 20px; padding-right: 20px; }
   .desk-grid { width: 100%; }
+  .desk-shell:not(.desk-shell-focus) {
+    max-height: none;
+    overflow: visible;
+  }
+  .page:has(.desk-shell) { margin-bottom: 4rem; }
   .desk-timer-card,
   .desk-todos-panel { height: auto; min-height: 28rem; }
   .desk-timer-card { overflow: visible; }
