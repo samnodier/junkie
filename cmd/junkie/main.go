@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -13,21 +14,25 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
-	"nhooyr.io/websocket"
 )
 
 type app struct {
 	db                  *pgxpool.Pool
 	templates           *template.Template
 	hub                 *hub
+	limiter             *rateLimiter
 	currentUserOverride func(*http.Request) (user, bool)
 }
 
@@ -131,6 +136,7 @@ type pageData struct {
 	Title                string
 	User                 user
 	Error                string
+	Notice               string
 	Rooms                []room
 	Room                 room
 	PersonalTodos        []todo
@@ -190,6 +196,7 @@ func main() {
 		db:        db,
 		templates: parseTemplates(),
 		hub:       &hub{rooms: map[string]map[*websocket.Conn]struct{}{}},
+		limiter:   newRateLimiter(),
 	}
 	if err := a.migrate(ctx); err != nil {
 		log.Fatal(err)
@@ -201,8 +208,10 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /assets/app.css", a.css)
 	mux.HandleFunc("GET /assets/guest.js", a.serveStaticAsset("guest.js", "application/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /assets/htmx.min.js", a.serveStaticAsset("htmx.min.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/notifications.js", a.serveStaticAsset("notifications.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/icon.svg", a.serveStaticAsset("icon.svg", "image/svg+xml"))
+	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /", a.home)
 	mux.HandleFunc("GET /signup", a.signupForm)
 	mux.HandleFunc("POST /signup", a.signup)
@@ -218,6 +227,7 @@ func main() {
 		http.Redirect(w, r, dest, http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("GET /profile", a.profilePage)
+	mux.HandleFunc("POST /profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
@@ -237,9 +247,68 @@ func main() {
 	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
 	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
 
+	go a.sweepExpiredSessions(ctx)
+
+	// Reject state-changing requests from other origins (CSRF). Requests
+	// without browser origin metadata (curl, health checks) still pass.
+	csrf := http.NewCrossOriginProtection()
+	handler := securityHeaders(csrf.Handler(mux))
+
 	addr := getenv("ADDR", ":8080")
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+	}
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		<-sigCtx.Done()
+		log.Println("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			// Long-lived WebSocket handlers may not drain in time; close them.
+			_ = srv.Close()
+		}
+	}()
+
 	log.Printf("junkie listening on http://localhost%s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+	<-shutdownDone
+}
+
+func (a *app) healthz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := a.db.Ping(ctx); err != nil {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprintln(w, "ok")
+}
+
+func (a *app) sweepExpiredSessions(ctx context.Context) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if _, err := a.db.Exec(ctx, `DELETE FROM sessions WHERE expires_at < now()`); err != nil {
+			log.Printf("sweep expired sessions: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (a *app) migrate(ctx context.Context) error {
@@ -283,6 +352,22 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 		a.render(w, "login", a.authPageData(r, true, next, "Username and password are required."))
 		return
 	}
+	if !validUsername(username) {
+		a.render(w, "login", a.authPageData(r, true, next, "Usernames are 2–32 characters: lowercase letters, numbers, dots, dashes, underscores."))
+		return
+	}
+	if len([]rune(password)) < minPasswordLength {
+		a.render(w, "login", a.authPageData(r, true, next, fmt.Sprintf("Passwords must be at least %d characters.", minPasswordLength)))
+		return
+	}
+	if len(password) > maxPasswordBytes {
+		a.render(w, "login", a.authPageData(r, true, next, "That password is too long."))
+		return
+	}
+	if !a.limiter.allow("signup:"+clientIP(r), 10, time.Hour) {
+		a.renderStatus(w, http.StatusTooManyRequests, "login", a.authPageData(r, true, next, "Too many new accounts from this address. Try again later."))
+		return
+	}
 	displayName := displayNameFromUsername(username)
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -309,6 +394,11 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
 	password := r.FormValue("password")
 	next := safeNext(r.FormValue("next"))
+	if !a.limiter.allow("login:"+clientIP(r), 20, 5*time.Minute) ||
+		(username != "" && !a.limiter.allow("login-user:"+username, 10, 15*time.Minute)) {
+		a.renderStatus(w, http.StatusTooManyRequests, "login", a.authPageData(r, false, next, "Too many sign-in attempts. Try again in a few minutes."))
+		return
+	}
 	var id, hash string
 	err := a.db.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
@@ -321,10 +411,9 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("junkie_session"); err == nil {
-		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token = $1`, cookie.Value)
+		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token = $1`, hashToken(cookie.Value))
 	}
-	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -345,7 +434,58 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 		ActivityWeeks:        heatmap.Weeks,
 		ActivityTotalMinutes: heatmap.TotalMinutes,
 		Error:                r.URL.Query().Get("error"),
+		Notice:               r.URL.Query().Get("notice"),
 	})
+}
+
+func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	fail := func(msg string) {
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape(msg), http.StatusSeeOther)
+	}
+	if !a.limiter.allow("pwchange:"+u.ID, 10, 15*time.Minute) {
+		fail("Too many attempts. Try again in a few minutes.")
+		return
+	}
+	current := r.FormValue("current_password")
+	newPassword := r.FormValue("new_password")
+	confirm := r.FormValue("confirm_password")
+	var hash string
+	if err := a.db.QueryRow(r.Context(), `SELECT password_hash FROM users WHERE id = $1`, u.ID).Scan(&hash); err != nil {
+		fail("Could not verify your password.")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(current)) != nil {
+		fail("Current password is incorrect.")
+		return
+	}
+	if len([]rune(newPassword)) < minPasswordLength {
+		fail(fmt.Sprintf("New password must be at least %d characters.", minPasswordLength))
+		return
+	}
+	if len(newPassword) > maxPasswordBytes {
+		fail("That new password is too long.")
+		return
+	}
+	if newPassword != confirm {
+		fail("New passwords do not match.")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		fail("Could not update your password.")
+		return
+	}
+	if _, err := a.db.Exec(r.Context(), `UPDATE users SET password_hash = $1 WHERE id = $2`, string(newHash), u.ID); err != nil {
+		fail("Could not update your password.")
+		return
+	}
+	// Sign out every other session so a compromised login cannot survive a
+	// password change; only the session that made the change stays valid.
+	if cookie, err := r.Cookie("junkie_session"); err == nil {
+		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE user_id = $1 AND token <> $2`, u.ID, hashToken(cookie.Value))
+	}
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Password updated. All other devices were signed out."), http.StatusSeeOther)
 }
 
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -418,7 +558,7 @@ func (a *app) skipSoloBreak(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) createPersonalTodo(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
-	text := strings.TrimSpace(r.FormValue("text"))
+	text := limitRunes(strings.TrimSpace(r.FormValue("text")), maxTodoTextLen)
 	if text != "" {
 		_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, text) VALUES ($1, $2)`, u.ID, text)
 	}
@@ -443,12 +583,14 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 			a.todoActionDenied(w, r, roomCode, "You can only complete your own todos.")
 			return
 		}
+	// Room todos can be managed by any member of that room, so these
+	// require the actor's membership rather than authorship.
 	case "remove":
-		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = true, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
+		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = true, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IN (SELECT room_id FROM room_members WHERE user_id = $2))`, id, u.ID)
 	case "restore":
-		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = false, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
+		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = false, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IN (SELECT room_id FROM room_members WHERE user_id = $2))`, id, u.ID)
 	case "delete":
-		_, _ = a.db.Exec(r.Context(), `DELETE FROM todos WHERE id = $1 AND (user_id = $2 OR room_id IS NOT NULL)`, id, u.ID)
+		_, _ = a.db.Exec(r.Context(), `DELETE FROM todos WHERE id = $1 AND (user_id = $2 OR room_id IN (SELECT room_id FROM room_members WHERE user_id = $2))`, id, u.ID)
 	default:
 		http.NotFound(w, r)
 		return
@@ -488,14 +630,21 @@ func (a *app) todoActionDenied(w http.ResponseWriter, r *http.Request, roomCode,
 
 func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
-	name := strings.TrimSpace(r.FormValue("name"))
+	name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)
 	if name == "" {
 		name = u.DisplayName + "'s focus room"
 	}
-	code := randomCode()
-	var roomID string
-	err := a.db.QueryRow(r.Context(), `INSERT INTO rooms (code, name, creator_id) VALUES ($1, $2, $3) RETURNING id`, code, name, u.ID).Scan(&roomID)
+	var code, roomID string
+	err := errors.New("no attempt")
+	for range 5 {
+		code = randomCode()
+		err = a.db.QueryRow(r.Context(), `INSERT INTO rooms (code, name, creator_id) VALUES ($1, $2, $3) RETURNING id`, code, name, u.ID).Scan(&roomID)
+		if err == nil || !isUniqueViolation(err) {
+			break
+		}
+	}
 	if err != nil {
+		log.Printf("create room: %v", err)
 		http.Error(w, "could not create room", http.StatusInternalServerError)
 		return
 	}
@@ -685,7 +834,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	}
 	switch action {
 	case "rename":
-		name := strings.TrimSpace(r.FormValue("name"))
+		name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)
 		if name != "" {
 			_, _ = a.db.Exec(r.Context(), `UPDATE rooms SET name = $1, updated_at = now() WHERE id = $2`, name, rm.ID)
 		}
@@ -704,7 +853,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 		return
 	case "todos":
-		text := strings.TrimSpace(r.FormValue("text"))
+		text := limitRunes(strings.TrimSpace(r.FormValue("text")), maxTodoTextLen)
 		if text != "" {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, room_id, text) VALUES ($1, $2, $3)`, u.ID, rm.ID, text)
 		}
@@ -792,7 +941,9 @@ func (a *app) roomWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "room membership required", http.StatusForbidden)
 		return
 	}
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	// Default options enforce a same-origin handshake, blocking
+	// cross-site WebSocket hijacking.
+	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return
 	}
@@ -1184,7 +1335,7 @@ func (a *app) currentUser(r *http.Request) (user, bool) {
 	err = a.db.QueryRow(r.Context(), `
 		SELECT u.id, u.username, u.display_name, u.role
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token = $1 AND s.expires_at > now()`, cookie.Value).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role)
+		WHERE s.token = $1 AND s.expires_at > now()`, hashToken(cookie.Value)).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role)
 	return u, err == nil
 }
 
@@ -1206,18 +1357,25 @@ func displayNameFromUsername(username string) string {
 }
 
 func safeNext(raw string) string {
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+	// Reject anything but a local path: browsers treat both "//host" and
+	// "/\host" as protocol-relative URLs, which would be open redirects.
+	if raw == "" || !strings.HasPrefix(raw, "/") ||
+		strings.HasPrefix(raw, "//") || strings.HasPrefix(raw, "/\\") {
 		return "/"
 	}
 	return raw
 }
 
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
 func (a *app) createSession(w http.ResponseWriter, r *http.Request, userID string) {
 	token := randomHex(32)
 	expires := time.Now().Add(30 * 24 * time.Hour)
-	_, _ = a.db.Exec(r.Context(), `INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)`, token, userID, expires)
-	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Value: token, Path: "/", Expires: expires, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
+	_, _ = a.db.Exec(r.Context(), `INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)`, hashToken(token), userID, expires)
+	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Value: token, Path: "/", Expires: expires, HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode})
 }
 
 func (a *app) findRoom(ctx context.Context, code string) (room, bool) {
@@ -1381,10 +1539,22 @@ func buildYearHeatmap(days []activityDay, dates []time.Time) heatmapData {
 }
 
 func (a *app) render(w http.ResponseWriter, name string, data pageData) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := a.templates.ExecuteTemplate(w, name, data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	a.renderStatus(w, http.StatusOK, name, data)
+}
+
+// renderStatus buffers template execution so a failure can be logged and
+// reported as a clean 500 instead of leaking template internals to the
+// client mid-response.
+func (a *app) renderStatus(w http.ResponseWriter, status int, name string, data pageData) {
+	var buf bytes.Buffer
+	if err := a.templates.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Printf("render %s: %v", name, err)
+		http.Error(w, "something went wrong", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = buf.WriteTo(w)
 }
 
 func (a *app) css(w http.ResponseWriter, r *http.Request) {

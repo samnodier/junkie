@@ -1,0 +1,7 @@
+# Caddy config for the `prod` compose profile. DOMAIN comes from .env.
+# Caddy provisions Let's Encrypt certificates automatically for real domains
+# and proxies WebSockets without extra configuration.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:8080
+}

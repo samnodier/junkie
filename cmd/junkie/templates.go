@@ -92,7 +92,7 @@ const layoutTemplates = `
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,wght@0,600;1,500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="/assets/htmx.min.js"></script>
   <script src="/assets/notifications.js"></script>
 </head>
 <body{{if or .SoloTimer .FocusMode}} class="focus-active"{{end}}{{if .User.ID}} data-user-id="{{.User.ID}}"{{end}}>
@@ -260,6 +260,7 @@ const layoutTemplates = `
                 if (roomSync && window.junkieReconcileRoomTimer) {
                   window.junkieReconcileRoomTimer('countdown');
                 } else {
+                  window.junkieStashTypedTodo?.();
                   location.reload();
                 }
               }, 400);
@@ -649,6 +650,7 @@ const layoutTemplates = `
           const server = await response.json();
           if (!sameRoomStatus(roomStatusFromElement(el), server)) {
             roomStatusReloading = true;
+            window.junkieStashTypedTodo?.();
             location.reload();
           }
         }).catch(() => {
@@ -696,7 +698,10 @@ const layoutTemplates = `
         const dismiss = () => {
           backdrop.remove();
           const onRoomPage = document.querySelector('[data-room-page]')?.dataset.roomSync === code;
-          if (onRoomPage || deskTodosViewingRoom(code)) location.reload();
+          if (onRoomPage || deskTodosViewingRoom(code)) {
+            window.junkieStashTypedTodo?.();
+            location.reload();
+          }
         };
         backdrop.querySelector('[data-dismiss]')?.addEventListener('click', dismiss);
         backdrop.addEventListener('click', (event) => {
@@ -712,6 +717,7 @@ const layoutTemplates = `
           if (left === 0) {
             clearInterval(interval);
             backdrop.remove();
+            window.junkieStashTypedTodo?.();
             location.reload();
           }
         };
@@ -741,7 +747,10 @@ const layoutTemplates = `
         if (type === 'timer-lobby' && !document.querySelector('.room-focus-shell')) {
           if (event?.starterUserId === document.body.dataset.userId) {
             if (document.querySelector('[data-room-page]') || deskTodosViewingRoom(code)) {
-              setTimeout(() => location.reload(), 100);
+              setTimeout(() => {
+                window.junkieStashTypedTodo?.();
+                location.reload();
+              }, 100);
             }
             return;
           }
@@ -765,7 +774,10 @@ const layoutTemplates = `
         } else if (!onRoomPage && !deskTodosViewingRoom(code)) {
           return;
         }
-        setTimeout(() => location.reload(), 200);
+        setTimeout(() => {
+          window.junkieStashTypedTodo?.();
+          location.reload();
+        }, 200);
       };
 
       const wireDeskRoomWS = () => {
@@ -828,6 +840,53 @@ const layoutTemplates = `
         });
       };
       wireTodoGroupCollapse();
+
+      // Server-backed todo forms navigate on submit, and room pages reload on
+      // WebSocket broadcasts, so adding a task normally throws the cursor (and
+      // any half-typed text) out of the add box. Stash a short-lived per-tab
+      // draft around those reloads and restore it afterwards so tasks can be
+      // entered back to back. The guest form has no action attribute: it adds
+      // todos without navigating and refocuses itself in guest.js.
+      const todoDraftKey = 'junkie:todoDraft';
+      let todoFormSubmitting = false;
+      const stashTodoDraft = (form, value) => {
+        const action = form?.getAttribute('action');
+        if (!action) return;
+        try {
+          sessionStorage.setItem(todoDraftKey, JSON.stringify({ action, value, ts: Date.now() }));
+        } catch (_) {}
+      };
+      // The submit stash must survive until navigation: the server broadcasts
+      // the new todo before responding, so this tab's own WebSocket reload can
+      // fire while the just-submitted text is still in the input.
+      window.junkieStashTypedTodo = () => {
+        if (todoFormSubmitting) return;
+        const input = document.activeElement;
+        if (input?.name === 'text') stashTodoDraft(input.closest?.('.todo-add-form[action]'), input.value);
+      };
+      document.addEventListener('submit', (event) => {
+        const form = event.target.closest?.('.todo-add-form[action]');
+        if (!form) return;
+        todoFormSubmitting = true;
+        stashTodoDraft(form, '');
+      }, true);
+
+      const restoreTodoDraft = () => {
+        let draft = null;
+        try {
+          draft = JSON.parse(sessionStorage.getItem(todoDraftKey) || 'null');
+          sessionStorage.removeItem(todoDraftKey);
+        } catch (_) {}
+        if (!draft?.action || Date.now() - (draft.ts || 0) > 15000) return;
+        const form = Array.from(document.querySelectorAll('.todo-add-form[action]'))
+          .find((el) => el.getAttribute('action') === draft.action);
+        const input = form?.querySelector('input[name="text"]');
+        if (!input || input.closest('[hidden]')) return;
+        input.value = draft.value || '';
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      };
+      restoreTodoDraft();
 
       const copyText = async (text) => {
         try {
@@ -1632,6 +1691,8 @@ const layoutTemplates = `
         <div id="guest-profile-work-map"></div>
         <script src="/assets/guest.js"></script>
       {{else}}
+        {{if .Error}}<p class="notice-error" role="alert">{{.Error}}</p>{{end}}
+        {{if .Notice}}<p class="notice-ok" role="status">{{.Notice}}</p>{{end}}
         <div class="profile-stats">
           <div>
             <strong>{{focusHours .ActivityTotalMinutes}}</strong>
@@ -1653,6 +1714,18 @@ const layoutTemplates = `
             <span aria-hidden="true"></span>
           </label>
         </div>
+        <div class="profile-preference profile-password">
+          <div>
+            <strong>Change password</strong>
+            <p class="muted">Updating your password signs out all other devices, so anyone else using your account loses access.</p>
+          </div>
+        </div>
+        <form class="profile-password-form" method="post" action="/profile/password">
+          <label>Current password <input type="password" name="current_password" autocomplete="current-password" required></label>
+          <label>New password <input type="password" name="new_password" autocomplete="new-password" required minlength="4"></label>
+          <label>Confirm new password <input type="password" name="confirm_password" autocomplete="new-password" required minlength="4"></label>
+          <button type="submit" class="btn-primary btn-compact">Update password</button>
+        </form>
         <p class="muted profile-follow-stub">Follow friends — coming soon</p>
       {{end}}
     </section>
@@ -1806,9 +1879,11 @@ const layoutTemplates = `
           <details class="room-details panel" data-room-section="controls">
             <summary><span class="label">Room controls</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <p class="muted">During focus, late joiners can watch the countdown but cannot enter the active block. During break, anyone can join the next block.</p>
+            {{if eq .Room.CreatorID .User.ID}}
             <form method="post" action="/r/{{.Room.Code}}/delete" onsubmit="return confirm('Delete \'{{.Room.Name}}\'? This removes it for all {{.MemberCount}} members.')">
               <button type="submit" class="btn-danger">Delete room</button>
             </form>
+            {{end}}
           </details>
           {{end}}
         </div>
@@ -2230,6 +2305,14 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 8%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.notice-ok {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: var(--radius);
   padding: var(--sp-3) var(--sp-4);
   margin-bottom: var(--sp-4);
@@ -3099,6 +3182,21 @@ body.menu-drawer-open { overflow: hidden; }
 .profile-stats strong { font-family: var(--font-serif); font-size: 2rem; display: block; line-height: 1; }
 .profile-stats span { color: var(--muted); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.1em; }
 .profile-follow-stub { margin-top: var(--sp-4); font-size: var(--fs-small); }
+.profile-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 340px;
+  margin-top: var(--sp-3);
+}
+.profile-password-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.profile-password-form button { align-self: flex-start; }
 .heatmap-chart { width: 100%; }
 .heatmap-summary { color: var(--muted); font-size: var(--fs-small); margin: 0 0 var(--sp-3); }
 .heatmap-layout { display: flex; gap: var(--sp-2); width: 100%; }

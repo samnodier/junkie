@@ -122,8 +122,7 @@ func (a *app) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if !canAccessAdmin(u.Role) {
-			w.WriteHeader(http.StatusForbidden)
-			a.render(w, "forbidden", pageData{
+			a.renderStatus(w, http.StatusForbidden, "forbidden", pageData{
 				Title:            "Access denied",
 				User:             u,
 				ForbiddenMessage: "This space is limited to platform administrators.",
