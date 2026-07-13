@@ -764,12 +764,44 @@ const layoutTemplates = `
         return room === code;
       };
 
+      // Transient bottom-center toasts, stacked and self-dismissing. Screen
+      // readers get them through the container's polite live region.
+      const toast = (message) => {
+        let holder = document.getElementById('junkie-toasts');
+        if (!holder) {
+          holder = document.createElement('div');
+          holder.id = 'junkie-toasts';
+          holder.setAttribute('role', 'status');
+          holder.setAttribute('aria-live', 'polite');
+          document.body.appendChild(holder);
+        }
+        const el = document.createElement('div');
+        el.className = 'toast';
+        el.textContent = message;
+        holder.appendChild(el);
+        while (holder.children.length > 3) holder.removeChild(holder.firstChild);
+        setTimeout(() => el.classList.add('toast-show'), 20);
+        setTimeout(() => {
+          el.classList.remove('toast-show');
+          setTimeout(() => el.remove(), 300);
+        }, 4500);
+      };
+      window.junkieToast = toast;
+
       window.junkieOnRoomWSMessage = (code, msg, roomName) => {
         let event = null;
         if (typeof msg === 'string' && msg.startsWith('{')) {
           try { event = JSON.parse(msg); } catch (_) {}
         }
         const type = event?.type || msg;
+        if (type === 'todo-done') {
+          if (event?.actorId !== document.body.dataset.userId) {
+            const text = String(event?.text || '');
+            const short = text.length > 60 ? text.slice(0, 57) + '…' : text;
+            toast((event?.actor || 'Someone') + ' completed: ' + short);
+          }
+          return;
+        }
         if (type === 'timer-lobby' && !document.querySelector('.room-focus-shell')) {
           if (event?.starterUserId === document.body.dataset.userId) {
             if (document.querySelector('[data-room-page]') || deskTodosViewingRoom(code)) {
@@ -2840,6 +2872,32 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
+#junkie-toasts {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  z-index: 1000;
+  pointer-events: none;
+}
+#junkie-toasts .toast {
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 250ms ease, transform 250ms ease;
+}
+#junkie-toasts .toast-show { opacity: 1; transform: translateY(0); }
 .todo-editable { cursor: text; border-radius: var(--radius-sm); }
 .todo-editable:hover { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
 .todo-edit-input {

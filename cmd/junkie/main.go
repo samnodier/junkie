@@ -729,10 +729,13 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 	id, action := parts[0], parts[1]
 	var roomID, roomCode string
 	_ = a.db.QueryRow(r.Context(), `SELECT COALESCE(r.id::text, ''), COALESCE(r.code, '') FROM todos t LEFT JOIN rooms r ON r.id = t.room_id WHERE t.id = $1`, id).Scan(&roomID, &roomCode)
+	var completedText string
 	switch action {
 	case "toggle":
-		tag, err := a.db.Exec(r.Context(), `UPDATE todos SET done = NOT done, updated_at = now() WHERE id = $1 AND user_id = $2`, id, u.ID)
-		if err != nil || tag.RowsAffected() == 0 {
+		var nowDone bool
+		var todoText string
+		err := a.db.QueryRow(r.Context(), `UPDATE todos SET done = NOT done, updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING done, text`, id, u.ID).Scan(&nowDone, &todoText)
+		if err != nil {
 			if isHTMXRequest(r) {
 				if roomCode != "" {
 					a.renderRoomTodosFragment(w, r, roomID, roomCode, u, r.FormValue("desk") == "1")
@@ -743,6 +746,9 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 			}
 			a.todoActionDenied(w, r, roomCode, "You can only complete your own todos.")
 			return
+		}
+		if nowDone {
+			completedText = todoText
 		}
 	case "edit":
 		text := limitRunes(strings.TrimSpace(r.FormValue("text")), maxTodoTextLen)
@@ -779,6 +785,13 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 	desk := r.FormValue("desk") == "1"
 	if roomCode != "" {
 		a.hub.broadcast(roomCode, "todos")
+		if completedText != "" {
+			// Separate from the "todos" patch signal: a small celebration
+			// event so other members see progress happening live.
+			a.hub.broadcastJSON(roomCode, map[string]string{
+				"type": "todo-done", "actorId": u.ID, "actor": u.DisplayName, "text": completedText,
+			})
+		}
 		if isHTMXRequest(r) {
 			a.renderRoomTodosFragment(w, r, roomID, roomCode, u, desk)
 			return
