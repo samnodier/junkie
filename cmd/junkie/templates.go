@@ -1197,9 +1197,24 @@ const layoutTemplates = `
 
 {{define "todo-row-focus"}}
   <li class="{{if .Done}}done{{end}}">
-    <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
+    <form method="post" action="/todo/{{.ID}}/toggle" hx-post="/todo/{{.ID}}/toggle"><input type="hidden" name="view" value="focus"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     <span>{{.Text}}</span>
   </li>
+{{end}}
+
+{{define "focus-todos-list"}}
+<ul class="todo-list" id="focus-todos-list" hx-target="this" hx-swap="outerHTML">
+  {{- $hasActive := false -}}
+  {{- range . -}}
+    {{- if not .Removed -}}
+      {{- $hasActive = true -}}
+      {{template "todo-row-focus" .}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $hasActive -}}
+    <li class="empty">Nothing yet. Add one thing worth finishing.</li>
+  {{- end -}}
+</ul>
 {{end}}
 
 {{define "todo-row-desk-room"}}
@@ -1717,18 +1732,7 @@ const layoutTemplates = `
         <div class="panel-title">
           <h2>Todos</h2>
         </div>
-        <ul class="todo-list" id="focus-todos-list">
-          {{- $hasActive := false -}}
-          {{- range .PersonalTodos -}}
-            {{- if not .Removed -}}
-              {{- $hasActive = true -}}
-              {{template "todo-row-focus" .}}
-            {{- end -}}
-          {{- end -}}
-          {{- if not $hasActive -}}
-            <li class="empty">Nothing yet. Add one thing worth finishing.</li>
-          {{- end -}}
-        </ul>
+        {{template "focus-todos-list" .PersonalTodos}}
       </aside>
     </section>
     </div>

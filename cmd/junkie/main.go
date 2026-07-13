@@ -665,6 +665,12 @@ type personalTodosView struct {
 
 func (a *app) renderPersonalTodosFragment(w http.ResponseWriter, r *http.Request, userID string) {
 	todos, _ := a.personalTodos(r.Context(), userID)
+	// The focus-desk peek panel renders personal todos with a different row
+	// template than the dashboard list; the form says which one it needs.
+	if r.FormValue("view") == "focus" {
+		a.renderFragment(w, "focus-todos-list", todos)
+		return
+	}
 	rooms, _ := a.roomsForUser(r.Context(), userID)
 	a.renderFragment(w, "personal-todos-list", personalTodosView{Todos: todos, HasRooms: len(rooms) > 0})
 }
