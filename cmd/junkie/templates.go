@@ -301,6 +301,39 @@ const layoutTemplates = `
         form.addEventListener('submit', () => window.junkieNotify?.requestPermission());
       });
 
+      // Downscale avatar uploads in the browser: center-crop to a square,
+      // shrink to 128px, and re-encode as a small JPEG so nobody ships a
+      // multi-megabyte photo to the server (which caps uploads hard anyway).
+      const wireAvatarForm = () => {
+        const form = document.getElementById('avatar-form');
+        const input = document.getElementById('avatar-input');
+        if (!form || !input) return;
+        form.addEventListener('submit', async (event) => {
+          const file = input.files?.[0];
+          if (!file) return;
+          event.preventDefault();
+          try {
+            const bmp = await createImageBitmap(file);
+            const size = 128;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const side = Math.min(bmp.width, bmp.height);
+            ctx.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+            if (!blob) throw new Error('encode failed');
+            const fd = new FormData();
+            fd.append('avatar', blob, 'avatar.jpg');
+            const resp = await fetch('/profile/avatar', { method: 'POST', body: fd });
+            location.href = resp.redirected ? resp.url : '/profile';
+          } catch (_) {
+            location.href = '/profile?error=' + encodeURIComponent("That image can't be used. Try a different one.");
+          }
+        });
+      };
+      wireAvatarForm();
+
       const roomInviteToggle = document.getElementById('room-invite-notifications');
       if (roomInviteToggle) {
         roomInviteToggle.checked = window.junkieNotify?.roomInvitesEnabled() !== false;
@@ -1436,7 +1469,7 @@ const layoutTemplates = `
 {{define "todo-row"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
     {{if .ReadOnly}}
-    <span class="todo-avatar" aria-hidden="true">{{initial .DisplayName}}</span>
+    <span class="todo-avatar" aria-hidden="true"><img class="avatar-img" src="/avatar/{{.UserID}}" alt="" loading="lazy" onerror="this.remove()">{{initial .DisplayName}}</span>
     {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle" hx-post="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     {{end}}
@@ -1481,7 +1514,7 @@ const layoutTemplates = `
 {{define "todo-row-desk-room"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
     {{if .ReadOnly}}
-    <span class="todo-avatar" aria-hidden="true">{{initial .DisplayName}}</span>
+    <span class="todo-avatar" aria-hidden="true"><img class="avatar-img" src="/avatar/{{.UserID}}" alt="" loading="lazy" onerror="this.remove()">{{initial .DisplayName}}</span>
     {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle" hx-post="/todo/{{.ID}}/toggle">
       <input type="hidden" name="desk" value="1">
@@ -1784,7 +1817,7 @@ const layoutTemplates = `
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
   <div class="drawer-identity drawer-identity-user">
-    <span class="drawer-avatar">{{initial .User.DisplayName}}</span>
+    <span class="drawer-avatar">{{if .User.HasAvatar}}<img class="avatar-img" src="/avatar/{{.User.ID}}?v={{.User.AvatarVersion}}" alt="">{{else}}{{initial .User.DisplayName}}{{end}}</span>
     <div class="drawer-user-meta">
       <span class="drawer-name">{{.User.DisplayName}}</span>
       <a href="/profile" class="label drawer-profile-link">View profile</a>
@@ -2118,6 +2151,34 @@ const layoutTemplates = `
             <span aria-hidden="true"></span>
           </label>
         </div>
+        <div class="profile-preference profile-avatar-pref">
+          <div>
+            <strong>Profile picture</strong>
+            <p class="muted">Shown next to your todos in rooms. Pictures are shrunk to a small square before upload, so any photo works.</p>
+          </div>
+          <span class="profile-avatar">{{if .User.HasAvatar}}<img class="avatar-img" src="/avatar/{{.User.ID}}?v={{.User.AvatarVersion}}" alt="Your profile picture">{{else}}{{initial .User.DisplayName}}{{end}}</span>
+        </div>
+        <div class="profile-avatar-actions">
+          <form id="avatar-form" method="post" action="/profile/avatar" enctype="multipart/form-data">
+            <input type="file" name="avatar" id="avatar-input" accept="image/*" required aria-label="Choose profile picture">
+            <button type="submit" class="btn-primary btn-compact">Upload picture</button>
+          </form>
+          {{if .User.HasAvatar}}
+          <form method="post" action="/profile/avatar/remove">
+            <button type="submit" class="btn-ghost btn-compact">Remove picture</button>
+          </form>
+          {{end}}
+        </div>
+        <div class="profile-preference">
+          <div>
+            <strong>Username</strong>
+            <p class="muted">Changes how you sign in and how your name appears to others. Your focus history stays with your account.</p>
+          </div>
+        </div>
+        <form class="profile-username-form" method="post" action="/profile/username">
+          <label>Username <input name="username" value="{{.User.Username}}" autocomplete="username" required minlength="2" maxlength="32"></label>
+          <button type="submit" class="btn-primary btn-compact">Save username</button>
+        </form>
         <div class="profile-preference profile-password">
           <div>
             <strong>Change password</strong>
@@ -3129,6 +3190,65 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+/* Uploaded pictures sit on top of the initial letter; when a user has no
+   avatar the request 404s and the img removes itself, revealing the letter. */
+.avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.profile-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent-btn);
+  color: var(--accent-ink);
+  font-family: var(--font-serif);
+  font-size: 1.4rem;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.profile-avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.profile-avatar-actions form { display: flex; align-items: center; gap: var(--sp-3); }
+.profile-avatar-actions input[type="file"] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  width: auto;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.profile-username-form {
+  display: flex;
+  align-items: end;
+  gap: var(--sp-3);
+  max-width: 340px;
+  margin-top: var(--sp-3);
+}
+.profile-username-form label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-small);
+  color: var(--muted);
 }
 .todo-sep { color: var(--faint); }
 .todo-author {
@@ -3474,6 +3594,8 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-family: var(--font-serif);
   font-weight: 600;
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
 }
 .drawer-profile-row {
   display: flex;

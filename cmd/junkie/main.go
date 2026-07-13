@@ -10,6 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -41,6 +45,10 @@ type user struct {
 	Username    string
 	DisplayName string
 	Role        string
+	HasAvatar   bool
+	// AvatarVersion is the avatar's upload time as a unix timestamp, used
+	// as a cache-busting query parameter on /avatar/{id} URLs.
+	AvatarVersion int64
 }
 
 type room struct {
@@ -240,6 +248,10 @@ func main() {
 	mux.HandleFunc("GET /profile", a.profilePage)
 	mux.HandleFunc("POST /profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /profile/delete", a.requireAuth(a.deleteAccount))
+	mux.HandleFunc("POST /profile/username", a.requireAuth(a.changeUsername))
+	mux.HandleFunc("POST /profile/avatar", a.requireAuth(a.uploadAvatar))
+	mux.HandleFunc("POST /profile/avatar/remove", a.requireAuth(a.removeAvatar))
+	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
@@ -572,6 +584,97 @@ func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/login?notice="+url.QueryEscape("Your account and all its data have been deleted."), http.StatusSeeOther)
+}
+
+func (a *app) changeUsername(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	fail := func(msg string) {
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape(msg), http.StatusSeeOther)
+	}
+	if !a.limiter.allow("unamechange:"+u.ID, 5, time.Hour) {
+		fail("Too many username changes. Try again later.")
+		return
+	}
+	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
+	if username == u.Username {
+		http.Redirect(w, r, "/profile", http.StatusSeeOther)
+		return
+	}
+	if !validUsername(username) {
+		fail("Usernames are 2–32 characters: lowercase letters, numbers, dots, dashes, underscores.")
+		return
+	}
+	displayName := displayNameFromUsername(username)
+	if _, err := a.db.Exec(r.Context(), `UPDATE users SET username = $1, display_name = $2 WHERE id = $3`, username, displayName, u.ID); err != nil {
+		fail("That username is already taken.")
+		return
+	}
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Username updated. You now sign in as "+username+"."), http.StatusSeeOther)
+}
+
+const maxAvatarBytes = 128 << 10 // 128 KiB, generous for a 128px JPEG
+
+func (a *app) uploadAvatar(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	fail := func(msg string) {
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape(msg), http.StatusSeeOther)
+	}
+	if !a.limiter.allow("avatar:"+u.ID, 10, time.Hour) {
+		fail("Too many avatar changes. Try again later.")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes+4096)
+	if err := r.ParseMultipartForm(maxAvatarBytes + 4096); err != nil {
+		fail("That image is too large. Pick a smaller one.")
+		return
+	}
+	file, _, err := r.FormFile("avatar")
+	if err != nil {
+		fail("Choose an image to upload.")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxAvatarBytes+1))
+	if err != nil || len(data) == 0 || len(data) > maxAvatarBytes {
+		fail("That image is too large. Pick a smaller one.")
+		return
+	}
+	// The client downscales to a small JPEG before uploading; verify what
+	// actually arrived regardless: sniffed type and sane pixel dimensions.
+	contentType := http.DetectContentType(data)
+	if contentType != "image/jpeg" && contentType != "image/png" {
+		fail("Avatars must be a JPEG or PNG image.")
+		return
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > 1024 || cfg.Height > 1024 {
+		fail("That image can't be used. Try a different one.")
+		return
+	}
+	if _, err := a.db.Exec(r.Context(), `UPDATE users SET avatar = $1, avatar_updated_at = now() WHERE id = $2`, data, u.ID); err != nil {
+		fail("Could not save your picture.")
+		return
+	}
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Profile picture updated."), http.StatusSeeOther)
+}
+
+func (a *app) removeAvatar(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	_, _ = a.db.Exec(r.Context(), `UPDATE users SET avatar = NULL, avatar_updated_at = NULL WHERE id = $1`, u.ID)
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Profile picture removed."), http.StatusSeeOther)
+}
+
+// serveAvatar returns a user's avatar bytes. Any signed-in user can fetch
+// any avatar by user id: ids are UUIDs already exposed to room members, and
+// avatars render next to shared todos and timers.
+func (a *app) serveAvatar(w http.ResponseWriter, r *http.Request) {
+	var data []byte
+	err := a.db.QueryRow(r.Context(), `SELECT avatar FROM users WHERE id = $1 AND avatar IS NOT NULL`, r.PathValue("id")).Scan(&data)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	serveStatic(w, r, http.DetectContentType(data), data)
 }
 
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -1673,9 +1776,10 @@ func (a *app) currentUser(r *http.Request) (user, bool) {
 	}
 	var u user
 	err = a.db.QueryRow(r.Context(), `
-		SELECT u.id, u.username, u.display_name, u.role
+		SELECT u.id, u.username, u.display_name, u.role, u.avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token = $1 AND s.expires_at > now()`, hashToken(cookie.Value)).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role)
+		WHERE s.token = $1 AND s.expires_at > now()`, hashToken(cookie.Value)).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.HasAvatar, &u.AvatarVersion)
 	return u, err == nil
 }
 
