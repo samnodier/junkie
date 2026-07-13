@@ -163,6 +163,49 @@ func TestRoomRendersPausedBreakControls(t *testing.T) {
 	}
 }
 
+func TestRoomRendersPendingBreakControls(t *testing.T) {
+	now := time.Now()
+	remaining := 600
+	data := pageData{
+		Title: "Study room",
+		User:  user{ID: "user-id", DisplayName: "Sam"},
+		Room:  room{Code: "JUNK-IES", Name: "Study room", BreakMinutes: 10},
+		Timer: &timerRun{
+			ID:                     "timer-id",
+			Phase:                  "break",
+			FocusMinutes:           50,
+			BreakMinutes:           10,
+			TotalSessions:          3,
+			CurrentSession:         1,
+			PhaseStartedAt:         now,
+			PhaseEndsAt:            now.Add(10 * time.Minute),
+			PausedAt:               &now,
+			PausedRemainingSeconds: &remaining,
+			Participant:            true,
+			Participants:           []string{"Sam"},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := parseTemplates().ExecuteTemplate(&output, "room", data); err != nil {
+		t.Fatalf("render room: %v", err)
+	}
+	html := output.String()
+	for _, expected := range []string{
+		`Break ready · set the length`,
+		`action="/r/JUNK-IES/timer-break-length"`,
+		`Start break`,
+		`action="/r/JUNK-IES/timer-skip-break"`,
+	} {
+		if !strings.Contains(html, expected) {
+			t.Errorf("pending break output missing %q", expected)
+		}
+	}
+	if strings.Contains(html, `action="/r/JUNK-IES/timer-resume"`) {
+		t.Error("pending break should not offer resume; the start-break form owns that flow")
+	}
+}
+
 func TestDashboardRendersIdleRoomStart(t *testing.T) {
 	rm := room{Code: "JUNK-IES", Name: "junkies", FocusMinutes: 45, BreakMinutes: 15, AutoSessions: 4}
 	data := pageData{

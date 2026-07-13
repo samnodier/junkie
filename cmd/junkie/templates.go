@@ -144,11 +144,18 @@ const layoutTemplates = `
 
       const wireIdleTimer = (form) => {
         if (!form || form.dataset.timerWired === 'true') return;
-        const timer = form.querySelector('.circle-timer.idle');
-        const input = form.querySelector('input[name="focus_minutes"]');
+        const timer = form.querySelector('.circle-timer');
+        const input = form.querySelector('.circle-timer-time input');
         if (!timer || !input) return;
         form.dataset.timerWired = 'true';
         timer.tabIndex = 0;
+
+        // Bounds come from the input so the same wiring drives the 5-180
+        // focus rings and the 1-60 pending-break ring.
+        const minM = Number(input.min) || 5;
+        const maxM = Number(input.max) || 180;
+        const fallbackM = Number(input.defaultValue) || minM;
+        const clampM = (n) => Math.min(maxM, Math.max(minM, n));
 
         const syncDigits = () => {
           const label = input.closest('.circle-timer-time');
@@ -156,16 +163,16 @@ const layoutTemplates = `
         };
 
         const syncRing = () => {
-          const minutes = clampMinutes(Number(input.value) || 50);
+          const minutes = clampM(Number(input.value) || fallbackM);
           input.value = minutes;
           syncDigits();
-          setRing(timer, minutes / 180);
+          setRing(timer, minutes / maxM);
         };
 
         const isReadOnly = () => input.readOnly;
         const adjustMinutes = (delta) => {
           if (isReadOnly()) return;
-          input.value = clampMinutes((Number(input.value) || 50) + delta);
+          input.value = clampM((Number(input.value) || fallbackM) + delta);
           syncRing();
         };
 
@@ -1653,8 +1660,25 @@ const layoutTemplates = `
   {{if .Timer}}
   <article class="timer-card panel desk-timer-card {{.Timer.Phase}}">
     <p class="label {{if or (eq .Timer.Phase "focus") (eq .Timer.Phase "lobby")}}label-accent{{else}}label-warn{{end}}">
-      {{if eq .Timer.Phase "lobby"}}Starting · join now{{else if eq .Timer.Phase "focus"}}Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{else if .Timer.PausedAt}}Break paused{{else}}Break · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{end}}
+      {{if eq .Timer.Phase "lobby"}}Starting · join now{{else if eq .Timer.Phase "focus"}}Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{else if .Timer.BreakPending}}Break ready · set the length{{else if .Timer.PausedAt}}Break paused{{else}}Break · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{end}}
     </p>
+    {{if .Timer.BreakPending}}
+    <form class="circle-timer-form" method="post" action="/r/{{.Room.Code}}/timer-break-length">
+      <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+      <div class="circle-timer break-running breather" role="group" aria-label="Set break length for {{.Room.Name}}">
+        <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+          <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+        </svg>
+        <div class="circle-timer-core">
+          <button type="button" class="circle-timer-step" data-delta="-5" aria-label="Decrease break by 5 minutes">−</button>
+          <label class="circle-timer-time"><input type="number" name="minutes" min="1" max="60" value="{{.Timer.BreakMinutes}}" aria-label="Break minutes"></label>
+          <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase break by 5 minutes">+</button>
+        </div>
+      </div>
+      <button type="submit" class="btn-primary">Start break</button>
+    </form>
+    {{else}}
     <div class="circle-timer {{if or (eq .Timer.Phase "focus") (eq .Timer.Phase "lobby")}}running{{else}}break-running breather{{end}}" role="timer" aria-label="{{.Timer.Phase}} countdown">
       <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
         <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
@@ -1664,6 +1688,7 @@ const layoutTemplates = `
         <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="{{if eq .Timer.Phase "lobby"}}10{{else if eq .Timer.Phase "focus"}}{{mul .Timer.FocusMinutes 60}}{{else}}{{mul .Timer.BreakMinutes 60}}{{end}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}">--:--</div>
       </div>
     </div>
+    {{end}}
     {{if and (eq .Timer.Phase "focus") (not .Timer.Participant)}}
     <p class="label label-warn">Watching · join on next break</p>
     {{end}}
@@ -1675,10 +1700,12 @@ const layoutTemplates = `
       </form>
       {{end}}
       {{if eq .Timer.Phase "break"}}
+      {{if not .Timer.BreakPending}}
       <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
         <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
         <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
       </form>
+      {{end}}
       <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
         <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
         <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
@@ -2226,20 +2253,22 @@ const layoutTemplates = `
             </form>
             {{end}}
             {{else}}
-            <p class="label label-warn">{{if .Timer.PausedAt}}Break paused{{else}}Break · next block in{{end}} <span class="countdown mono" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}">--:--</span></p>
+            <p class="label label-warn">{{if .Timer.BreakPending}}Break ready · set the length{{else if .Timer.PausedAt}}Break paused{{else}}Break · next block in{{end}}{{if not .Timer.BreakPending}} <span class="countdown mono" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}">--:--</span>{{end}}</p>
             <div class="room-ready-time mono">{{.Timer.FocusMinutes}}:00</div>
             {{if not .Timer.Participant}}
             <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
             {{end}}
             {{if .Timer.PausedAt}}
             <form class="inline-form break-length-form" method="post" action="/r/{{.Room.Code}}/timer-break-length">
-              <label>Break minutes <input type="number" name="minutes" min="1" max="60" value="{{.Room.BreakMinutes}}"></label>
+              <label>Break minutes <input type="number" name="minutes" min="1" max="60" value="{{.Timer.BreakMinutes}}"></label>
               <button type="submit" class="btn-primary btn-compact">Start break</button>
             </form>
             {{end}}
+            {{if not .Timer.BreakPending}}
             <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
               <button type="submit" class="btn-ghost">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
             </form>
+            {{end}}
             <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
               <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
             </form>

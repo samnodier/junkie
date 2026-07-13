@@ -122,6 +122,13 @@ type timerRun struct {
 	Transitioned           bool
 }
 
+// BreakPending reports a break that arrived with auto-roll off and hasn't
+// been started yet: it was paused at the exact moment it began. A break
+// paused manually mid-run has a later paused_at than phase_started_at.
+func (t *timerRun) BreakPending() bool {
+	return t != nil && t.Phase == "break" && t.PausedAt != nil && t.PausedAt.Equal(t.PhaseStartedAt)
+}
+
 type timerStatus struct {
 	RunID                  string `json:"runId"`
 	Phase                  string `json:"phase"`
