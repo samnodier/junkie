@@ -2141,21 +2141,25 @@ const layoutTemplates = `
     {{end}}
     {{end}}
   {{else if eq .Title "Profile"}}
+    {{if .GuestMode}}
     <section class="panel profile-page">
       <div class="panel-title">
         <h1>Profile</h1>
-        {{if .GuestMode}}
-          <span>Stored on this device</span>
-        {{else}}
-          <span class="profile-title-actions"><a href="/connections" class="btn btn-ghost btn-compact">Connections</a><span>{{.User.DisplayName}}</span></span>
-        {{end}}
+        <span>Stored on this device</span>
       </div>
-      {{if .GuestMode}}
-        <div id="guest-profile-work-map"></div>
-        <script src="/assets/guest.js"></script>
-      {{else}}
-        {{if .Error}}<p class="notice-error" role="alert">{{.Error}}</p>{{end}}
-        {{if .Notice}}<p class="notice-ok" role="status">{{.Notice}}</p>{{end}}
+      <div id="guest-profile-work-map"></div>
+      <script src="/assets/guest.js"></script>
+    </section>
+    {{else}}
+    <section class="profile-page profile-stack">
+      <header class="profile-head">
+        <h1>Profile</h1>
+        <span class="profile-title-actions"><a href="/connections" class="btn btn-ghost btn-compact">Connections</a><span>{{.User.DisplayName}}</span></span>
+      </header>
+      {{if .Error}}<p class="notice-error" role="alert">{{.Error}}</p>{{end}}
+      {{if .Notice}}<p class="notice-ok" role="status">{{.Notice}}</p>{{end}}
+      <article class="panel profile-card">
+        <p class="eyebrow">Activity</p>
         <div class="profile-stats">
           <div>
             <strong>{{focusHours .ActivityTotalMinutes}}</strong>
@@ -2167,6 +2171,9 @@ const layoutTemplates = `
           </div>
         </div>
         {{template "heatmap" .}}
+      </article>
+      <article class="panel profile-card">
+        <p class="eyebrow">Preferences</p>
         <div class="profile-preference">
           <div>
             <strong>Room invite notifications</strong>
@@ -2195,6 +2202,9 @@ const layoutTemplates = `
           </form>
           {{end}}
         </div>
+      </article>
+      <article class="panel profile-card">
+        <p class="eyebrow">Account</p>
         {{if ne .User.Role "owner"}}
         <div class="profile-preference">
           <div>
@@ -2219,14 +2229,20 @@ const layoutTemplates = `
           <label>Confirm new password <input type="password" name="confirm_password" autocomplete="new-password" required minlength="4"></label>
           <button type="submit" class="btn-primary btn-compact">Update password</button>
         </form>
+      </article>
+      <article class="panel profile-card">
+        <p class="eyebrow">Connections</p>
         <div class="profile-preference">
           <div>
-            <strong>Connections</strong>
+            <strong>Share your focus map</strong>
             <p class="muted">Share a one-time link to connect with someone. Connections see each other's focus heatmaps — nothing else, and nobody else sees your profile at all. <a href="/connections">See your connections</a>.</p>
           </div>
           <button type="button" id="connect-link-copy" class="btn-ghost btn-compact">Copy connect link</button>
         </div>
-        {{if ne .User.Role "owner"}}
+      </article>
+      {{if ne .User.Role "owner"}}
+      <article class="panel profile-card profile-card-danger">
+        <p class="eyebrow eyebrow-danger">Danger zone</p>
         <div class="profile-preference profile-danger">
           <div>
             <strong>Delete account</strong>
@@ -2237,9 +2253,10 @@ const layoutTemplates = `
           <label>Confirm your password <input type="password" name="password" autocomplete="current-password" required></label>
           <button type="submit" class="btn-danger btn-compact">Delete account</button>
         </form>
-        {{end}}
+      </article>
       {{end}}
     </section>
+    {{end}}
   {{else if eq .Title "Connections"}}
     <section class="panel profile-page connections-page">
       <div class="panel-title">
@@ -3310,6 +3327,31 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   align-items: center;
   gap: var(--sp-4);
 }
+.profile-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.profile-stack .panel { margin-bottom: 0; }
+.profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-2);
+}
+.profile-head h1 { margin: 0; }
+.profile-card > .eyebrow { margin-bottom: var(--sp-4); }
+/* Inside a card the eyebrow already separates the first section, so it
+   drops the hairline the shared preference rows carry. */
+.profile-card > .eyebrow + .profile-preference,
+.profile-card > .eyebrow + .profile-stats {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+.profile-card-danger { border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.eyebrow-danger { color: var(--danger); }
 .connections-list {
   display: flex;
   flex-direction: column;
