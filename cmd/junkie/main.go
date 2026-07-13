@@ -151,11 +151,24 @@ type timerStatus struct {
 	ParticipantCount       int    `json:"participantCount"`
 }
 
+// publicProfileView is what a connection is allowed to see of a user: the
+// identity basics and the focus heatmap. Field names mirror pageData's
+// activity fields so the shared "heatmap" template renders either.
+type publicProfileView struct {
+	ProfileUser          user
+	Activity             []activityDay
+	ActivityMonths       []activityMonth
+	ActivityWeeks        int
+	ActivityTotalMinutes int
+}
+
 type pageData struct {
 	Title                string
 	User                 user
 	Error                string
 	Notice               string
+	PublicProfile        *publicProfileView
+	Connections          []publicProfileView
 	Rooms                []room
 	Room                 room
 	PersonalTodos        []todo
@@ -252,6 +265,10 @@ func main() {
 	mux.HandleFunc("POST /profile/avatar", a.requireAuth(a.uploadAvatar))
 	mux.HandleFunc("POST /profile/avatar/remove", a.requireAuth(a.removeAvatar))
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
+	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
+	// Exact routes above win over this single-segment pattern; usernames
+	// that would collide with them are reserved at signup.
+	mux.HandleFunc("GET /{username}", a.publicProfilePage)
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
@@ -465,6 +482,7 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 		ActivityMonths:       heatmap.Months,
 		ActivityWeeks:        heatmap.Weeks,
 		ActivityTotalMinutes: heatmap.TotalMinutes,
+		Connections:          a.connectionViews(r.Context(), u.ID),
 		Error:                r.URL.Query().Get("error"),
 		Notice:               r.URL.Query().Get("notice"),
 	})
@@ -619,7 +637,9 @@ func (a *app) changeUsername(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Username updated. You now sign in as "+username+"."), http.StatusSeeOther)
 }
 
-const maxAvatarBytes = 128 << 10 // 128 KiB, generous for a 128px JPEG
+// maxAvatarBytes stays under the global maxRequestBody cap (64 KiB) that
+// securityHeaders applies to every request; a 128px JPEG runs 3-10 KiB.
+const maxAvatarBytes = 48 << 10
 
 func (a *app) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
@@ -669,6 +689,165 @@ func (a *app) removeAvatar(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	_, _ = a.db.Exec(r.Context(), `UPDATE users SET avatar = NULL, avatar_updated_at = NULL WHERE id = $1`, u.ID)
 	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Profile picture removed."), http.StatusSeeOther)
+}
+
+// orderPair returns the two ids with the smaller first, matching the
+// connections table's (user_a < user_b) storage convention.
+func orderPair(a, b string) (string, string) {
+	if a < b {
+		return a, b
+	}
+	return b, a
+}
+
+func (a *app) areConnected(ctx context.Context, userA, userB string) bool {
+	first, second := orderPair(userA, userB)
+	var exists bool
+	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM connections WHERE user_a = $1 AND user_b = $2)`, first, second).Scan(&exists)
+	return err == nil && exists
+}
+
+// consumeConnectToken redeems a single-use connect invite belonging to
+// ownerID: the token row is deleted and the pair becomes connected. Returns
+// false for unknown, expired, or self-redeemed tokens.
+func (a *app) consumeConnectToken(ctx context.Context, ownerID, token, visitorID string) bool {
+	if token == "" || ownerID == visitorID {
+		return false
+	}
+	tag, err := a.db.Exec(ctx, `DELETE FROM connect_tokens WHERE user_id = $1 AND token_hash = $2 AND expires_at > now()`, ownerID, hashToken(token))
+	if err != nil || tag.RowsAffected() == 0 {
+		return false
+	}
+	first, second := orderPair(ownerID, visitorID)
+	_, err = a.db.Exec(ctx, `INSERT INTO connections (user_a, user_b) VALUES ($1, $2) ON CONFLICT DO NOTHING`, first, second)
+	return err == nil
+}
+
+// createConnectLink mints (or replaces) the caller's single outstanding
+// connect invite and returns the full URL as plain text for the copy button.
+func (a *app) createConnectLink(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	if !a.limiter.allow("connectlink:"+u.ID, 10, time.Hour) {
+		http.Error(w, "too many links generated; try again later", http.StatusTooManyRequests)
+		return
+	}
+	token := randomHex(32)
+	expires := time.Now().Add(7 * 24 * time.Hour)
+	if _, err := a.db.Exec(r.Context(), `
+		INSERT INTO connect_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)
+		ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, created_at = now(), expires_at = EXCLUDED.expires_at`,
+		u.ID, hashToken(token), expires); err != nil {
+		http.Error(w, "could not create link", http.StatusInternalServerError)
+		return
+	}
+	scheme := "http"
+	if isSecureRequest(r) {
+		scheme = "https"
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintf(w, "%s://%s/%s?connect=%s", scheme, r.Host, u.Username, token)
+}
+
+// publicProfilePage serves /<username>. Privacy rule: unless the viewer is
+// connected to (or is) that user, the response is indistinguishable from a
+// username that does not exist.
+func (a *app) publicProfilePage(w http.ResponseWriter, r *http.Request) {
+	username := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
+	if !usernamePattern.MatchString(username) {
+		http.NotFound(w, r)
+		return
+	}
+	token := r.URL.Query().Get("connect")
+	u, authed := a.currentUser(r)
+	if !authed {
+		if token != "" {
+			// Signing up or in first, then returning here, completes the
+			// connection -- same intent-preserving flow as room invites.
+			dest := "/" + username + "?connect=" + url.QueryEscape(token)
+			http.Redirect(w, r, "/login?mode=signup&next="+url.QueryEscape(dest), http.StatusSeeOther)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	var target user
+	err := a.db.QueryRow(r.Context(), `
+		SELECT id, username, display_name, avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM avatar_updated_at), 0)::bigint
+		FROM users WHERE username = $1`, username).Scan(
+		&target.ID, &target.Username, &target.DisplayName, &target.HasAvatar, &target.AvatarVersion)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if target.ID == u.ID {
+		http.Redirect(w, r, "/profile", http.StatusSeeOther)
+		return
+	}
+	if token != "" {
+		if a.consumeConnectToken(r.Context(), target.ID, token, u.ID) {
+			http.Redirect(w, r, "/"+target.Username+"?notice="+url.QueryEscape("You are now connected with "+target.DisplayName+"."), http.StatusSeeOther)
+			return
+		}
+		// A dead token still lands connected visitors on the profile; for
+		// everyone else it must look like nothing is here.
+	}
+	if !a.areConnected(r.Context(), u.ID, target.ID) {
+		http.NotFound(w, r)
+		return
+	}
+	heat, _ := a.activity(r.Context(), target.ID)
+	view := publicProfileView{
+		ProfileUser:          target,
+		Activity:             heat.Cells,
+		ActivityMonths:       heat.Months,
+		ActivityWeeks:        heat.Weeks,
+		ActivityTotalMinutes: heat.TotalMinutes,
+	}
+	a.render(w, "public-profile", pageData{
+		Title:         target.DisplayName,
+		User:          u,
+		PublicProfile: &view,
+		Notice:        r.URL.Query().Get("notice"),
+	})
+}
+
+// connectionViews loads the caller's connections with each one's heatmap,
+// newest connection first, for the profile page list.
+func (a *app) connectionViews(ctx context.Context, userID string) []publicProfileView {
+	rows, err := a.db.Query(ctx, `
+		SELECT u.id, u.username, u.display_name, u.avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+		FROM connections c
+		JOIN users u ON u.id = CASE WHEN c.user_a = $1 THEN c.user_b ELSE c.user_a END
+		WHERE c.user_a = $1 OR c.user_b = $1
+		ORDER BY c.created_at DESC`, userID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var people []user
+	for rows.Next() {
+		var p user
+		if rows.Scan(&p.ID, &p.Username, &p.DisplayName, &p.HasAvatar, &p.AvatarVersion) == nil {
+			people = append(people, p)
+		}
+	}
+	var views []publicProfileView
+	for _, p := range people {
+		heat, err := a.activity(ctx, p.ID)
+		if err != nil {
+			continue
+		}
+		views = append(views, publicProfileView{
+			ProfileUser:          p,
+			Activity:             heat.Cells,
+			ActivityMonths:       heat.Months,
+			ActivityWeeks:        heat.Weeks,
+			ActivityTotalMinutes: heat.TotalMinutes,
+		})
+	}
+	return views
 }
 
 // serveAvatar returns a user's avatar bytes. Any signed-in user can fetch

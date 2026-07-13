@@ -334,6 +334,30 @@ const layoutTemplates = `
       };
       wireAvatarForm();
 
+      // Mint a fresh one-time connect link and put it on the clipboard.
+      // Each click replaces the previous link, so only the newest works.
+      const wireConnectLink = () => {
+        const btn = document.getElementById('connect-link-copy');
+        if (!btn) return;
+        const label = btn.textContent;
+        const flash = (text) => {
+          btn.textContent = text;
+          setTimeout(() => { btn.textContent = label; }, 4000);
+        };
+        btn.addEventListener('click', async () => {
+          try {
+            const resp = await fetch('/profile/connect-link', { method: 'POST' });
+            if (!resp.ok) throw new Error('request failed');
+            const link = await resp.text();
+            await navigator.clipboard.writeText(link);
+            flash('Copied — works for one person');
+          } catch (_) {
+            flash('Could not copy — try again');
+          }
+        });
+      };
+      wireConnectLink();
+
       const roomInviteToggle = document.getElementById('room-invite-notifications');
       if (roomInviteToggle) {
         roomInviteToggle.checked = window.junkieNotify?.roomInvitesEnabled() !== false;
@@ -1784,6 +1808,7 @@ const layoutTemplates = `
 {{define "forbidden"}}{{template "shell" .}}{{end}}
 
 {{define "room-invite"}}{{template "shell" .}}{{end}}
+{{define "public-profile"}}{{template "shell" .}}{{end}}
 
 {{define "menu-drawer-guest"}}
 <div class="menu-drawer-backdrop" hidden></div>
@@ -2193,7 +2218,27 @@ const layoutTemplates = `
           <label>Confirm new password <input type="password" name="confirm_password" autocomplete="new-password" required minlength="4"></label>
           <button type="submit" class="btn-primary btn-compact">Update password</button>
         </form>
-        <p class="muted profile-follow-stub">Follow friends — coming soon</p>
+        <div class="profile-preference">
+          <div>
+            <strong>Connections</strong>
+            <p class="muted">Share a one-time link to connect with someone. Connections see each other's focus heatmaps — nothing else, and nobody else sees your profile at all.</p>
+          </div>
+          <button type="button" id="connect-link-copy" class="btn-ghost btn-compact">Copy connect link</button>
+        </div>
+        <div class="connections-list">
+          {{range .Connections}}
+          <article class="connection-row">
+            <div class="connection-head">
+              <span class="todo-avatar connection-avatar" aria-hidden="true">{{if .ProfileUser.HasAvatar}}<img class="avatar-img" src="/avatar/{{.ProfileUser.ID}}?v={{.ProfileUser.AvatarVersion}}" alt="">{{else}}{{initial .ProfileUser.DisplayName}}{{end}}</span>
+              <a href="/{{.ProfileUser.Username}}" class="connection-name">{{.ProfileUser.DisplayName}}</a>
+              <span class="mono muted">@{{.ProfileUser.Username}}</span>
+            </div>
+            {{template "heatmap" .}}
+          </article>
+          {{else}}
+          <p class="muted">No connections yet. Copy your link and send it to one person — it works once.</p>
+          {{end}}
+        </div>
         {{if ne .User.Role "owner"}}
         <div class="profile-preference profile-danger">
           <div>
@@ -2207,6 +2252,19 @@ const layoutTemplates = `
         </form>
         {{end}}
       {{end}}
+    </section>
+  {{else if .PublicProfile}}
+    <section class="panel profile-page public-profile-page">
+      <div class="panel-title">
+        <div class="connection-head">
+          <span class="todo-avatar connection-avatar" aria-hidden="true">{{if .PublicProfile.ProfileUser.HasAvatar}}<img class="avatar-img" src="/avatar/{{.PublicProfile.ProfileUser.ID}}?v={{.PublicProfile.ProfileUser.AvatarVersion}}" alt="">{{else}}{{initial .PublicProfile.ProfileUser.DisplayName}}{{end}}</span>
+          <h1>{{.PublicProfile.ProfileUser.DisplayName}}</h1>
+        </div>
+        <span class="mono muted">@{{.PublicProfile.ProfileUser.Username}}</span>
+      </div>
+      {{if .Notice}}<p class="notice-ok" role="status">{{.Notice}}</p>{{end}}
+      {{template "heatmap" .PublicProfile}}
+      <p class="muted"><a href="/profile">Back to your profile</a></p>
     </section>
   {{else if eq .Title "Join room"}}
     <section class="auth-card room-invite-card">
@@ -3237,6 +3295,29 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-size: var(--fs-small);
   color: var(--muted);
 }
+.connections-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin-top: var(--sp-3);
+}
+.connection-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: var(--sp-4);
+}
+.connection-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.connection-head h1 { margin: 0; }
+.connection-avatar { width: 28px; height: 28px; font-size: 0.8rem; }
+.connection-name { font-weight: 600; text-decoration: none; }
+.connection-name:hover { text-decoration: underline; }
+.public-profile-page .connection-head { margin-bottom: 0; }
 .profile-username-form {
   display: flex;
   align-items: end;

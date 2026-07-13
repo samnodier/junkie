@@ -22,8 +22,19 @@ const (
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,31}$`)
 
+// reservedUsernames are names that would shadow application routes or
+// well-known files now that profiles are served at /<username>.
+var reservedUsernames = map[string]bool{
+	"login": true, "signup": true, "logout": true, "profile": true,
+	"todos": true, "todo": true, "todos-fragment": true, "rooms": true,
+	"join": true, "admin": true, "healthz": true, "assets": true,
+	"avatar": true, "ws": true, "r": true, "dashboard": true, "solo": true,
+	"connect": true, "connections": true, "settings": true, "api": true,
+	"favicon.ico": true, "robots.txt": true, "sitemap.xml": true,
+}
+
 func validUsername(username string) bool {
-	return usernamePattern.MatchString(username)
+	return usernamePattern.MatchString(username) && !reservedUsernames[username]
 }
 
 func limitRunes(s string, max int) string {
