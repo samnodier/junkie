@@ -757,7 +757,9 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 			// client falls back to the stored text.
 			break
 		}
-		tag, err := a.db.Exec(r.Context(), `UPDATE todos SET text = $2, updated_at = now() WHERE id = $1 AND user_id = $3`, id, text, u.ID)
+		// Only active todos are editable: completed and removed ones keep
+		// the text they had when they changed state.
+		tag, err := a.db.Exec(r.Context(), `UPDATE todos SET text = $2, updated_at = now() WHERE id = $1 AND user_id = $3 AND NOT done AND NOT removed`, id, text, u.ID)
 		if err != nil || tag.RowsAffected() == 0 {
 			if isHTMXRequest(r) {
 				if roomCode != "" {
@@ -770,14 +772,14 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 			a.todoActionDenied(w, r, roomCode, "You can only edit your own todos.")
 			return
 		}
-	// Room todos can be managed by any member of that room, so these
-	// require the actor's membership rather than authorship.
+	// Every mutation is author-only: room members see each other's todos
+	// but can never remove, restore, or delete them.
 	case "remove":
-		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = true, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IN (SELECT room_id FROM room_members WHERE user_id = $2))`, id, u.ID)
+		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = true, updated_at = now() WHERE id = $1 AND user_id = $2`, id, u.ID)
 	case "restore":
-		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = false, updated_at = now() WHERE id = $1 AND (user_id = $2 OR room_id IN (SELECT room_id FROM room_members WHERE user_id = $2))`, id, u.ID)
+		_, _ = a.db.Exec(r.Context(), `UPDATE todos SET removed = false, updated_at = now() WHERE id = $1 AND user_id = $2`, id, u.ID)
 	case "delete":
-		_, _ = a.db.Exec(r.Context(), `DELETE FROM todos WHERE id = $1 AND (user_id = $2 OR room_id IN (SELECT room_id FROM room_members WHERE user_id = $2))`, id, u.ID)
+		_, _ = a.db.Exec(r.Context(), `DELETE FROM todos WHERE id = $1 AND user_id = $2`, id, u.ID)
 	default:
 		http.NotFound(w, r)
 		return

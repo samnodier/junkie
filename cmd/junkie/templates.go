@@ -1396,7 +1396,8 @@ const layoutTemplates = `
     {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle" hx-post="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     {{end}}
-    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}<span{{if not .Removed}} class="todo-editable" data-id="{{.ID}}" title="Click to edit"{{end}}>{{.Text}}</span>{{end}}</span>
+    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}<span{{if and (not .Removed) (not .Done)}} class="todo-editable" data-id="{{.ID}}" title="Click to edit"{{end}}>{{.Text}}</span>{{end}}</span>
+    {{if not .ReadOnly}}
     {{if .Removed}}
       <div class="todo-actions">
         <form method="post" action="/todo/{{.ID}}/restore" hx-post="/todo/{{.ID}}/restore"><button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button></form>
@@ -1404,6 +1405,7 @@ const layoutTemplates = `
       </div>
     {{else}}
       <form method="post" action="/todo/{{.ID}}/remove" hx-post="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
+    {{end}}
     {{end}}
   </li>
 {{end}}
@@ -1443,7 +1445,8 @@ const layoutTemplates = `
       <button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button>
     </form>
     {{end}}
-    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}<span{{if not .Removed}} class="todo-editable" data-id="{{.ID}}" title="Click to edit"{{end}}>{{.Text}}</span>{{end}}</span>
+    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}<span{{if and (not .Removed) (not .Done)}} class="todo-editable" data-id="{{.ID}}" title="Click to edit"{{end}}>{{.Text}}</span>{{end}}</span>
+    {{if not .ReadOnly}}
     {{if .Removed}}
       <div class="todo-actions">
         <form method="post" action="/todo/{{.ID}}/restore" hx-post="/todo/{{.ID}}/restore">
@@ -1463,6 +1466,7 @@ const layoutTemplates = `
         <input type="hidden" name="room" value="{{.RoomCode}}">
         <button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button>
       </form>
+    {{end}}
     {{end}}
   </li>
 {{end}}
