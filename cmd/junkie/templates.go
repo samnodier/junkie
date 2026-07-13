@@ -1809,6 +1809,7 @@ const layoutTemplates = `
 
 {{define "room-invite"}}{{template "shell" .}}{{end}}
 {{define "public-profile"}}{{template "shell" .}}{{end}}
+{{define "connections"}}{{template "shell" .}}{{end}}
 
 {{define "menu-drawer-guest"}}
 <div class="menu-drawer-backdrop" hidden></div>
@@ -2146,7 +2147,7 @@ const layoutTemplates = `
         {{if .GuestMode}}
           <span>Stored on this device</span>
         {{else}}
-          <span>{{.User.DisplayName}}</span>
+          <span class="profile-title-actions"><a href="/connections" class="btn btn-ghost btn-compact">Connections</a><span>{{.User.DisplayName}}</span></span>
         {{end}}
       </div>
       {{if .GuestMode}}
@@ -2221,23 +2222,9 @@ const layoutTemplates = `
         <div class="profile-preference">
           <div>
             <strong>Connections</strong>
-            <p class="muted">Share a one-time link to connect with someone. Connections see each other's focus heatmaps — nothing else, and nobody else sees your profile at all.</p>
+            <p class="muted">Share a one-time link to connect with someone. Connections see each other's focus heatmaps — nothing else, and nobody else sees your profile at all. <a href="/connections">See your connections</a>.</p>
           </div>
           <button type="button" id="connect-link-copy" class="btn-ghost btn-compact">Copy connect link</button>
-        </div>
-        <div class="connections-list">
-          {{range .Connections}}
-          <article class="connection-row">
-            <div class="connection-head">
-              <span class="todo-avatar connection-avatar" aria-hidden="true">{{if .ProfileUser.HasAvatar}}<img class="avatar-img" src="/avatar/{{.ProfileUser.ID}}?v={{.ProfileUser.AvatarVersion}}" alt="">{{else}}{{initial .ProfileUser.DisplayName}}{{end}}</span>
-              <a href="/{{.ProfileUser.Username}}" class="connection-name">{{.ProfileUser.DisplayName}}</a>
-              <span class="mono muted">@{{.ProfileUser.Username}}</span>
-            </div>
-            {{template "heatmap" .}}
-          </article>
-          {{else}}
-          <p class="muted">No connections yet. Copy your link and send it to one person — it works once.</p>
-          {{end}}
         </div>
         {{if ne .User.Role "owner"}}
         <div class="profile-preference profile-danger">
@@ -2252,6 +2239,29 @@ const layoutTemplates = `
         </form>
         {{end}}
       {{end}}
+    </section>
+  {{else if eq .Title "Connections"}}
+    <section class="panel profile-page connections-page">
+      <div class="panel-title">
+        <h1>Connections</h1>
+        <button type="button" id="connect-link-copy" class="btn-ghost btn-compact">Copy connect link</button>
+      </div>
+      {{if .Notice}}<p class="notice-ok" role="status">{{.Notice}}</p>{{end}}
+      <div class="connections-list">
+        {{range .Connections}}
+        <article class="connection-row">
+          <div class="connection-head">
+            <span class="todo-avatar connection-avatar" aria-hidden="true">{{if .ProfileUser.HasAvatar}}<img class="avatar-img" src="/avatar/{{.ProfileUser.ID}}?v={{.ProfileUser.AvatarVersion}}" alt="">{{else}}{{initial .ProfileUser.DisplayName}}{{end}}</span>
+            <a href="/{{.ProfileUser.Username}}" class="connection-name">{{.ProfileUser.DisplayName}}</a>
+            <span class="mono muted">@{{.ProfileUser.Username}}</span>
+          </div>
+          {{template "heatmap" .}}
+        </article>
+        {{else}}
+        <p class="muted">No connections yet. Copy your link and send it to one person — it works once, then you mint a new one for the next person.</p>
+        {{end}}
+      </div>
+      <p class="muted"><a href="/profile">Back to your profile</a></p>
     </section>
   {{else if .PublicProfile}}
     <section class="panel profile-page public-profile-page">
@@ -3295,11 +3305,17 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-size: var(--fs-small);
   color: var(--muted);
 }
+.profile-title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
 .connections-list {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
   margin-top: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
 .connection-row {
   border: 1px solid var(--border);

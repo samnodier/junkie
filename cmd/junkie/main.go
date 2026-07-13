@@ -266,6 +266,7 @@ func main() {
 	mux.HandleFunc("POST /profile/avatar/remove", a.requireAuth(a.removeAvatar))
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
+	mux.HandleFunc("GET /connections", a.requireAuth(a.connectionsPage))
 	// Exact routes above win over this single-segment pattern; usernames
 	// that would collide with them are reserved at signup.
 	mux.HandleFunc("GET /{username}", a.publicProfilePage)
@@ -809,6 +810,18 @@ func (a *app) publicProfilePage(w http.ResponseWriter, r *http.Request) {
 		User:          u,
 		PublicProfile: &view,
 		Notice:        r.URL.Query().Get("notice"),
+	})
+}
+
+// connectionsPage is the feed of the caller's connections, one heatmap
+// card per person, newest connection first.
+func (a *app) connectionsPage(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	a.render(w, "connections", pageData{
+		Title:       "Connections",
+		User:        u,
+		Connections: a.connectionViews(r.Context(), u.ID),
+		Notice:      r.URL.Query().Get("notice"),
 	})
 }
 
