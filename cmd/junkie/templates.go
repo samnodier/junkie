@@ -865,6 +865,74 @@ const layoutTemplates = `
       };
       wireDeskRoomWS();
 
+      // Personal state (private todos, solo timer) syncs across the same
+      // user's devices over a per-user channel, mirroring the room socket.
+      const wireUserWS = () => {
+        if (!document.body.dataset.userId) return;
+        let ws = null;
+        let retryTimer = null;
+        let retryCount = 0;
+        let soloReloading = false;
+
+        const patchList = (id, url) => {
+          const target = document.getElementById(id);
+          if (!target) return;
+          fetch(url, { headers: { 'HX-Request': 'true' } })
+            .then((resp) => (resp.ok ? resp.text() : null))
+            .then((html) => {
+              if (html == null) return;
+              target.outerHTML = html;
+              const fresh = document.getElementById(id);
+              if (fresh) window.htmx?.process(fresh);
+            })
+            .catch(() => {});
+        };
+
+        const onMessage = (msg) => {
+          if (msg === 'todos') {
+            patchList('personal-todos-list', '/todos-fragment');
+            patchList('focus-todos-list', '/todos-fragment?view=focus');
+            return;
+          }
+          if (msg === 'solo-timer') {
+            // Solo timer changes swap the whole desk between idle/focus/break
+            // shells, which (like room timer phases) still works via reload.
+            // Only the dashboard shows the solo timer, and the device that
+            // made the change already navigated, so this reaches other tabs.
+            if (soloReloading) return;
+            if (!document.querySelector('.desk-shell, .focus-desk')) return;
+            soloReloading = true;
+            setTimeout(() => {
+              window.junkieStashTypedTodo?.();
+              location.reload();
+            }, 200);
+          }
+        };
+
+        const connect = () => {
+          if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+          clearTimeout(retryTimer);
+          ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/me');
+          ws.onopen = () => {
+            retryCount = 0;
+          };
+          ws.onmessage = (event) => onMessage(String(event.data));
+          ws.onclose = () => {
+            ws = null;
+            const delay = Math.min(30000, 1000 * (2 ** Math.min(retryCount, 5)));
+            retryCount++;
+            retryTimer = setTimeout(connect, delay + Math.floor(Math.random() * 500));
+          };
+        };
+        connect();
+        window.addEventListener('online', connect);
+        window.addEventListener('focus', connect);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') connect();
+        });
+      };
+      wireUserWS();
+
       const wireTodoGroupCollapse = () => {
         document.querySelectorAll('.todo-groups').forEach((groups) => {
           const room = groups.dataset.room || '';

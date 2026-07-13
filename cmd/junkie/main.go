@@ -245,6 +245,11 @@ func main() {
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
+	mux.HandleFunc("GET /ws/me", a.requireAuth(a.userWS))
+	mux.HandleFunc("GET /todos-fragment", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		u, _ := a.currentUser(r)
+		a.renderPersonalTodosFragment(w, r, u.ID)
+	}))
 	mux.HandleFunc("GET /admin", a.requireAdmin(a.adminPage))
 	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
 	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
@@ -590,6 +595,13 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// userChannel names a per-user hub channel for cross-device sync of
+// personal state (private todos, solo timer). Room codes are uppercase
+// alphanumerics, so the lowercase prefix can never collide with one.
+func userChannel(userID string) string {
+	return "user:" + userID
+}
+
 func (a *app) startSoloTimer(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	if active, _ := a.activeSoloTimer(r.Context(), u.ID); active != nil {
@@ -599,12 +611,14 @@ func (a *app) startSoloTimer(w http.ResponseWriter, r *http.Request) {
 	focus := clampInt(r.FormValue("focus_minutes"), 5, 180, 50)
 	ends := time.Now().Add(time.Duration(focus) * time.Minute)
 	_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_runs (user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at) VALUES ($1, 'focus', $2, 0, 1, $3)`, u.ID, focus, ends)
+	a.hub.broadcast(userChannel(u.ID), "solo-timer")
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
 func (a *app) cancelSoloTimer(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'focus'`, u.ID)
+	a.hub.broadcast(userChannel(u.ID), "solo-timer")
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -617,6 +631,7 @@ func (a *app) startSoloBreak(w http.ResponseWriter, r *http.Request) {
 	}
 	ends := time.Now().Add(time.Duration(timer.BreakMinutes) * time.Minute)
 	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase_started_at = now(), phase_ends_at = $1 WHERE id = $2`, ends, timer.ID)
+	a.hub.broadcast(userChannel(u.ID), "solo-timer")
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -632,6 +647,7 @@ func (a *app) createPersonalTodo(w http.ResponseWriter, r *http.Request) {
 	if text != "" {
 		_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, text) VALUES ($1, $2)`, u.ID, text)
 	}
+	a.hub.broadcast(userChannel(u.ID), "todos")
 	if isHTMXRequest(r) {
 		a.renderPersonalTodosFragment(w, r, u.ID)
 		return
@@ -741,6 +757,7 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/r/"+roomCode, http.StatusSeeOther)
 		return
 	}
+	a.hub.broadcast(userChannel(u.ID), "todos")
 	if isHTMXRequest(r) {
 		a.renderPersonalTodosFragment(w, r, u.ID)
 		return
@@ -1108,6 +1125,27 @@ func (a *app) roomWS(w http.ResponseWriter, r *http.Request) {
 	}
 	a.hub.join(code, c)
 	defer a.hub.leave(code, c)
+	for {
+		_, _, err := c.Read(r.Context())
+		if err != nil {
+			return
+		}
+	}
+}
+
+// userWS subscribes the connection to the caller's own channel so personal
+// state (private todos, solo timer) syncs live across the user's devices.
+func (a *app) userWS(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	// Default options enforce a same-origin handshake, blocking
+	// cross-site WebSocket hijacking.
+	c, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	channel := userChannel(u.ID)
+	a.hub.join(channel, c)
+	defer a.hub.leave(channel, c)
 	for {
 		_, _, err := c.Read(r.Context())
 		if err != nil {
