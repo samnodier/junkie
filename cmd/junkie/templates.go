@@ -801,8 +801,9 @@ const layoutTemplates = `
         return room === code;
       };
 
-      // Transient bottom-center toasts, stacked and self-dismissing. Screen
-      // readers get them through the container's polite live region.
+      // Transient top-right toasts, stacked, dismissible, self-expiring
+      // after 10s. Screen readers get them through the container's polite
+      // live region.
       const toast = (message) => {
         let holder = document.getElementById('junkie-toasts');
         if (!holder) {
@@ -814,14 +815,24 @@ const layoutTemplates = `
         }
         const el = document.createElement('div');
         el.className = 'toast';
-        el.textContent = message;
+        const text = document.createElement('span');
+        text.textContent = message;
+        el.appendChild(text);
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'toast-close';
+        close.setAttribute('aria-label', 'Dismiss');
+        close.textContent = '×';
+        el.appendChild(close);
         holder.appendChild(el);
-        while (holder.children.length > 3) holder.removeChild(holder.firstChild);
-        setTimeout(() => el.classList.add('toast-show'), 20);
-        setTimeout(() => {
+        while (holder.children.length > 4) holder.removeChild(holder.firstChild);
+        const dismiss = () => {
           el.classList.remove('toast-show');
           setTimeout(() => el.remove(), 300);
-        }, 4500);
+        };
+        close.addEventListener('click', dismiss);
+        setTimeout(() => el.classList.add('toast-show'), 20);
+        setTimeout(dismiss, 10000);
       };
       window.junkieToast = toast;
 
@@ -2941,30 +2952,46 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 }
 #junkie-toasts {
   position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 16px;
+  right: 16px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--sp-2);
   z-index: 1000;
-  pointer-events: none;
 }
 #junkie-toasts .toast {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   max-width: min(420px, calc(100vw - 32px));
-  padding: 10px 18px;
+  padding: 10px 12px 10px 18px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-card);
   font-size: var(--fs-small);
   overflow-wrap: anywhere;
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(-8px);
   transition: opacity 250ms ease, transform 250ms ease;
 }
 #junkie-toasts .toast-show { opacity: 1; transform: translateY(0); }
+#junkie-toasts .toast-close {
+  flex: 0 0 auto;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  border-radius: 50%;
+}
+#junkie-toasts .toast-close:hover { color: var(--ink); background: var(--surface-2); }
 .todo-editable { cursor: text; border-radius: var(--radius-sm); }
 .todo-editable:hover { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
 .todo-edit-input {
