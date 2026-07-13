@@ -989,6 +989,76 @@ const layoutTemplates = `
         if (form && event.target.name === 'text') syncTodoAddButton(form);
       });
 
+      // Click a todo's text to edit it in place. Enter or clicking away
+      // saves, Escape cancels. The server only accepts edits from the todo's
+      // author, and the response is the same list fragment the other todo
+      // actions return, so the whole container refreshes in place.
+      document.addEventListener('click', (event) => {
+        const span = event.target.closest?.('.todo-editable');
+        if (!span || span.querySelector('input')) return;
+        const row = span.closest('li');
+        const original = span.textContent;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'todo-edit-input';
+        input.value = original;
+        input.maxLength = 500;
+        span.textContent = '';
+        span.appendChild(input);
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+
+        let done = false;
+        const restore = () => {
+          if (done) return;
+          done = true;
+          span.textContent = original;
+        };
+        const commit = () => {
+          if (done) return;
+          const next = input.value.trim();
+          if (next === '' || next === original) {
+            restore();
+            return;
+          }
+          done = true;
+          span.textContent = next;
+          const body = new URLSearchParams({ text: next });
+          // Carry the same view context the row's action forms use so the
+          // server renders the fragment variant this surface expects.
+          row?.querySelectorAll('form input[type="hidden"]').forEach((h) => {
+            if (!body.has(h.name)) body.set(h.name, h.value);
+          });
+          const container = span.closest('#personal-todos-list, .todo-groups');
+          fetch('/todo/' + span.dataset.id + '/edit', {
+            method: 'POST',
+            headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+          })
+            .then((resp) => (resp.ok ? resp.text() : null))
+            .then((html) => {
+              if (html == null || !container) return;
+              const id = container.id;
+              container.outerHTML = html;
+              const fresh = id ? document.getElementById(id) : null;
+              if (fresh) {
+                window.htmx?.process(fresh);
+                window.junkieWireTodoGroupCollapse?.();
+              }
+            })
+            .catch(() => {});
+        };
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Escape') {
+            restore();
+          }
+        });
+        input.addEventListener('blur', commit);
+      });
+
       // htmx only swaps the todo list/group container, not the add form, so
       // the input keeps focus across a submit. Disable the button while the
       // request is in flight (double-submit guard), then clear the input and
@@ -1257,7 +1327,7 @@ const layoutTemplates = `
     {{else}}
     <form method="post" action="/todo/{{.ID}}/toggle" hx-post="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     {{end}}
-    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
+    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}<span{{if not .Removed}} class="todo-editable" data-id="{{.ID}}" title="Click to edit"{{end}}>{{.Text}}</span>{{end}}</span>
     {{if .Removed}}
       <div class="todo-actions">
         <form method="post" action="/todo/{{.ID}}/restore" hx-post="/todo/{{.ID}}/restore"><button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button></form>
@@ -1304,7 +1374,7 @@ const layoutTemplates = `
       <button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button>
     </form>
     {{end}}
-    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
+    <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}<span{{if not .Removed}} class="todo-editable" data-id="{{.ID}}" title="Click to edit"{{end}}>{{.Text}}</span>{{end}}</span>
     {{if .Removed}}
       <div class="todo-actions">
         <form method="post" action="/todo/{{.ID}}/restore" hx-post="/todo/{{.ID}}/restore">
@@ -2770,6 +2840,21 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.todo-editable { cursor: text; border-radius: var(--radius-sm); }
+.todo-editable:hover { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
+.todo-edit-input {
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  padding: 0 4px;
+  margin: -1px 0;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font: inherit;
+  color: inherit;
+}
+.todo-edit-input:focus { box-shadow: 0 0 0 3px var(--focus-ring); outline: none; }
 .todo-list li.removed > span { color: var(--danger); }
 .todo-list li > form:has(.check),
 .todo-list li > .check {

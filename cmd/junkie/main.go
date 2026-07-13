@@ -744,6 +744,26 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 			a.todoActionDenied(w, r, roomCode, "You can only complete your own todos.")
 			return
 		}
+	case "edit":
+		text := limitRunes(strings.TrimSpace(r.FormValue("text")), maxTodoTextLen)
+		if text == "" {
+			// An emptied todo is a no-op, not a delete; re-render so the
+			// client falls back to the stored text.
+			break
+		}
+		tag, err := a.db.Exec(r.Context(), `UPDATE todos SET text = $2, updated_at = now() WHERE id = $1 AND user_id = $3`, id, text, u.ID)
+		if err != nil || tag.RowsAffected() == 0 {
+			if isHTMXRequest(r) {
+				if roomCode != "" {
+					a.renderRoomTodosFragment(w, r, roomID, roomCode, u, r.FormValue("desk") == "1")
+				} else {
+					a.renderPersonalTodosFragment(w, r, u.ID)
+				}
+				return
+			}
+			a.todoActionDenied(w, r, roomCode, "You can only edit your own todos.")
+			return
+		}
 	// Room todos can be managed by any member of that room, so these
 	// require the actor's membership rather than authorship.
 	case "remove":
