@@ -113,7 +113,7 @@ Browser `localStorage` only:
 PostgreSQL on the server:
 
 - Account credentials and session
-- Private todos and todo reactions
+- Private todos
 - Solo timer runs and completed focus minutes (work map)
 - Room membership, room settings, room todos, and shared room timers
 - Profile pictures, connections, and connect invite tokens
