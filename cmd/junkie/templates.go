@@ -2169,6 +2169,7 @@ const layoutTemplates = `
           </form>
           {{end}}
         </div>
+        {{if ne .User.Role "owner"}}
         <div class="profile-preference">
           <div>
             <strong>Username</strong>
@@ -2179,6 +2180,7 @@ const layoutTemplates = `
           <label>Username <input name="username" value="{{.User.Username}}" autocomplete="username" required minlength="2" maxlength="32"></label>
           <button type="submit" class="btn-primary btn-compact">Save username</button>
         </form>
+        {{end}}
         <div class="profile-preference profile-password">
           <div>
             <strong>Change password</strong>

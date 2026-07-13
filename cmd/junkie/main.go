@@ -591,6 +591,13 @@ func (a *app) changeUsername(w http.ResponseWriter, r *http.Request) {
 	fail := func(msg string) {
 		http.Redirect(w, r, "/profile?error="+url.QueryEscape(msg), http.StatusSeeOther)
 	}
+	// The owner's username is pinned: JUNKIE_OWNER_USERNAME locates the
+	// owner account by name at startup, so a rename would silently detach
+	// the bootstrap. Renaming stays disabled for that account.
+	if u.Role == roleOwner {
+		fail("The owner account's username can't be changed.")
+		return
+	}
 	if !a.limiter.allow("unamechange:"+u.ID, 5, time.Hour) {
 		fail("Too many username changes. Try again later.")
 		return
