@@ -241,6 +241,7 @@ func main() {
 	mux.HandleFunc("GET /join/confirm", a.requireAuth(a.joinRoomConfirm))
 	mux.HandleFunc("POST /join/confirm", a.requireAuth(a.joinRoomConfirmPost))
 	mux.HandleFunc("GET /r/{code}/timer-status", a.requireAuth(a.roomTimerStatus))
+	mux.HandleFunc("GET /r/{code}/todos-fragment", a.requireAuth(a.roomTodosFragment))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
@@ -631,7 +632,51 @@ func (a *app) createPersonalTodo(w http.ResponseWriter, r *http.Request) {
 	if text != "" {
 		_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, text) VALUES ($1, $2)`, u.ID, text)
 	}
+	if isHTMXRequest(r) {
+		a.renderPersonalTodosFragment(w, r, u.ID)
+		return
+	}
 	http.Redirect(w, r, "/dashboard?todos=private", http.StatusSeeOther)
+}
+
+// isHTMXRequest reports whether the request was made by htmx (hx-post/hx-get
+// etc.), which expects an HTML fragment back instead of a full-page redirect.
+func isHTMXRequest(r *http.Request) bool {
+	return r.Header.Get("HX-Request") == "true"
+}
+
+// renderFragment writes a single named template directly, bypassing the
+// "shell" page wrapper -- used for htmx partial swaps.
+func (a *app) renderFragment(w http.ResponseWriter, name string, data any) {
+	var buf bytes.Buffer
+	if err := a.templates.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Printf("render fragment %s: %v", name, err)
+		http.Error(w, "something went wrong", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
+}
+
+type personalTodosView struct {
+	Todos    []todo
+	HasRooms bool
+}
+
+func (a *app) renderPersonalTodosFragment(w http.ResponseWriter, r *http.Request, userID string) {
+	todos, _ := a.personalTodos(r.Context(), userID)
+	rooms, _ := a.roomsForUser(r.Context(), userID)
+	a.renderFragment(w, "personal-todos-list", personalTodosView{Todos: todos, HasRooms: len(rooms) > 0})
+}
+
+func (a *app) renderRoomTodosFragment(w http.ResponseWriter, r *http.Request, roomID, roomCode string, u user, desk bool) {
+	todos, _ := a.roomTodos(r.Context(), roomID)
+	view := groupRoomTodos(todos, u.ID).View(roomCode, u.DisplayName)
+	name := "todo-groups-room"
+	if desk {
+		name = "todo-groups-desk-room"
+	}
+	a.renderFragment(w, name, view)
 }
 
 func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
@@ -643,12 +688,20 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action := parts[0], parts[1]
-	var roomCode string
-	_ = a.db.QueryRow(r.Context(), `SELECT COALESCE(r.code, '') FROM todos t LEFT JOIN rooms r ON r.id = t.room_id WHERE t.id = $1`, id).Scan(&roomCode)
+	var roomID, roomCode string
+	_ = a.db.QueryRow(r.Context(), `SELECT COALESCE(r.id::text, ''), COALESCE(r.code, '') FROM todos t LEFT JOIN rooms r ON r.id = t.room_id WHERE t.id = $1`, id).Scan(&roomID, &roomCode)
 	switch action {
 	case "toggle":
 		tag, err := a.db.Exec(r.Context(), `UPDATE todos SET done = NOT done, updated_at = now() WHERE id = $1 AND user_id = $2`, id, u.ID)
 		if err != nil || tag.RowsAffected() == 0 {
+			if isHTMXRequest(r) {
+				if roomCode != "" {
+					a.renderRoomTodosFragment(w, r, roomID, roomCode, u, r.FormValue("desk") == "1")
+				} else {
+					a.renderPersonalTodosFragment(w, r, u.ID)
+				}
+				return
+			}
 			a.todoActionDenied(w, r, roomCode, "You can only complete your own todos.")
 			return
 		}
@@ -664,9 +717,14 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	desk := r.FormValue("desk") == "1"
 	if roomCode != "" {
 		a.hub.broadcast(roomCode, "todos")
-		if r.FormValue("desk") == "1" {
+		if isHTMXRequest(r) {
+			a.renderRoomTodosFragment(w, r, roomID, roomCode, u, desk)
+			return
+		}
+		if desk {
 			code := strings.TrimSpace(r.FormValue("room"))
 			if code == "" {
 				code = roomCode
@@ -675,6 +733,10 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Redirect(w, r, "/r/"+roomCode, http.StatusSeeOther)
+		return
+	}
+	if isHTMXRequest(r) {
+		a.renderPersonalTodosFragment(w, r, u.ID)
 		return
 	}
 	http.Redirect(w, r, "/dashboard?todos=private", http.StatusSeeOther)
@@ -834,6 +896,24 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount, Error: r.URL.Query().Get("error")})
 }
 
+// roomTodosFragment serves the current todo-groups markup for a room so
+// clients can patch their DOM after a WebSocket "todos" broadcast instead
+// of reloading the page. hub.broadcast includes the sender's own
+// connection, so this also covers the acting user's own tab.
+func (a *app) roomTodosFragment(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		http.Error(w, "room membership required", http.StatusForbidden)
+		return
+	}
+	a.renderRoomTodosFragment(w, r, rm.ID, rm.Code, u, r.URL.Query().Get("desk") == "1")
+}
+
 func (a *app) roomTimerStatus(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
@@ -927,6 +1007,10 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, room_id, text) VALUES ($1, $2, $3)`, u.ID, rm.ID, text)
 		}
 		a.hub.broadcast(code, action)
+		if isHTMXRequest(r) {
+			a.renderRoomTodosFragment(w, r, rm.ID, rm.Code, u, r.FormValue("desk") == "1")
+			return
+		}
 		if next := strings.TrimSpace(r.FormValue("next")); next != "" {
 			http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
 			return

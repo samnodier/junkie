@@ -789,7 +789,31 @@ const layoutTemplates = `
         const onRoomPage = document.querySelector('.room-shell') || document.querySelector('.room-focus-page');
         if (type === 'todos') {
           if (!onRoomPage && !deskTodosViewingRoom(code)) return;
-        } else if (!onRoomPage && !deskTodosViewingRoom(code)) {
+          // hub.broadcast includes the sender's own connection, so this also
+          // patches the tab that made the change -- it just re-fetches the
+          // same fragment its own htmx swap already applied. Patch instead
+          // of location.reload() so completing a task never blows away the
+          // rest of the page (typed drafts, open panels, running timers).
+          const desk = !onRoomPage;
+          const target = document.getElementById('todo-groups-' + code);
+          if (!target) return;
+          fetch('/r/' + code + '/todos-fragment' + (desk ? '?desk=1' : ''), {
+            headers: { 'HX-Request': 'true' },
+          })
+            .then((resp) => (resp.ok ? resp.text() : null))
+            .then((html) => {
+              if (html == null) return;
+              target.outerHTML = html;
+              const fresh = document.getElementById('todo-groups-' + code);
+              if (fresh) {
+                window.htmx?.process(fresh);
+                window.junkieWireTodoGroupCollapse?.();
+              }
+            })
+            .catch(() => {});
+          return;
+        }
+        if (!onRoomPage && !deskTodosViewingRoom(code)) {
           return;
         }
         setTimeout(() => {
@@ -851,6 +875,8 @@ const layoutTemplates = `
 
             setCollapsed(sessionStorage.getItem(key) === 'collapsed');
 
+            if (toggle.dataset.wired === 'true') return;
+            toggle.dataset.wired = 'true';
             toggle.addEventListener('click', () => {
               setCollapsed(!section.classList.contains('is-collapsed'));
             });
@@ -858,6 +884,29 @@ const layoutTemplates = `
         });
       };
       wireTodoGroupCollapse();
+      window.junkieWireTodoGroupCollapse = wireTodoGroupCollapse;
+      // htmx replaces the whole .todo-groups container on every todo action,
+      // so the click listeners above need to be re-attached to the fresh
+      // nodes each time (collapsed/expanded state itself lives in
+      // sessionStorage, so it survives the swap either way).
+      document.body.addEventListener('htmx:afterSwap', (event) => {
+        if (event.target.closest?.('.todo-groups') || event.target.classList?.contains('todo-groups')) {
+          wireTodoGroupCollapse();
+        }
+      });
+
+      // htmx only swaps the todo list/group container, not the add form, so
+      // the input naturally keeps focus across a submit -- just clear the
+      // typed text once the add actually succeeds.
+      document.body.addEventListener('htmx:afterRequest', (event) => {
+        const form = event.target.closest?.('.todo-add-form[hx-post]');
+        if (!form || !event.detail.successful) return;
+        const input = form.querySelector('input[name="text"]');
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+      });
 
       // Server-backed todo forms navigate on submit, and room pages reload on
       // WebSocket broadcasts, so adding a task normally throws the cursor (and
@@ -1085,21 +1134,31 @@ const layoutTemplates = `
 </div>
 {{end}}
 
+{{define "personal-todos-list"}}
+<ul class="todo-list" id="personal-todos-list" hx-target="this" hx-swap="outerHTML">
+  {{range .Todos}}
+    {{template "todo-row" .}}
+  {{else}}
+    {{if not .HasRooms}}<li class="empty">Nothing yet. Add one thing worth finishing.</li>{{end}}
+  {{end}}
+</ul>
+{{end}}
+
 {{define "todo-row"}}
   <li class="{{if .Removed}}removed{{else if .Done}}done{{end}}">
     {{if .ReadOnly}}
     <span class="todo-avatar" aria-hidden="true">{{initial .DisplayName}}</span>
     {{else}}
-    <form method="post" action="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
+    <form method="post" action="/todo/{{.ID}}/toggle" hx-post="/todo/{{.ID}}/toggle"><button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button></form>
     {{end}}
     <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
       <div class="todo-actions">
-        <form method="post" action="/todo/{{.ID}}/restore"><button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button></form>
-        <form method="post" action="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
+        <form method="post" action="/todo/{{.ID}}/restore" hx-post="/todo/{{.ID}}/restore"><button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button></form>
+        <form method="post" action="/todo/{{.ID}}/delete" hx-post="/todo/{{.ID}}/delete"><button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button></form>
       </div>
     {{else}}
-      <form method="post" action="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
+      <form method="post" action="/todo/{{.ID}}/remove" hx-post="/todo/{{.ID}}/remove"><button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button></form>
     {{end}}
   </li>
 {{end}}
@@ -1118,7 +1177,7 @@ const layoutTemplates = `
     {{if .ReadOnly}}
     <span class="todo-avatar" aria-hidden="true">{{initial .DisplayName}}</span>
     {{else}}
-    <form method="post" action="/todo/{{.ID}}/toggle">
+    <form method="post" action="/todo/{{.ID}}/toggle" hx-post="/todo/{{.ID}}/toggle">
       <input type="hidden" name="desk" value="1">
       <input type="hidden" name="room" value="{{.RoomCode}}">
       <button type="submit" class="check" aria-label="{{if .Done}}Mark incomplete{{else}}Mark complete{{end}}">{{if .Done}}✓{{else}}○{{end}}</button>
@@ -1127,19 +1186,19 @@ const layoutTemplates = `
     <span>{{if .ReadOnly}}<span class="todo-text">{{.Text}}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{.DisplayName}}</span>{{else}}{{.Text}}{{end}}</span>
     {{if .Removed}}
       <div class="todo-actions">
-        <form method="post" action="/todo/{{.ID}}/restore">
+        <form method="post" action="/todo/{{.ID}}/restore" hx-post="/todo/{{.ID}}/restore">
           <input type="hidden" name="desk" value="1">
           <input type="hidden" name="room" value="{{.RoomCode}}">
           <button type="submit" class="todo-action todo-restore" title="Bring back" aria-label="Bring back">{{template "todo-restore-icon" .}}</button>
         </form>
-        <form method="post" action="/todo/{{.ID}}/delete">
+        <form method="post" action="/todo/{{.ID}}/delete" hx-post="/todo/{{.ID}}/delete">
           <input type="hidden" name="desk" value="1">
           <input type="hidden" name="room" value="{{.RoomCode}}">
           <button type="submit" class="todo-action todo-delete" title="Delete permanently" aria-label="Delete permanently">{{template "todo-delete-icon" .}}</button>
         </form>
       </div>
     {{else}}
-      <form method="post" action="/todo/{{.ID}}/remove">
+      <form method="post" action="/todo/{{.ID}}/remove" hx-post="/todo/{{.ID}}/remove">
         <input type="hidden" name="desk" value="1">
         <input type="hidden" name="room" value="{{.RoomCode}}">
         <button type="submit" class="todo-action todo-remove" title="Remove" aria-label="Remove">{{template "todo-remove-icon" .}}</button>
@@ -1149,7 +1208,7 @@ const layoutTemplates = `
 {{end}}
 
 {{define "todo-groups-desk-room"}}
-<div class="todo-groups" data-room="{{.RoomCode}}">
+<div class="todo-groups" data-room="{{.RoomCode}}" id="todo-groups-{{.RoomCode}}" hx-target="this" hx-swap="outerHTML">
   <section class="todo-group" data-group="mine">
     <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-mine-{{.RoomCode}}">
       <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
@@ -1180,7 +1239,7 @@ const layoutTemplates = `
 {{end}}
 
 {{define "todo-groups-room"}}
-<div class="todo-groups" data-room="{{.RoomCode}}">
+<div class="todo-groups" data-room="{{.RoomCode}}" id="todo-groups-{{.RoomCode}}" hx-target="this" hx-swap="outerHTML">
   <section class="todo-group" data-group="mine">
     <button type="button" class="todo-group-toggle" aria-expanded="true" aria-controls="todo-group-mine-{{.RoomCode}}">
       <svg class="todo-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
@@ -1675,25 +1734,20 @@ const layoutTemplates = `
             {{if .DeskRoomTodos}}<span class="label desk-todos-hint label-warn">Public to the room</span>{{end}}
           </div>
           <div class="desk-todos-view" data-mode="private"{{if .DeskRoomTodos}} hidden{{end}}>
-            <form class="inline-form todo-add-form" method="post" action="/todos">
+            <form class="inline-form todo-add-form" method="post" action="/todos" hx-post="/todos" hx-target="#personal-todos-list" hx-swap="outerHTML">
               <input name="text" placeholder="What do you need to do?" required>
               <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
             </form>
-            <ul class="todo-list">
-              {{range .PersonalTodos}}
-                {{template "todo-row" .}}
-              {{else}}
-                {{if not .DeskRoomTodos}}<li class="empty">Nothing yet. Add one thing worth finishing.</li>{{end}}
-              {{end}}
-            </ul>
+            {{template "personal-todos-list" (dict "Todos" .PersonalTodos "HasRooms" (gt (len .DeskRoomTodos) 0))}}
             {{if and .DeskRoomTodos (not .Rooms)}}
             <p class="desk-join-link"><a href="#" class="btn btn-ghost btn-compact" onclick="document.querySelector('.menu-drawer-trigger')?.click();return false">Create a room</a></p>
             {{end}}
           </div>
           {{range .DeskRoomTodos}}
           <div class="desk-todos-view" data-mode="room" data-room="{{.Room.Code}}" hidden>
-            <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos">
+            <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos" hx-post="/r/{{.Room.Code}}/todos" hx-target="#todo-groups-{{.Room.Code}}" hx-swap="outerHTML">
               <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+              <input type="hidden" name="desk" value="1">
               <input name="text" placeholder="What are you working on?" required>
               <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
             </form>
@@ -1934,7 +1988,7 @@ const layoutTemplates = `
             <h2>Room todos</h2>
             <span class="label label-warn">Public to the room</span>
           </div>
-          <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos">
+          <form class="inline-form todo-add-form" method="post" action="/r/{{.Room.Code}}/todos" hx-post="/r/{{.Room.Code}}/todos" hx-target="#todo-groups-{{.Room.Code}}" hx-swap="outerHTML">
             <input name="text" placeholder="What are you working on?" required>
             <button type="submit" class="todo-add-plus" aria-label="Add task">+</button>
           </form>
