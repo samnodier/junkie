@@ -2,21 +2,134 @@
 
 junkie is a long-running Go process that holds live WebSocket connections, so
 it needs an always-on host — serverless and scale-to-zero platforms break the
-shared room timers. Two paths cost nothing:
+shared room timers. Three paths cost nothing:
 
-| | Path A: Oracle Cloud Always Free | Path B: Render free + Neon free |
-|---|---|---|
-| Cost | $0 forever | $0 forever |
-| Card needed at signup | Yes (identity check only, never charged) | No |
-| Always on | Yes | No — sleeps after 15 min idle, ~1 min cold start, drops live WebSockets |
-| Ops | You manage a VM | Fully managed |
+| | Path A: Google Cloud Always Free | Path B: Oracle Cloud Always Free | Path C: Render free + Neon free |
+|---|---|---|---|
+| Cost | $0 forever (see billing safety below) | $0 forever | $0 forever |
+| Card needed at signup | Yes (id check only; the 90-day/$300 trial never auto-charges) | Yes (identity check only, never charged) | No |
+| Always on | Yes | Yes | No — sleeps after 15 min idle, ~1 min cold start, drops live WebSockets |
+| Database | Neon (managed, free) | Self-hosted Postgres in the same compose stack | Neon (managed, free) |
+| Ops | You manage a VM; DB is managed | You manage a VM and its Postgres | Fully managed |
 
-**Use Path A for real users.** Use Path B if Oracle signup rejects your card
-or you just want a quick demo link.
+**Use Path A or B for real users.** Path A is the default recommendation: same
+VM + Docker + Caddy playbook as Path B, but Google's card verification is
+far less prone to spuriously rejecting valid cards than Oracle's (a common,
+widely-reported Oracle-specific issue). If Oracle already worked for you,
+Path B is equally good and gives more headroom (2 OCPUs/12GB RAM vs
+e2-micro's 1GB). Use Path C only if you won't put a card on file anywhere.
 
 ---
 
-## Path A: Oracle Cloud Always Free VM
+## Path A: Google Cloud Always Free VM + Neon
+
+### 1. Set up billing safety before creating anything
+
+Sign up at <https://cloud.google.com/free>. You land on a 90-day/$300 trial
+first — signing up carries no billing risk: if the trial ends unused it just
+shuts workloads down (30-day grace period to recover them by upgrading), it
+never auto-charges.
+
+The risk starts once you upgrade to a full paid account, which you'll need
+to do to keep the Always Free VM running past 90 days. From that point,
+Google's budget alerts are **notifications only** — they don't stop billing
+by themselves, so anything outside the free limits (an extra disk, a
+reserved-but-unused static IP, egress over 1GB/month) bills the card
+automatically, the same failure mode that's bitten you on AWS. Close that
+gap before it can happen:
+
+1. **Billing → Budgets & alerts** → create a budget (e.g. $1) with alert
+   thresholds.
+2. Wire the alert to an automatic billing-disable action so an overage gets
+   hard-stopped instead of silently charged. Google documents the pattern
+   (budget alert → Pub/Sub → Cloud Function → disables billing on the
+   project):
+   <https://cloud.google.com/billing/docs/how-to/disable-billing-with-notifications>.
+   A packaged version of this exists at
+   <https://github.com/Cyclenerd/poweroff-google-cloud-cap-billing> if you'd
+   rather not write the Cloud Function by hand.
+3. Stay inside the Always Free limits so the killswitch never needs to fire:
+   exactly one `e2-micro` instance, in `us-central1`, `us-west1`, or
+   `us-east1`; leave the VM's external IP **ephemeral** (a *reserved* static
+   IP bills hourly even when unused — this is a classic surprise-bill trap);
+   keep the default 30GB standard persistent disk; stay under 1GB/month of
+   egress to the internet.
+
+### 2. Create the VM
+
+Console → Compute Engine → VM instances → Create instance:
+
+- Region: `us-central1`, `us-west1`, or `us-east1` (required for Always Free)
+- Machine type: **e2-micro**
+- Boot disk: **Ubuntu 24.04**, keep the default free-tier-eligible disk size
+- Firewall: check **Allow HTTP traffic** and **Allow HTTPS traffic**
+- Networking: leave the external IP as **Ephemeral**, not Static
+- Add your SSH key under Security (or use the console's browser SSH button)
+
+### 3. Get a free domain
+
+Caddy needs a hostname to issue a TLS certificate. Free option:
+<https://www.duckdns.org> — sign in, create a subdomain (e.g.
+`myjunkie.duckdns.org`), and set its IP to the VM's external IP. Any domain
+you own works the same way (an A record pointing at the VM).
+
+### 4. Create the database on Neon
+
+Create a free project at <https://neon.tech> — no card required. Copy the
+connection string; it already includes `sslmode=require`.
+
+### 5. Install Docker and deploy
+
+SSH in, then:
+
+```sh
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER && exit   # re-SSH so the group applies
+```
+
+```sh
+git clone https://github.com/<you>/junkie.git && cd junkie
+cp .env.example .env
+```
+
+Edit `.env`:
+
+- `DATABASE_URL` — the Neon connection string from step 4
+- `DOMAIN` — the hostname from step 3
+
+This path has no local Postgres container, so use the Neon-specific compose
+file instead of the default one:
+
+```sh
+docker compose -f docker-compose.neon.yml up -d --build
+```
+
+Caddy obtains the certificate automatically (needs DNS from step 3 already
+pointing at the VM). Open `https://<your-domain>` — migrations run at app
+startup, so the site should just work. `https://<your-domain>/healthz`
+returns `200 ok` when the app can reach the database.
+
+### 6. Bootstrap the owner account
+
+1. Sign up in the app with your username.
+2. Set `JUNKIE_OWNER_USERNAME=<that username>` in `.env`.
+3. `docker compose -f docker-compose.neon.yml up -d` (recreates the app with
+   the new env).
+
+### Updating
+
+```sh
+git pull && docker compose -f docker-compose.neon.yml up -d --build
+```
+
+### Backups
+
+Neon runs its own automatic backups/point-in-time restore on the free tier
+(check current retention in Neon's docs) — no cron job needed on the VM.
+
+---
+
+## Path B: Oracle Cloud Always Free VM
 
 You get a permanent free ARM VM (currently 2 OCPUs / 12 GB RAM — far more
 than junkie needs) and run the existing compose file on it.
@@ -130,7 +243,7 @@ This keeps seven rotating daily dumps. Copy them off the VM occasionally.
 
 ---
 
-## Path B: Render free + Neon free
+## Path C: Render free + Neon free
 
 No card, no server to manage — but the free instance sleeps after 15 minutes
 of inactivity. The first visitor after a sleep waits ~1 minute, and a sleep

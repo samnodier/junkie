@@ -1,0 +1,30 @@
+services:
+  # No local postgres service here — DATABASE_URL points at a managed
+  # database (e.g. Neon) instead. See "Path A" in DEPLOY.md.
+  app:
+    build: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ADDR: :8080
+      JUNKIE_OWNER_USERNAME: ${JUNKIE_OWNER_USERNAME:-}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:
