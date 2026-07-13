@@ -874,6 +874,10 @@ const layoutTemplates = `
           const desk = !onRoomPage;
           const target = document.getElementById('todo-groups-' + code);
           if (!target) return;
+          // Hold off while an inline edit is open -- replacing the group
+          // would destroy the input mid-typing; the edit's own final save
+          // re-renders the fresh state.
+          if (target.querySelector('.todo-edit-input')) return;
           fetch('/r/' + code + '/todos-fragment' + (desk ? '?desk=1' : ''), {
             headers: { 'HX-Request': 'true' },
           })
@@ -946,6 +950,10 @@ const layoutTemplates = `
         const patchList = (id, url) => {
           const target = document.getElementById(id);
           if (!target) return;
+          // Hold off while an inline edit is open -- replacing the list
+          // would destroy the input mid-typing; the edit's own final save
+          // re-renders the fresh state.
+          if (target.querySelector('.todo-edit-input')) return;
           fetch(url, { headers: { 'HX-Request': 'true' } })
             .then((resp) => (resp.ok ? resp.text() : null))
             .then((html) => {
@@ -1058,10 +1066,10 @@ const layoutTemplates = `
         if (form && event.target.name === 'text') syncTodoAddButton(form);
       });
 
-      // Click a todo's text to edit it in place. Enter or clicking away
-      // saves, Escape cancels. The server only accepts edits from the todo's
-      // author, and the response is the same list fragment the other todo
-      // actions return, so the whole container refreshes in place.
+      // Click a todo's text to edit it in place. Changes auto-save: a short
+      // pause in typing pushes the text to the server, and Enter or clicking
+      // away finishes the edit. Escape reverts, undoing any autosaved text.
+      // Only active todos are editable and the server enforces author-only.
       document.addEventListener('click', (event) => {
         const span = event.target.closest?.('.todo-editable');
         if (!span || span.querySelector('input')) return;
@@ -1077,36 +1085,25 @@ const layoutTemplates = `
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
 
-        let done = false;
-        const restore = () => {
-          if (done) return;
-          done = true;
-          span.textContent = original;
-        };
-        const commit = () => {
-          if (done) return;
-          const next = input.value.trim();
-          if (next === '' || next === original) {
-            restore();
-            return;
-          }
-          done = true;
-          span.textContent = next;
-          const body = new URLSearchParams({ text: next });
+        const body = (text) => {
+          const params = new URLSearchParams({ text });
           // Carry the same view context the row's action forms use so the
           // server renders the fragment variant this surface expects.
           row?.querySelectorAll('form input[type="hidden"]').forEach((h) => {
-            if (!body.has(h.name)) body.set(h.name, h.value);
+            if (!params.has(h.name)) params.set(h.name, h.value);
           });
-          const container = span.closest('#personal-todos-list, .todo-groups');
+          return params.toString();
+        };
+        const container = span.closest('#personal-todos-list, .todo-groups');
+        const save = (text, patch) =>
           fetch('/todo/' + span.dataset.id + '/edit', {
             method: 'POST',
             headers: { 'HX-Request': 'true', 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString(),
+            body: body(text),
           })
             .then((resp) => (resp.ok ? resp.text() : null))
             .then((html) => {
-              if (html == null || !container) return;
+              if (!patch || html == null || !container || !container.isConnected) return;
               const id = container.id;
               container.outerHTML = html;
               const fresh = id ? document.getElementById(id) : null;
@@ -1116,13 +1113,42 @@ const layoutTemplates = `
               }
             })
             .catch(() => {});
+
+        let lastSaved = original;
+        let saveTimer = null;
+        let done = false;
+        input.addEventListener('input', () => {
+          clearTimeout(saveTimer);
+          saveTimer = setTimeout(() => {
+            const text = input.value.trim();
+            if (text !== '' && text !== lastSaved) {
+              lastSaved = text;
+              save(text, false);
+            }
+          }, 900);
+        });
+        const finish = (text, needsSave) => {
+          if (done) return;
+          done = true;
+          clearTimeout(saveTimer);
+          span.textContent = text;
+          if (needsSave) save(text, true);
+        };
+        const commit = () => {
+          const next = input.value.trim();
+          if (next === '') {
+            // Emptied text reverts, undoing anything autosave pushed.
+            finish(original, lastSaved !== original);
+            return;
+          }
+          finish(next, next !== lastSaved);
         };
         input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
             commit();
           } else if (e.key === 'Escape') {
-            restore();
+            finish(original, lastSaved !== original);
           }
         });
         input.addEventListener('blur', commit);
