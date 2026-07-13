@@ -51,6 +51,10 @@ type room struct {
 	FocusMinutes int
 	BreakMinutes int
 	AutoSessions int
+	// AutoRoll starts breaks automatically when a focus session ends. When
+	// off, the break waits paused at full length so members can adjust it
+	// and start it deliberately.
+	AutoRoll bool
 }
 
 type todo struct {
@@ -1066,7 +1070,11 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		focus := clampInt(r.FormValue("focus_minutes"), 5, 180, rm.FocusMinutes)
 		breaks := clampInt(r.FormValue("break_minutes"), 1, 60, rm.BreakMinutes)
 		sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, rm.AutoSessions)
-		_, _ = a.db.Exec(r.Context(), `UPDATE rooms SET focus_minutes = $1, break_minutes = $2, auto_sessions = $3, updated_at = now() WHERE id = $4`, focus, breaks, sessions, rm.ID)
+		autoRoll := rm.AutoRoll
+		if v := r.FormValue("auto_roll"); v != "" {
+			autoRoll = v == "1"
+		}
+		_, _ = a.db.Exec(r.Context(), `UPDATE rooms SET focus_minutes = $1, break_minutes = $2, auto_sessions = $3, auto_roll = $4, updated_at = now() WHERE id = $5`, focus, breaks, sessions, autoRoll, rm.ID)
 	case "delete":
 		if rm.CreatorID != u.ID {
 			http.Error(w, "only the creator can delete this room", http.StatusForbidden)
@@ -1141,6 +1149,27 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if !changed {
 			action = ""
+		} else {
+			action = "timer-phase"
+		}
+	case "timer-break-length":
+		minutes := clampInt(r.FormValue("minutes"), 1, 60, rm.BreakMinutes)
+		// Set the length and start in one motion; only meaningful while the
+		// break is paused (which includes the auto-roll-off pending state).
+		var runID string
+		err := a.db.QueryRow(r.Context(), `
+			UPDATE timer_runs
+			SET phase_started_at = now(),
+				phase_ends_at = now() + make_interval(mins => $2),
+				paused_at = NULL,
+				paused_remaining_seconds = NULL
+			WHERE room_id = $1 AND ended_at IS NULL AND phase = 'break' AND paused_at IS NOT NULL
+			RETURNING id`, rm.ID, minutes).Scan(&runID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			action = ""
+		} else if err != nil {
+			http.Error(w, "could not start break", http.StatusInternalServerError)
+			return
 		} else {
 			action = "timer-phase"
 		}
@@ -1243,6 +1272,11 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		return nil, false, err
 	}
 
+	var autoRoll bool
+	if err = tx.QueryRow(ctx, `SELECT auto_roll FROM rooms WHERE id = $1`, roomID).Scan(&autoRoll); err != nil {
+		return nil, false, err
+	}
+
 	now := time.Now()
 	for timer.Phase != "ended" && timer.PausedAt == nil && !now.Before(timer.PhaseEndsAt) {
 		if timer.Phase == "lobby" {
@@ -1272,8 +1306,21 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			timer.Phase = "break"
 			timer.PhaseStartedAt = now
 			timer.PhaseEndsAt = now.Add(time.Duration(timer.BreakMinutes) * time.Minute)
-			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $2, paused_at = NULL, paused_remaining_seconds = NULL WHERE id = $3`, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
-				return nil, false, err
+			if autoRoll {
+				if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $2, paused_at = NULL, paused_remaining_seconds = NULL WHERE id = $3`, timer.PhaseStartedAt, timer.PhaseEndsAt, timer.ID); err != nil {
+					return nil, false, err
+				}
+			} else {
+				// Auto-roll off: the break arrives paused at full length so
+				// members can adjust it and start it deliberately. The paused
+				// state also halts this loop, exactly like a manual pause.
+				remaining := timer.BreakMinutes * 60
+				if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $2, paused_at = $1, paused_remaining_seconds = $3 WHERE id = $4`, timer.PhaseStartedAt, timer.PhaseEndsAt, remaining, timer.ID); err != nil {
+					return nil, false, err
+				}
+				pausedAt := now
+				timer.PausedAt = &pausedAt
+				timer.PausedRemainingSeconds = &remaining
 			}
 			timer.Transitioned = true
 		} else if timer.Phase == "break" {
@@ -1670,7 +1717,7 @@ func (a *app) findRoom(ctx context.Context, code string) (room, bool) {
 		return room{}, false
 	}
 	var rm room
-	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions)
+	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll)
 	return rm, err == nil
 }
 
@@ -1685,7 +1732,7 @@ func (a *app) addRoomMember(ctx context.Context, roomID, userID string) {
 }
 
 func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
-	rows, err := a.db.Query(ctx, `SELECT r.id, r.code, r.name, r.creator_id, r.focus_minutes, r.break_minutes, r.auto_sessions FROM room_members rm JOIN rooms r ON r.id = rm.room_id WHERE rm.user_id = $1 ORDER BY r.updated_at DESC`, userID)
+	rows, err := a.db.Query(ctx, `SELECT r.id, r.code, r.name, r.creator_id, r.focus_minutes, r.break_minutes, r.auto_sessions, r.auto_roll FROM room_members rm JOIN rooms r ON r.id = rm.room_id WHERE rm.user_id = $1 ORDER BY r.updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1693,7 +1740,7 @@ func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
 	var rooms []room
 	for rows.Next() {
 		var rm room
-		if rows.Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions) == nil {
+		if rows.Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll) == nil {
 			rooms = append(rooms, rm)
 		}
 	}

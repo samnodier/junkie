@@ -2231,8 +2231,14 @@ const layoutTemplates = `
             {{if not .Timer.Participant}}
             <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
             {{end}}
+            {{if .Timer.PausedAt}}
+            <form class="inline-form break-length-form" method="post" action="/r/{{.Room.Code}}/timer-break-length">
+              <label>Break minutes <input type="number" name="minutes" min="1" max="60" value="{{.Room.BreakMinutes}}"></label>
+              <button type="submit" class="btn-primary btn-compact">Start break</button>
+            </form>
+            {{end}}
             <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
-              <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
+              <button type="submit" class="btn-ghost">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
             </form>
             <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
               <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
@@ -2251,15 +2257,30 @@ const layoutTemplates = `
             <form method="post" action="/r/{{.Room.Code}}/timer-start" data-room-name="{{.Room.Name}}"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
             <p class="muted room-ready-hint">Start alone or with others — members get a join prompt when you start.</p>
           </article>
+          {{end}}
+          {{if or (not .Timer) (eq .Timer.Phase "break")}}
           <details class="room-details panel" data-room-section="settings">
             <summary><span class="label">Timer settings · {{.Room.AutoSessions}}×{{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <form class="settings stack" method="post" action="/r/{{.Room.Code}}/settings">
               <label>Focus <input type="number" name="focus_minutes" min="5" max="180" value="{{.Room.FocusMinutes}}"></label>
               <label>Break <input type="number" name="break_minutes" min="1" max="60" value="{{.Room.BreakMinutes}}"></label>
               <label>Sessions <input type="number" name="auto_sessions" min="1" max="12" value="{{.Room.AutoSessions}}"></label>
+              <div class="settings-auto-roll">
+                <div>
+                  <strong>Auto-start breaks</strong>
+                  <p class="muted">When off, the break waits after each focus block so the room can adjust its length and start it together.</p>
+                </div>
+                <label class="toggle-control">
+                  <input type="checkbox" name="auto_roll" value="1"{{if .Room.AutoRoll}} checked{{end}} aria-label="Auto-start breaks">
+                  <span aria-hidden="true"></span>
+                </label>
+                <input type="hidden" name="auto_roll" value="0">
+              </div>
               <button type="submit" class="btn-primary btn-compact">Save</button>
             </form>
           </details>
+          {{end}}
+          {{if not .Timer}}
           <details class="room-details panel" data-room-section="share">
             <summary><span class="label">Share room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <p class="room-share room-share-block" data-room-path="/r/{{.Room.Code}}">
@@ -2992,6 +3013,23 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   border-radius: 50%;
 }
 #junkie-toasts .toast-close:hover { color: var(--ink); background: var(--surface-2); }
+.settings-auto-roll {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.settings-auto-roll strong { display: block; margin-bottom: var(--sp-1); font-size: var(--fs-small); }
+.settings-auto-roll p { margin: 0; font-size: var(--fs-small); }
+.break-length-form { align-items: end; }
+.break-length-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.break-length-form input { width: 90px; }
 .todo-editable { cursor: text; border-radius: var(--radius-sm); }
 .todo-editable:hover { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
 .todo-edit-input {
