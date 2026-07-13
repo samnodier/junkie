@@ -361,6 +361,24 @@ const layoutTemplates = `
       });
       syncThemeToggle();
 
+      const wirePasswordToggles = () => {
+        document.querySelectorAll('.password-toggle').forEach((toggle) => {
+          if (toggle.dataset.wired === 'true') return;
+          toggle.dataset.wired = 'true';
+          const input = toggle.closest('.password-field')?.querySelector('input');
+          if (!input) return;
+          toggle.addEventListener('click', () => {
+            const visible = input.type === 'password';
+            input.type = visible ? 'text' : 'password';
+            toggle.classList.toggle('is-visible', visible);
+            const label = visible ? 'Hide password' : 'Show password';
+            toggle.setAttribute('aria-label', label);
+            toggle.setAttribute('aria-pressed', visible ? 'true' : 'false');
+          });
+        });
+      };
+      wirePasswordToggles();
+
       const wireFocusTodosPeek = () => {
         if (document.getElementById('guest-desk')) return;
         const toggle = document.querySelector('.focus-todos-toggle');
@@ -1202,6 +1220,16 @@ const layoutTemplates = `
 <div class="auth-brand"><span class="brand-mark">j</span></div>
 {{end}}
 
+{{define "password-field"}}
+<span class="password-field">
+  <input type="password" name="{{.Name}}" autocomplete="{{.Autocomplete}}" required>
+  <button type="button" class="password-toggle" aria-label="Show password" aria-pressed="false">
+    <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+    <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 0 0 4.24 4.24"/><path d="M9.9 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a13.3 13.3 0 0 1-3.09 3.9M6.1 6.1A13.4 13.4 0 0 0 2 12s3.5 7 10 7c1.15 0 2.25-.16 3.29-.47"/></svg>
+  </button>
+</span>
+{{end}}
+
 {{define "desk-private-timer"}}
 <div class="desk-timer-view" data-mode="private"{{if .Rooms}} hidden{{end}}>
   {{if .SoloTimer}}
@@ -1420,11 +1448,12 @@ const layoutTemplates = `
       {{end}}
       {{if .AuthBanner}}<p class="context-banner">{{.AuthBanner}}</p>{{end}}
       {{if .Error}}<p class="notice notice-error">{{.Error}}</p>{{end}}
+      {{if .Notice}}<p class="notice-ok" role="status">{{.Notice}}</p>{{end}}
       {{if .AuthSignup}}
       <form class="stack auth-form" method="post" action="/signup">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
-        <label>Password <input type="password" name="password" autocomplete="new-password" required></label>
+        <label>Password {{template "password-field" (dict "Name" "password" "Autocomplete" "new-password")}}</label>
         <button type="submit" class="btn-primary">Create account</button>
       </form>
       <p class="muted auth-switch">Already have an account? <a href="/login{{if .Next}}?next={{.Next}}{{end}}">Sign in</a></p>
@@ -1432,7 +1461,7 @@ const layoutTemplates = `
       <form class="stack auth-form" method="post" action="/login">
         {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}
         <label>Username <input name="username" autocomplete="username" required></label>
-        <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+        <label>Password {{template "password-field" (dict "Name" "password" "Autocomplete" "current-password")}}</label>
         <button type="submit" class="btn-primary">Sign in</button>
       </form>
       <p class="muted auth-switch">New here? <a href="/login?mode=signup{{if .Next}}&amp;next={{.Next}}{{end}}">Create an account</a></p>
@@ -1727,6 +1756,18 @@ const layoutTemplates = `
           <button type="submit" class="btn-primary btn-compact">Update password</button>
         </form>
         <p class="muted profile-follow-stub">Follow friends — coming soon</p>
+        {{if ne .User.Role "owner"}}
+        <div class="profile-preference profile-danger">
+          <div>
+            <strong>Delete account</strong>
+            <p class="muted">Permanently deletes your account, any rooms you created, your todos, and your activity history. This cannot be undone.</p>
+          </div>
+        </div>
+        <form class="profile-delete-form" method="post" action="/profile/delete" onsubmit="return confirm('Permanently delete your account and all its data? This cannot be undone.')">
+          <label>Confirm your password <input type="password" name="password" autocomplete="current-password" required></label>
+          <button type="submit" class="btn-danger btn-compact">Delete account</button>
+        </form>
+        {{end}}
       {{end}}
     </section>
   {{else if eq .Title "Join room"}}
@@ -2289,6 +2330,26 @@ code {
 }
 .auth-switch { margin: var(--sp-5) 0 0; text-align: center; font-size: var(--fs-small); }
 .auth-switch a { font-weight: 600; }
+.password-field { position: relative; display: block; }
+.password-field input { padding-right: 44px; }
+.password-toggle {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  background: transparent;
+  color: var(--muted);
+}
+.password-toggle:hover { color: var(--ink); }
+.password-toggle svg { width: 1.15rem; height: 1.15rem; }
+.password-toggle .icon-eye-off { display: none; }
+.password-toggle.is-visible .icon-eye { display: none; }
+.password-toggle.is-visible .icon-eye-off { display: block; }
 h1, h2, p { margin-top: 0; }
 h1, h2 {
   font-family: var(--font-serif);
@@ -3217,6 +3278,22 @@ body.menu-drawer-open { overflow: hidden; }
   color: var(--muted);
 }
 .profile-password-form button { align-self: flex-start; }
+.profile-danger strong { color: var(--danger); }
+.profile-delete-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 340px;
+  margin-top: var(--sp-3);
+}
+.profile-delete-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.profile-delete-form button { align-self: flex-start; }
 .heatmap-chart { width: 100%; }
 .heatmap-summary { color: var(--muted); font-size: var(--fs-small); margin: 0 0 var(--sp-3); }
 .heatmap-layout { display: flex; gap: var(--sp-2); width: 100%; }

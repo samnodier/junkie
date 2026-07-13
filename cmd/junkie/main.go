@@ -228,6 +228,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /profile", a.profilePage)
 	mux.HandleFunc("POST /profile/password", a.requireAuth(a.changePassword))
+	mux.HandleFunc("POST /profile/delete", a.requireAuth(a.deleteAccount))
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
@@ -386,7 +387,9 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) loginForm(w http.ResponseWriter, r *http.Request) {
 	signup := r.URL.Query().Get("mode") == "signup"
-	a.render(w, "login", a.authPageData(r, signup, safeNext(r.URL.Query().Get("next")), ""))
+	data := a.authPageData(r, signup, safeNext(r.URL.Query().Get("next")), "")
+	data.Notice = r.URL.Query().Get("notice")
+	a.render(w, "login", data)
 }
 
 func (a *app) login(w http.ResponseWriter, r *http.Request) {
@@ -486,6 +489,72 @@ func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
 		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE user_id = $1 AND token <> $2`, u.ID, hashToken(cookie.Value))
 	}
 	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Password updated. All other devices were signed out."), http.StatusSeeOther)
+}
+
+func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	fail := func(msg string) {
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape(msg), http.StatusSeeOther)
+	}
+	if !a.limiter.allow("acctdelete:"+u.ID, 5, 15*time.Minute) {
+		fail("Too many attempts. Try again in a few minutes.")
+		return
+	}
+	if u.Role == roleOwner {
+		fail("The owner account can't be deleted here. Reassign JUNKIE_OWNER_USERNAME first.")
+		return
+	}
+	password := r.FormValue("password")
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail("Could not delete your account.")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var hash string
+	if err := tx.QueryRow(r.Context(), `SELECT password_hash FROM users WHERE id = $1 FOR UPDATE`, u.ID).Scan(&hash); err != nil {
+		fail("Could not verify your password.")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		fail("Password is incorrect.")
+		return
+	}
+	var ownedRoomCodes []string
+	rows, err := tx.Query(r.Context(), `SELECT code FROM rooms WHERE creator_id = $1`, u.ID)
+	if err != nil {
+		fail("Could not delete your account.")
+		return
+	}
+	for rows.Next() {
+		var code string
+		if rows.Scan(&code) == nil {
+			ownedRoomCodes = append(ownedRoomCodes, code)
+		}
+	}
+	rows.Close()
+	metadata, _ := json.Marshal(map[string]string{"username": u.Username})
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO admin_audit_log (actor_user_id, action, target_type, target_id, metadata)
+		VALUES ($1, 'user.self_deleted', 'user', $1, $2::jsonb)`, u.ID, metadata); err != nil {
+		fail("Could not delete your account.")
+		return
+	}
+	// Cascades to sessions, rooms this user created (and their members/todos/
+	// timers), room memberships, personal todos, and activity history.
+	if _, err := tx.Exec(r.Context(), `DELETE FROM users WHERE id = $1`, u.ID); err != nil {
+		fail("Could not delete your account.")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		fail("Could not delete your account.")
+		return
+	}
+	for _, code := range ownedRoomCodes {
+		a.hub.broadcast(code, "deleted")
+	}
+	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode})
+	http.Redirect(w, r, "/login?notice="+url.QueryEscape("Your account and all its data have been deleted."), http.StatusSeeOther)
 }
 
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
