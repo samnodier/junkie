@@ -108,7 +108,9 @@ const layoutTemplates = `
         <span class="theme-icon theme-icon-light" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg></span>
       </button>
       {{if and $menu .User.ID}}
-        <span class="topbar-user mono">{{.User.DisplayName}}</span>
+        <a href="/profile" class="topbar-user" aria-label="Profile — {{.User.DisplayName}}">
+          <span class="topbar-avatar" aria-hidden="true">{{if .User.HasAvatar}}<img class="avatar-img" src="/avatar/{{.User.ID}}?v={{.User.AvatarVersion}}" alt="">{{else}}{{initial .User.DisplayName}}{{end}}</span>
+        </a>
       {{end}}
       {{if $menu}}
         <button type="button" class="menu-drawer-trigger" aria-label="Open menu" aria-expanded="false">
@@ -2785,9 +2787,25 @@ code {
   font-weight: 600;
 }
 .topbar-user {
-  color: var(--muted);
-  font-size: var(--fs-small);
-  font-weight: 500;
+  display: inline-flex;
+  color: var(--ink);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.topbar-user:hover { opacity: 0.85; }
+.topbar-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 0.95rem;
+  position: relative;
+  overflow: hidden;
 }
 .page {
   width: min(1400px, 100%);
