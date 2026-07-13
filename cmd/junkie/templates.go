@@ -895,17 +895,43 @@ const layoutTemplates = `
         }
       });
 
+      // The add button doubles as an affordance: gray while the input is
+      // empty, accent-colored once there is text to submit.
+      const syncTodoAddButton = (form) => {
+        const input = form.querySelector('input[name="text"]');
+        const btn = form.querySelector('.todo-add-plus');
+        if (!input || !btn) return;
+        btn.disabled = input.value.trim() === '';
+        btn.style.opacity = '';
+      };
+      window.junkieSyncTodoAddButtons = () => {
+        document.querySelectorAll('.todo-add-form').forEach(syncTodoAddButton);
+      };
+      window.junkieSyncTodoAddButtons();
+      document.addEventListener('input', (event) => {
+        const form = event.target.closest?.('.todo-add-form');
+        if (form && event.target.name === 'text') syncTodoAddButton(form);
+      });
+
       // htmx only swaps the todo list/group container, not the add form, so
-      // the input naturally keeps focus across a submit -- just clear the
-      // typed text once the add actually succeeds.
+      // the input keeps focus across a submit. Disable the button while the
+      // request is in flight (double-submit guard), then clear the input and
+      // restore the button from the input's state -- unlike the old global
+      // disable-on-submit guard, which assumed a full page load would reset
+      // the button and permanently bricked it after the first htmx add.
+      document.body.addEventListener('htmx:beforeRequest', (event) => {
+        const btn = event.target.closest?.('.todo-add-form[hx-post]')?.querySelector('.todo-add-plus');
+        if (btn) btn.disabled = true;
+      });
       document.body.addEventListener('htmx:afterRequest', (event) => {
         const form = event.target.closest?.('.todo-add-form[hx-post]');
-        if (!form || !event.detail.successful) return;
+        if (!form) return;
         const input = form.querySelector('input[name="text"]');
-        if (input) {
+        if (input && event.detail.successful) {
           input.value = '';
           input.focus();
         }
+        syncTodoAddButton(form);
       });
 
       // Server-backed todo forms navigate on submit, and room pages reload on
@@ -1036,6 +1062,10 @@ const layoutTemplates = `
 
       document.querySelectorAll('form').forEach((form) => {
         form.addEventListener('submit', () => {
+          // htmx forms don't navigate away, so a permanent disable here would
+          // brick the form after its first use; their in-flight disable is
+          // handled by the htmx:beforeRequest/afterRequest pair instead.
+          if (form.hasAttribute('hx-post')) return;
           form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach((btn) => {
             btn.disabled = true;
             btn.style.opacity = '0.6';
@@ -2738,6 +2768,15 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-size: 1.2rem;
   line-height: 1;
   font-weight: 500;
+  background: var(--accent-btn);
+  color: var(--accent-ink);
+  transition: background 120ms ease, color 120ms ease;
+}
+.todo-add-plus:disabled,
+.todo-add-plus:disabled:hover {
+  background: var(--surface-2);
+  color: var(--faint);
+  cursor: default;
 }
 .todo-groups { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
 .todo-group-toggle {

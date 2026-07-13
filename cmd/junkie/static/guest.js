@@ -699,6 +699,8 @@
       submitGuestTodo();
     });
 
+    window.junkieSyncTodoAddButtons?.();
+
     document.getElementById('guest-todos')?.addEventListener('click', (event) => {
       const item = event.target.closest('[data-id]');
       if (!item) return;
