@@ -308,7 +308,7 @@
         '</div>' +
       '</div>' +
       '<button type="button" class="btn-primary timer-cancel" id="guest-break-start">Start break</button>' +
-      '<button type="button" class="btn-ghost timer-cancel" id="guest-break-skip">Skip break</button>' +
+      '<button type="button" class="btn-ghost timer-cancel" id="guest-break-skip">Skip break &amp; continue</button>' +
     '</article>';
 
   const breakRunningHTML = (timer) => {
@@ -325,7 +325,7 @@
             '</div>' +
           '</div>' +
         '</div>' +
-        '<button type="button" class="btn-ghost timer-cancel" id="guest-break-skip">Skip break</button>' +
+        '<button type="button" class="btn-ghost timer-cancel" id="guest-break-skip">Skip break &amp; continue</button>' +
       '</article>'
     );
   };
@@ -587,8 +587,14 @@
       });
 
       document.getElementById('guest-break-skip')?.addEventListener('click', () => {
-        save(keys.timer, null);
-        setFocusActive(false);
+        const current = load(keys.timer, null);
+        const focusMinutes = current?.focusMinutes || 50;
+        save(keys.timer, {
+          phase: 'focus',
+          focusMinutes,
+          endsAt: new Date(Date.now() + focusMinutes * 60 * 1000).toISOString(),
+        });
+        setFocusActive(true);
         render();
       });
       return;
@@ -598,8 +604,14 @@
       showFocusDesk(breakRunningHTML(timer), todos);
 
       document.getElementById('guest-break-skip')?.addEventListener('click', () => {
-        save(keys.timer, null);
-        setFocusActive(false);
+        const current = load(keys.timer, null);
+        const focusMinutes = current?.focusMinutes || 50;
+        save(keys.timer, {
+          phase: 'focus',
+          focusMinutes,
+          endsAt: new Date(Date.now() + focusMinutes * 60 * 1000).toISOString(),
+        });
+        setFocusActive(true);
         render();
       });
 

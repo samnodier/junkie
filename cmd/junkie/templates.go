@@ -1432,7 +1432,7 @@ const layoutTemplates = `
     <p class="label label-warn">Private break ready</p>
     <div class="room-ready-time mono">{{.SoloTimer.BreakMinutes}}:00</div>
     <form method="post" action="/solo/break/start"><button type="submit" class="btn-primary">Start break</button></form>
-    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
+    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button></form>
     {{else}}
     <p class="label label-warn">Private break</p>
     <div class="circle-timer break-running breather" role="timer" aria-label="Private break countdown">
@@ -1444,7 +1444,7 @@ const layoutTemplates = `
         <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.BreakMinutes 60}}">--:--</div>
       </div>
     </div>
-    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
+    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button></form>
     {{end}}
   </article>
   {{else}}
@@ -1498,6 +1498,10 @@ const layoutTemplates = `
       <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
         <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
         <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
+      </form>
+      <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
+        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+        <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
       </form>
       {{end}}
       {{if .Timer.Participant}}
@@ -1780,7 +1784,7 @@ const layoutTemplates = `
             <button type="submit" class="btn-primary timer-cancel">Start break</button>
           </form>
           <form method="post" action="/solo/break/skip">
-            <button type="submit" class="btn-ghost timer-cancel">Skip break</button>
+            <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
           </form>
         </article>
         {{else}}
@@ -1796,7 +1800,7 @@ const layoutTemplates = `
             </div>
           </div>
           <form method="post" action="/solo/break/skip">
-            <button type="submit" class="btn-ghost timer-cancel">Skip break</button>
+            <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
           </form>
         </article>
         {{end}}
@@ -2049,6 +2053,9 @@ const layoutTemplates = `
             {{end}}
             <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
               <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
+            </form>
+            <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
+              <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
             </form>
             {{if .Timer.Participant}}
             <form method="post" action="/r/{{.Room.Code}}/timer-leave"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>

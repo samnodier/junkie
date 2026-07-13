@@ -61,6 +61,8 @@ func TestDashboardRendersIndependentSoloAndRoomTimers(t *testing.T) {
 		`Break · session 2 of 3`,
 		`Watching · 1 joined`,
 		`action="/r/JUNK-IES/timer-join"`,
+		`action="/r/JUNK-IES/timer-skip-break"`,
+		`Skip break &amp; continue`,
 		`data-room-sync="JUNK-IES"`,
 		`data-run-id="room-timer-id"`,
 		`data-participant-count="1"`,
@@ -150,6 +152,8 @@ func TestRoomRendersPausedBreakControls(t *testing.T) {
 		`data-seconds="137" data-paused="true"`,
 		`action="/r/JUNK-IES/timer-resume"`,
 		`Resume break`,
+		`action="/r/JUNK-IES/timer-skip-break"`,
+		`Skip break &amp; continue`,
 		`Leave this focus block`,
 		`data-paused="true" data-paused-remaining="137"`,
 	} {

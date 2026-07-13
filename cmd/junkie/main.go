@@ -637,7 +637,24 @@ func (a *app) startSoloBreak(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) skipSoloBreak(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
-	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'break'`, u.ID)
+	timer, _ := a.normalizeSoloTimer(r.Context(), u.ID)
+	if timer == nil || timer.Phase != "break" {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		return
+	}
+	focus := timer.FocusMinutes
+	if focus < 5 {
+		focus = 5
+	} else if focus > 180 {
+		focus = 180
+	}
+	// End the break, then immediately start the next private focus with the
+	// same duration. Solo runs are single-session, so "next session" is a
+	// fresh run rather than bumping current_session.
+	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND phase = 'break' AND ended_at IS NULL`, timer.ID)
+	ends := time.Now().Add(time.Duration(focus) * time.Minute)
+	_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_runs (user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at) VALUES ($1, 'focus', $2, 0, 1, $3)`, u.ID, focus, ends)
+	a.hub.broadcast(userChannel(u.ID), "solo-timer")
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -1083,6 +1100,15 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		} else if !changed {
 			action = ""
 		}
+	case "timer-skip-break":
+		if _, changed, err := a.skipRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
+			http.Error(w, "could not skip break", http.StatusInternalServerError)
+			return
+		} else if !changed {
+			action = ""
+		} else {
+			action = "timer-phase"
+		}
 	case "timer-leave":
 		timer, _, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 		if timer != nil && timer.Participant {
@@ -1376,6 +1402,34 @@ func (a *app) resumeRoomBreak(ctx context.Context, roomID, userID string) (*time
 	}
 	timer, err := a.activeTimer(ctx, roomID, userID)
 	return timer, true, err
+}
+
+// skipRoomBreak ends the current break early and advances to the next focus
+// session (same transition path as a natural break expiry). Available to any
+// room member, matching pause/resume.
+func (a *app) skipRoomBreak(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
+	timer, _, err := a.normalizeTimer(ctx, roomID, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	if timer == nil || timer.Phase != "break" {
+		return timer, false, nil
+	}
+	// Force the break window closed (including while paused) so normalizeTimer
+	// performs the shared break → focus / end transition.
+	if _, err = a.db.Exec(ctx, `
+		UPDATE timer_runs
+		SET paused_at = NULL,
+			paused_remaining_seconds = NULL,
+			phase_ends_at = now() - interval '1 second'
+		WHERE id = $1 AND ended_at IS NULL AND phase = 'break'`, timer.ID); err != nil {
+		return nil, false, err
+	}
+	timer, transitioned, err := a.normalizeTimer(ctx, roomID, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	return timer, transitioned, nil
 }
 
 func soloBreakMinutes(focusMinutes int) int {
