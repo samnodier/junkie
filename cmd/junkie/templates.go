@@ -242,15 +242,21 @@ const layoutTemplates = `
         const timer = box.closest('.circle-timer');
         const phase = timerPhase(box);
         const soloTimer = box.closest('.solo-timer');
+        // Count down against an absolute deadline instead of decrementing
+        // once per tick: background tabs get their intervals throttled or
+        // suspended, so lost ticks left the display behind real time until
+        // a manual refresh.
+        const deadline = Date.now() + left * 1000;
         let notified = false;
         const paint = () => {
+          if (!paused) left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
           const m = String(Math.floor(left / 60)).padStart(2, '0');
           const s = String(left % 60).padStart(2, '0');
           box.textContent = m + ':' + s;
           const live = box.closest('[aria-live]') || box.parentElement;
           if (live && left % 60 === 0) live.setAttribute('aria-label', m + ' minutes remaining');
           setRing(timer, left / total);
-          if (left <= 0 && !notified) {
+          if (left <= 0 && !notified && !paused) {
             notified = true;
             const deskView = box.closest('.desk-timer-view');
             if (!deskView || !deskView.hidden) {
@@ -266,10 +272,12 @@ const layoutTemplates = `
               }, 400);
             }
           }
-          if (left > 0 && !paused) left -= 1;
         };
         paint();
         setInterval(paint, 1000);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') paint();
+        });
       });
 
       document.querySelectorAll('form[action="/solo/start"], form[action$="/timer-start"]').forEach((form) => {
