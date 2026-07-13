@@ -1843,11 +1843,10 @@ const layoutTemplates = `
     <button type="button" class="menu-drawer-close" aria-label="Close">×</button>
   </div>
   <div class="drawer-identity drawer-identity-user">
-    <span class="drawer-avatar">{{if .User.HasAvatar}}<img class="avatar-img" src="/avatar/{{.User.ID}}?v={{.User.AvatarVersion}}" alt="">{{else}}{{initial .User.DisplayName}}{{end}}</span>
-    <div class="drawer-user-meta">
+    <a href="/profile" class="drawer-profile-row">
+      <span class="drawer-avatar">{{if .User.HasAvatar}}<img class="avatar-img" src="/avatar/{{.User.ID}}?v={{.User.AvatarVersion}}" alt="">{{else}}{{initial .User.DisplayName}}{{end}}</span>
       <span class="drawer-name">{{.User.DisplayName}}</span>
-      <a href="/profile" class="label drawer-profile-link">View profile</a>
-    </div>
+    </a>
   </div>
   <p class="label drawer-section-label">Your rooms</p>
   <div class="room-list">
@@ -3747,7 +3746,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   font-weight: 600;
 }
 .drawer-name { font-family: var(--font-serif); font-size: 1.125rem; font-weight: 600; }
-.drawer-profile-link { text-decoration: none; display: inline-block; margin-top: var(--sp-1); }
+.drawer-profile-row:hover .drawer-name { text-decoration: underline; }
 .drawer-guest-hint { font-size: var(--fs-label); }
 .drawer-section-label { margin: 0; }
 .drawer-signin { width: 100%; text-align: center; text-decoration: none; display: grid; place-items: center; }
