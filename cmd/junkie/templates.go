@@ -304,6 +304,43 @@ const layoutTemplates = `
 
       window.junkieCircleTimer = { CIRC, clampMinutes, setRing, wireIdleTimer };
 
+      // Keep the screen awake on mobile while a timer is visible or a focus
+      // session is active, so the countdown doesn't disappear behind the
+      // phone's lock screen mid-session. Scoped to sessions rather than the
+      // whole app to spare batteries on an idle dashboard. The browser
+      // releases the lock whenever the tab is hidden, so it must be
+      // re-acquired on return; the class observer covers guest mode, which
+      // toggles focus-active without a page load.
+      const wireWakeLock = () => {
+        if (!('wakeLock' in navigator)) return;
+        let lock = null;
+        let requesting = false;
+        const shouldHold = () =>
+          document.body.classList.contains('focus-active') ||
+          document.querySelector('.circle-timer.running, .circle-timer.break-running');
+        const sync = async () => {
+          const want = shouldHold() && document.visibilityState === 'visible';
+          if (want && !lock && !requesting) {
+            requesting = true;
+            try {
+              lock = await navigator.wakeLock.request('screen');
+              lock.addEventListener('release', () => { lock = null; });
+            } catch (_) {
+              lock = null;
+            }
+            requesting = false;
+          } else if (!want && lock) {
+            const held = lock;
+            lock = null;
+            try { await held.release(); } catch (_) {}
+          }
+        };
+        sync();
+        document.addEventListener('visibilitychange', sync);
+        new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      };
+      wireWakeLock();
+
       const todoFocusKey = 'junkie:todoFocus';
       if (sessionStorage.getItem(todoFocusKey)) {
         sessionStorage.removeItem(todoFocusKey);
