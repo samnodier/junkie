@@ -34,16 +34,29 @@ var discordCommands = []*discordgo.ApplicationCommand{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "register",
 				Description: "Register this server's junkie room, posting to this channel",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "code",
+						Description: "Code of an existing room to connect; omit to create a new room",
+						Required:    false,
+					},
+				},
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "deregister",
+				Description: "Disconnect this server from its junkie room",
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "config",
-				Description: "Set the timer: sessions/focus-minutes/break-minutes, e.g. 3/30/5",
+				Description: "Set the timer: focus-minutes/break-minutes/sessions, e.g. 30/5/3",
 				Options: []*discordgo.ApplicationCommandOption{
 					{
 						Type:        discordgo.ApplicationCommandOptionString,
 						Name:        "shorthand",
-						Description: "sessions/focus-minutes/break-minutes, e.g. 3/30/5",
+						Description: "focus-minutes/break-minutes/sessions, e.g. 30/5/3",
 						Required:    true,
 					},
 				},
@@ -135,7 +148,13 @@ func (b *discordBot) handleCommand(s *discordgo.Session, i *discordgo.Interactio
 	sub := data.Options[0]
 	switch sub.Name {
 	case "register":
-		b.handleRegister(s, i)
+		code := ""
+		if len(sub.Options) > 0 {
+			code, _ = sub.Options[0].Value.(string)
+		}
+		b.handleRegister(s, i, code)
+	case "deregister":
+		b.handleDeregister(s, i)
 	case "config":
 		shorthand := ""
 		if len(sub.Options) > 0 {
@@ -272,7 +291,12 @@ func (a *app) notifyDiscord(rm room, event string, timer *timerRun) {
 	}
 }
 
-func (b *discordBot) handleRegister(s *discordgo.Session, i *discordgo.InteractionCreate) {
+// handleRegister connects the guild to a room: an existing one when a room
+// code is given (the caller must be — or becomes — a member, same as the web
+// join-by-code flow), or a newly created one when the code is omitted. The
+// discord_guilds constraints keep both directions 1:1 — a second guild
+// linking the same room, or the same guild linking twice, fails cleanly.
+func (b *discordBot) handleRegister(s *discordgo.Session, i *discordgo.InteractionCreate, roomCode string) {
 	a := b.app
 	ctx := context.Background()
 	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
@@ -281,36 +305,79 @@ func (b *discordBot) handleRegister(s *discordgo.Session, i *discordgo.Interacti
 		return
 	}
 	if _, _, ok := a.discordRoom(ctx, i.GuildID); ok {
-		b.ephemeral(s, i, "This server already has a junkie room. Use `/junkie config` to change its timer settings.")
+		b.ephemeral(s, i, "This server already has a junkie room. `/junkie deregister` first to connect a different one.")
 		return
 	}
 
-	name := "Discord room"
-	if g, err := s.Guild(i.GuildID); err == nil && g.Name != "" {
-		name = g.Name + " focus room"
-	}
 	var roomID, code string
-	var err error
-	for range 5 {
-		code = randomCode()
-		err = a.db.QueryRow(ctx, `INSERT INTO rooms (code, name, creator_id) VALUES ($1, $2, $3) RETURNING id`, code, name, u.ID).Scan(&roomID)
-		if err == nil || !isUniqueViolation(err) {
-			break
+	if roomCode = normalizeRoomCode(roomCode); roomCode != "" {
+		rm, ok := a.findRoom(ctx, roomCode)
+		if !ok {
+			b.ephemeral(s, i, "No room found with that code.")
+			return
 		}
-	}
-	if err != nil {
-		log.Printf("discord: register room: %v", err)
-		b.ephemeral(s, i, "Couldn't create a room for this server — try again.")
-		return
+		roomID, code = rm.ID, rm.Code
+	} else {
+		name := "Discord room"
+		if g, err := s.Guild(i.GuildID); err == nil && g.Name != "" {
+			name = g.Name + " focus room"
+		}
+		var err error
+		for range 5 {
+			code = randomCode()
+			err = a.db.QueryRow(ctx, `INSERT INTO rooms (code, name, creator_id) VALUES ($1, $2, $3) RETURNING id`, code, name, u.ID).Scan(&roomID)
+			if err == nil || !isUniqueViolation(err) {
+				break
+			}
+		}
+		if err != nil {
+			log.Printf("discord: register room: %v", err)
+			b.ephemeral(s, i, "Couldn't create a room for this server — try again.")
+			return
+		}
 	}
 	a.addRoomMember(ctx, roomID, u.ID)
 	if _, err := a.db.Exec(ctx, `INSERT INTO discord_guilds (guild_id, room_id, channel_id, linked_by) VALUES ($1, $2, $3, $4)`,
 		i.GuildID, roomID, i.ChannelID, u.ID); err != nil {
+		if isUniqueViolation(err) {
+			b.ephemeral(s, i, "That room is already connected to another Discord server.")
+			return
+		}
 		log.Printf("discord: register guild: %v", err)
-		b.ephemeral(s, i, "Room created but couldn't link this channel — try again.")
+		b.ephemeral(s, i, "Couldn't link this channel — try again.")
 		return
 	}
-	b.reply(s, i, fmt.Sprintf("Registered! This channel now runs room `%s`. Configure it with `/junkie config sessions/focus/break`, e.g. `/junkie config 3/30/5`.", code), nil)
+	b.reply(s, i, fmt.Sprintf("Registered! This channel now runs room `%s`. Configure it with `/junkie config focus/break/sessions`, e.g. `/junkie config 30/5/3`.", code), nil)
+}
+
+// handleDeregister disconnects the guild from its room. The room itself and
+// its todos/history survive on the web — only the Discord linkage row goes,
+// so registering again later starts a fresh room. Allowed for the member who
+// registered it or anyone with Manage Server permission.
+func (b *discordBot) handleDeregister(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	a := b.app
+	ctx := context.Background()
+	rm, _, ok := a.discordRoom(ctx, i.GuildID)
+	if !ok {
+		b.replyNotRegistered(s, i)
+		return
+	}
+	canManage := i.Member != nil && i.Member.Permissions&discordgo.PermissionManageGuild != 0
+	if !canManage {
+		var registeredBy string
+		_ = a.db.QueryRow(ctx, `SELECT COALESCE(linked_by::text, '') FROM discord_guilds WHERE guild_id = $1`, i.GuildID).Scan(&registeredBy)
+		u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+		if !linked || u.ID != registeredBy {
+			b.ephemeral(s, i, "Only the member who registered this room or someone with Manage Server permission can deregister it.")
+			return
+		}
+	}
+	if _, err := a.db.Exec(ctx, `DELETE FROM discord_guilds WHERE guild_id = $1`, i.GuildID); err != nil {
+		log.Printf("discord: deregister guild: %v", err)
+		b.ephemeral(s, i, "Couldn't deregister — try again.")
+		return
+	}
+	b.reply(s, i, fmt.Sprintf("Deregistered. Room `%s` still exists on the web, but this server is no longer connected to it. Run `/junkie register` to connect a new room.", rm.Code), nil)
 }
 
 func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.InteractionCreate, shorthand string) {
@@ -323,18 +390,18 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 	}
 	parts := strings.Split(strings.TrimSpace(shorthand), "/")
 	if len(parts) != 3 {
-		b.ephemeral(s, i, "Use the form `sessions/focus-minutes/break-minutes`, e.g. `3/30/5`.")
+		b.ephemeral(s, i, "Use the form `focus-minutes/break-minutes/sessions`, e.g. `30/5/3`.")
 		return
 	}
-	sessions := clampInt(parts[0], 1, 12, rm.AutoSessions)
-	focus := clampInt(parts[1], 5, 180, rm.FocusMinutes)
-	breaks := clampInt(parts[2], 1, 60, rm.BreakMinutes)
+	focus := clampInt(parts[0], 5, 180, rm.FocusMinutes)
+	breaks := clampInt(parts[1], 1, 60, rm.BreakMinutes)
+	sessions := clampInt(parts[2], 1, 12, rm.AutoSessions)
 	if err := a.applyRoomSettings(ctx, rm.ID, focus, breaks, sessions, rm.AutoRoll); err != nil {
 		log.Printf("discord: config room %s: %v", rm.Code, err)
 		b.ephemeral(s, i, "Couldn't save that configuration — try again.")
 		return
 	}
-	b.reply(s, i, fmt.Sprintf("Configured `%s`: %d session(s), %d min focus, %d min break.", rm.Code, sessions, focus, breaks), nil)
+	b.reply(s, i, fmt.Sprintf("Configured `%s`: %d min focus, %d min break, %d session(s).", rm.Code, focus, breaks, sessions), nil)
 }
 
 func (b *discordBot) handleStart(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -486,8 +553,9 @@ func (a *app) discordLinkConfirm(w http.ResponseWriter, r *http.Request) {
 func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	b.ephemeral(s, i, "**junkie commands**\n"+
 		"`/junkie link` — connect your Discord account to your junkie account\n"+
-		"`/junkie register` — register this server's junkie room (posts to this channel)\n"+
-		"`/junkie config sessions/focus/break` — set the timer, e.g. `3/30/5`\n"+
+		"`/junkie register [code]` — connect an existing room by code, or create a new one (posts to this channel)\n"+
+		"`/junkie deregister` — disconnect this server from its room\n"+
+		"`/junkie config focus/break/sessions` — set the timer, e.g. `30/5/3`\n"+
 		"`/junkie start` — start a focus run\n"+
 		"`/junkie join` — join the active run\n"+
 		"`/junkie leave` — leave the active run")
