@@ -439,6 +439,13 @@ const layoutTemplates = `
         sync();
         document.addEventListener('visibilitychange', sync);
         new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        // Safari only grants the lock inside a user gesture, unlike Chrome
+        // which allows the page-load request above -- so retry on the next
+        // tap/click too. iOS Safari has also been known to drop an active
+        // lock silently after a few minutes; the interval catches that.
+        document.addEventListener('click', sync);
+        document.addEventListener('touchstart', sync, { passive: true });
+        setInterval(sync, 20000);
       };
       wireWakeLock();
 
