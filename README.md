@@ -96,6 +96,18 @@ Sign in on each device with the same account.
 
 On supported mobile browsers, junkie requests a **screen wake lock** while a timer is visible or a focus session is active so the phone is less likely to lock mid-session.
 
+## Discord bot
+
+junkie has a Discord bot that runs a server's focus room from chat: live countdown messages, break notifications, join buttons, stats, and a heatmap picture — no browser needed once you're set up.
+
+**Add it to a server** (needs Manage Server permission there):
+
+> https://discord.com/oauth2/authorize?client_id=1526585859044933684&scope=bot+applications.commands&permissions=2048
+
+The bot only asks for Send Messages. Once added: each participant runs `/junkie link` once to connect their junkie account, then an admin runs `/junkie register` in the channel the timer should post to (pass an existing room code to connect it, or omit to create a fresh room). `/junkie help` lists all commands.
+
+Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, and `PUBLIC_BASE_URL` are set (see `.env.example`), and you'd mint your own invite link with your application's client id.
+
 ## Where your data lives
 
 junkie splits storage by whether you have an account.
@@ -227,4 +239,4 @@ junkie marks session cookies `Secure` when the request arrived over TLS or with 
 ## Later
 
 - Terminal client using the same account and room API.
-- Discord sign-in and a small bot for notifications/link sharing.
+- Discord sign-in (the bot exists — see the Discord bot section above; OAuth sign-in does not yet).
