@@ -206,6 +206,12 @@ type pageData struct {
 	// ("" when unlinked); shown on the profile page.
 	DiscordUsername string
 	DiscordLinked   bool
+	// ConnectUser and ConnectToken drive the connect / Discord-link confirm
+	// pages: linking is a state change, so the GET only shows what the token
+	// would do and a same-origin POST performs it — a bare link (or a
+	// drive-by <img> fetch) can never bind accounts on its own.
+	ConnectUser  user
+	ConnectToken string
 }
 
 type activityDay struct {
@@ -304,8 +310,10 @@ func main() {
 		u, _ := a.currentUser(r)
 		a.render(w, "terms", pageData{Title: "Terms of Service", User: u})
 	})
-	mux.HandleFunc("GET /discord/link/{token}", a.requireAuth(a.discordLinkConfirm))
+	mux.HandleFunc("GET /discord/link/{token}", a.requireAuth(a.discordLinkPage))
+	mux.HandleFunc("POST /discord/link/{token}", a.requireAuth(a.discordLinkConfirm))
 	mux.HandleFunc("POST /profile/discord/unlink", a.requireAuth(a.discordUnlink))
+	mux.HandleFunc("POST /connect/{username}", a.requireAuth(a.connectConfirmPost))
 	// Exact routes above win over this single-segment pattern; usernames
 	// that would collide with them are reserved at signup.
 	mux.HandleFunc("GET /{username}", a.publicProfilePage)
@@ -751,6 +759,18 @@ func (a *app) areConnected(ctx context.Context, userA, userB string) bool {
 	return err == nil && exists
 }
 
+// peekConnectToken reports whether a connect invite belonging to ownerID is
+// currently redeemable, without consuming it — the GET side of the confirm
+// step, so rendering the page never spends the token.
+func (a *app) peekConnectToken(ctx context.Context, ownerID, token string) bool {
+	if token == "" {
+		return false
+	}
+	var ok bool
+	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM connect_tokens WHERE user_id = $1 AND token_hash = $2 AND expires_at > now())`, ownerID, hashToken(token)).Scan(&ok)
+	return err == nil && ok
+}
+
 // consumeConnectToken redeems a single-use connect invite belonging to
 // ownerID: the token row is deleted and the pair becomes connected. Returns
 // false for unknown, expired, or self-redeemed tokens.
@@ -792,6 +812,24 @@ func (a *app) createConnectLink(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s://%s/%s?connect=%s", scheme, r.Host, u.Username, token)
 }
 
+// connectConfirmPost completes a connect invite the viewer accepted on the
+// confirm page; the token is only consumed here, never on a GET.
+func (a *app) connectConfirmPost(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	username := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
+	var target user
+	err := a.db.QueryRow(r.Context(), `SELECT id, username, display_name FROM users WHERE username = $1`, username).Scan(&target.ID, &target.Username, &target.DisplayName)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if a.consumeConnectToken(r.Context(), target.ID, r.FormValue("token"), u.ID) {
+		http.Redirect(w, r, "/"+target.Username+"?notice="+url.QueryEscape("You are now connected with "+target.DisplayName+"."), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/?error="+url.QueryEscape("That connect link is invalid or has expired — ask for a fresh one."), http.StatusSeeOther)
+}
+
 // publicProfilePage serves /<username>. Privacy rule: unless the viewer is
 // connected to (or is) that user, the response is indistinguishable from a
 // username that does not exist.
@@ -828,9 +866,12 @@ func (a *app) publicProfilePage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/profile", http.StatusSeeOther)
 		return
 	}
-	if token != "" {
-		if a.consumeConnectToken(r.Context(), target.ID, token, u.ID) {
-			http.Redirect(w, r, "/"+target.Username+"?notice="+url.QueryEscape("You are now connected with "+target.DisplayName+"."), http.StatusSeeOther)
+	if token != "" && !a.areConnected(r.Context(), u.ID, target.ID) {
+		if a.peekConnectToken(r.Context(), target.ID, token) {
+			// Confirm step: connecting is a state change, so the GET only
+			// offers it and the POST below (connectConfirmPost) performs it.
+			// A drive-by fetch of this URL can no longer force a connection.
+			a.render(w, "connect-confirm", pageData{Title: "Connect request", User: u, ConnectUser: target, ConnectToken: token})
 			return
 		}
 		// A dead token still lands connected visitors on the profile; for
@@ -1190,10 +1231,29 @@ func (a *app) todoActionDenied(w http.ResponseWriter, r *http.Request, roomCode,
 	http.Redirect(w, r, "/dashboard?todos=private&error="+errMsg, http.StatusSeeOther)
 }
 
+// maxRoomsPerUser caps how many rooms one account can have created at a
+// time. Deleting a room frees its slot; the cap exists so a single account
+// can't flood the instance with rooms.
+const maxRoomsPerUser = 5
+
+// userAtRoomCap reports whether userID currently owns the maximum number of
+// rooms. Checked on both creation surfaces (web form and /junkie register).
+func (a *app) userAtRoomCap(ctx context.Context, userID string) bool {
+	var count int
+	if err := a.db.QueryRow(ctx, `SELECT COUNT(*) FROM rooms WHERE creator_id = $1`, userID).Scan(&count); err != nil {
+		return false
+	}
+	return count >= maxRoomsPerUser
+}
+
 func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	if !a.limiter.allow("createroom:"+u.ID, 20, time.Hour) {
 		http.Redirect(w, r, "/?error="+url.QueryEscape("Too many rooms created; try again later."), http.StatusSeeOther)
+		return
+	}
+	if a.userAtRoomCap(r.Context(), u.ID) {
+		http.Redirect(w, r, "/?error="+url.QueryEscape(fmt.Sprintf("You can have up to %d rooms — delete one you no longer need first.", maxRoomsPerUser)), http.StatusSeeOther)
 		return
 	}
 	name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)

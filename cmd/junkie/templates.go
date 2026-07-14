@@ -1890,6 +1890,8 @@ const layoutTemplates = `
 {{define "room-members"}}{{template "shell" .}}{{end}}
 {{define "privacy"}}{{template "shell" .}}{{end}}
 {{define "terms"}}{{template "shell" .}}{{end}}
+{{define "connect-confirm"}}{{template "shell" .}}{{end}}
+{{define "discord-link"}}{{template "shell" .}}{{end}}
 
 {{define "menu-drawer-guest"}}
 <div class="menu-drawer-backdrop" hidden></div>
@@ -2402,6 +2404,35 @@ const layoutTemplates = `
         <input type="hidden" name="code" value="{{.Room.Code}}">
         <button type="submit" name="action" value="join">Join room</button>
         <button type="submit" name="action" value="cancel" class="ghost">Cancel</button>
+      </form>
+    </section>
+  {{else if eq .Title "Connect request"}}
+    <section class="auth-card room-invite-card">
+      <div class="auth-card-top">
+        {{template "auth-back" .}}
+        {{template "auth-brand" .}}
+      </div>
+      <p class="eyebrow">Connect request</p>
+      <h1>Connect with {{.ConnectUser.DisplayName}}?</h1>
+      <p class="muted">Connections see each other's focus heatmaps — nothing else. <span class="mono">@{{.ConnectUser.Username}}</span> shared this link with you.</p>
+      <form class="stack room-invite-actions" method="post" action="/connect/{{.ConnectUser.Username}}">
+        <input type="hidden" name="token" value="{{.ConnectToken}}">
+        <button type="submit">Connect</button>
+        <a href="/" class="ghost btn">Not now</a>
+      </form>
+    </section>
+  {{else if eq .Title "Link Discord"}}
+    <section class="auth-card room-invite-card">
+      <div class="auth-card-top">
+        {{template "auth-back" .}}
+        {{template "auth-brand" .}}
+      </div>
+      <p class="eyebrow">Discord link</p>
+      <h1>Link <span class="mono">@{{.DiscordUsername}}</span> to your account?</h1>
+      <p class="muted">The junkie bot's commands run by this Discord account will act as you: joining runs, adding todos, showing your stats. Only continue if this is your Discord account.</p>
+      <form class="stack room-invite-actions" method="post" action="/discord/link/{{.ConnectToken}}">
+        <button type="submit">Link Discord account</button>
+        <a href="/profile" class="ghost btn">Not now</a>
       </form>
     </section>
   {{else if eq .Title "Privacy"}}

@@ -465,6 +465,10 @@ func (b *discordBot) handleRegister(s *discordgo.Session, i *discordgo.Interacti
 			b.ephemeral(s, i, "Too many rooms created; try again later.")
 			return
 		}
+		if a.userAtRoomCap(ctx, u.ID) {
+			b.ephemeral(s, i, fmt.Sprintf("You can have up to %d rooms — delete one on the web first, or register an existing room by code.", maxRoomsPerUser))
+			return
+		}
 		name := "Discord room"
 		if g, err := s.Guild(i.GuildID); err == nil && g.Name != "" {
 			name = g.Name + " focus room"
@@ -897,7 +901,25 @@ func (b *discordBot) handleLink(s *discordgo.Session, i *discordgo.InteractionCr
 	b.ephemeral(s, i, "Open this link (valid 24h) signed in to your junkie account to connect it: "+linkURL)
 }
 
-// discordLinkConfirm serves GET /discord/link/{token}: the signed-in visitor
+// discordLinkPage serves GET /discord/link/{token}: it only *shows* what the
+// token would do (peek, never consume), so a bare link — or a drive-by
+// <img> fetch planted by whoever minted the token — can't bind the visitor's
+// junkie account to someone else's Discord. The POST below performs it.
+func (a *app) discordLinkPage(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	token := r.PathValue("token")
+	var discordUsername string
+	err := a.db.QueryRow(r.Context(), `
+		SELECT discord_username FROM discord_link_tokens
+		WHERE token_hash = $1 AND expires_at > now()`, hashToken(token)).Scan(&discordUsername)
+	if err != nil {
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape("That Discord link is invalid or has expired — run /junkie link again."), http.StatusSeeOther)
+		return
+	}
+	a.render(w, "discord-link", pageData{Title: "Link Discord", User: u, DiscordUsername: discordUsername, ConnectToken: token})
+}
+
+// discordLinkConfirm serves POST /discord/link/{token}: the signed-in visitor
 // redeems the single-use token minted by /junkie link, tying their junkie
 // account to the Discord user the token was issued for. Mirrors
 // consumeConnectToken's delete-first redemption so a token can't be replayed.
