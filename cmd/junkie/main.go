@@ -1454,40 +1454,41 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		timer, created, err := a.startRoomTimerAndSchedule(r.Context(), rm, u.ID, focusMinutes, u.DisplayName)
-		if err != nil {
+		if _, _, err := a.startRoomTimerAndSchedule(r.Context(), rm, u.ID, focusMinutes, u.DisplayName); err != nil {
 			log.Printf("start room timer %s: %v", rm.Code, err)
 			http.Error(w, "could not start timer", http.StatusInternalServerError)
 			return
-		}
-		if created {
-			a.notifyDiscord(rm, "lobby", timer)
 		}
 		action = ""
 	case "timer-join":
 		_, _, _ = a.joinTimer(r.Context(), rm, u.ID)
 	case "timer-pause":
-		if _, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
+		if timer, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not pause break", http.StatusInternalServerError)
 			return
 		} else if !changed {
 			action = ""
+		} else {
+			a.notifyDiscord(rm, timer)
 		}
 	case "timer-resume":
-		if _, changed, err := a.resumeRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
+		if timer, changed, err := a.resumeRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not resume break", http.StatusInternalServerError)
 			return
 		} else if !changed {
 			action = ""
+		} else {
+			a.notifyDiscord(rm, timer)
 		}
 	case "timer-skip-break":
-		if _, changed, err := a.skipRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
+		if timer, changed, err := a.skipRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not skip break", http.StatusInternalServerError)
 			return
 		} else if !changed {
 			action = ""
 		} else {
 			action = "timer-phase"
+			a.notifyDiscord(rm, timer)
 		}
 	case "timer-break-length":
 		minutes := clampInt(r.FormValue("minutes"), 1, 60, rm.BreakMinutes)
@@ -1509,10 +1510,14 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			return
 		} else {
 			action = "timer-phase"
+			if timer, err := a.activeTimer(r.Context(), rm.ID, u.ID); err == nil {
+				a.notifyDiscord(rm, timer)
+			}
 		}
 	case "timer-leave":
 		if ended, _ := a.leaveTimer(r.Context(), rm, u.ID); ended {
 			action = "timer-end"
+			a.notifyDiscord(rm, nil)
 		}
 	default:
 		http.NotFound(w, r)
@@ -1589,8 +1594,8 @@ func (a *app) broadcastTimerPhase(rm room, timer *timerRun) {
 			"type": "timer-break-invite", "roomCode": rm.Code, "roomName": rm.Name,
 			"breakDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
 		})
-		a.notifyDiscord(rm, "break", timer)
 	}
+	a.notifyDiscord(rm, timer)
 }
 
 func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
@@ -1899,6 +1904,7 @@ func (a *app) startRoomTimerAndSchedule(ctx context.Context, rm room, userID str
 		"runId": timer.ID, "lobbyDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
 		"starterName": starterName, "starterUserId": userID,
 	})
+	a.notifyDiscord(rm, timer)
 	a.scheduleLobbyDeadline(rm, userID, timer.PhaseEndsAt)
 	return timer, created, nil
 }

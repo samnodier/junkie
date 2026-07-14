@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -21,6 +22,11 @@ type discordBot struct {
 	app     *app
 	session *discordgo.Session
 	appID   string
+
+	// scheduled dedupes the phase-end wakeups (scheduleNext) so overlapping
+	// notify calls don't stack timers for the same room+phase.
+	mu        sync.Mutex
+	scheduled map[string]string
 }
 
 const discordJoinButtonID = "junkie:join"
@@ -107,7 +113,7 @@ func newDiscordBot(a *app) (*discordBot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create discord session: %w", err)
 	}
-	bot := &discordBot{app: a, session: session, appID: appID}
+	bot := &discordBot{app: a, session: session, appID: appID, scheduled: map[string]string{}}
 	session.AddHandler(bot.onInteraction)
 
 	if err := session.Open(); err != nil {
@@ -271,40 +277,102 @@ func (a *app) discordRoom(ctx context.Context, guildID string) (room, string, bo
 	return rm, channelID, err == nil
 }
 
-// discordChannelForRoom is the reverse lookup used by notifyDiscord, which
-// only has the web-side room, not the guild id.
-func (a *app) discordChannelForRoom(ctx context.Context, roomID string) (string, bool) {
-	var channelID string
-	err := a.db.QueryRow(ctx, `SELECT channel_id FROM discord_guilds WHERE room_id = $1`, roomID).Scan(&channelID)
-	return channelID, err == nil
+// discordStatusContent renders the one live status message for a room's
+// current timer state. Discord's <t:...:R> timestamps tick down client-side,
+// so the message only needs an edit per phase change, not per second.
+func discordStatusContent(rm room, timer *timerRun) string {
+	switch {
+	case timer == nil:
+		return fmt.Sprintf("**%s** — run complete. Nice work! `/junkie start` when you're ready for another.", rm.Name)
+	case timer.Phase == "lobby":
+		return fmt.Sprintf("**%s** — focus run starting %s. Tap Join to be in from the first session!", rm.Name, discordTimestamp(timer.PhaseEndsAt))
+	case timer.Phase == "focus":
+		return fmt.Sprintf("**%s** — focus · session %d of %d. Break %s. Tap Join to hop in at the break.", rm.Name, timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt))
+	case timer.BreakPending():
+		return fmt.Sprintf("**%s** — break ready, waiting for someone to start it. Tap Join to be in the next session.", rm.Name)
+	case timer.PausedAt != nil:
+		return fmt.Sprintf("**%s** — break paused. Tap Join to be in the next session.", rm.Name)
+	default:
+		return fmt.Sprintf("**%s** — break · focus resumes %s. Tap Join to be in the next session!", rm.Name, discordTimestamp(timer.PhaseEndsAt))
+	}
 }
 
-// notifyDiscord posts a Join-able announcement to a room's linked Discord
-// channel when its lobby countdown or break starts from the *web* side. It's
-// a no-op when the bot isn't running or the room has no linked guild.
-// Discord-triggered starts skip this and reply directly instead (see
-// handleStart), so a single start doesn't double-post.
-func (a *app) notifyDiscord(rm room, event string, timer *timerRun) {
-	if a.discord == nil || timer == nil {
+// notifyDiscord keeps the room's live status message in the linked channel
+// current: a lobby posts a fresh message (one per run), every later phase
+// change edits it in place, and timer == nil marks the run complete. It also
+// arms the phase-end wakeup so Discord-only rooms advance without a web
+// viewer polling. No-op when the bot isn't running or the room isn't linked.
+func (a *app) notifyDiscord(rm room, timer *timerRun) {
+	if a.discord == nil {
 		return
 	}
-	channelID, ok := a.discordChannelForRoom(context.Background(), rm.ID)
-	if !ok {
+	ctx := context.Background()
+	var channelID, messageID string
+	if err := a.db.QueryRow(ctx, `SELECT channel_id, live_message_id FROM discord_guilds WHERE room_id = $1`, rm.ID).Scan(&channelID, &messageID); err != nil {
 		return
 	}
-	var content string
-	switch event {
-	case "lobby":
-		content = fmt.Sprintf("Focus run starting %s in **%s** — tap Join before it begins!", discordTimestamp(timer.PhaseEndsAt), rm.Name)
-	case "break":
-		content = fmt.Sprintf("Break started in **%s** — back to focus %s. Tap Join if you weren't in the last block.", rm.Name, discordTimestamp(timer.PhaseEndsAt))
-	default:
-		return
+	content := discordStatusContent(rm, timer)
+	components := joinComponents()
+	if timer == nil {
+		components = nil
 	}
-	_, err := a.discord.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: content, Components: joinComponents()})
+	fresh := timer != nil && timer.Phase == "lobby"
+	if !fresh && messageID != "" {
+		edit := &discordgo.MessageEdit{Channel: channelID, ID: messageID, Content: &content, Components: &components}
+		if _, err := a.discord.session.ChannelMessageEditComplex(edit); err == nil {
+			a.discord.scheduleNext(rm, timer)
+			return
+		}
+		// The tracked message was deleted or is unreachable; fall through and
+		// post a replacement.
+	}
+	msg, err := a.discord.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: content, Components: components})
 	if err != nil {
 		log.Printf("discord: notify %s: %v", rm.Code, err)
+		return
 	}
+	_, _ = a.db.Exec(ctx, `UPDATE discord_guilds SET live_message_id = $1 WHERE room_id = $2`, msg.ID, rm.ID)
+	a.discord.scheduleNext(rm, timer)
+}
+
+// scheduleNext arms a wakeup just past the timer's phase end that advances
+// the state machine and re-notifies, so a room whose members are all on
+// Discord still transitions on time. normalizeTimer stays the single source
+// of truth; this only pokes it. Deduped per room+run+phase so overlapping
+// notify calls (web viewers polling plus this chain) don't stack timers.
+func (b *discordBot) scheduleNext(rm room, timer *timerRun) {
+	if timer == nil || timer.PausedAt != nil {
+		return
+	}
+	key := timer.ID + ":" + timer.Phase + ":" + timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano)
+	b.mu.Lock()
+	if b.scheduled[rm.ID] == key {
+		b.mu.Unlock()
+		return
+	}
+	b.scheduled[rm.ID] = key
+	b.mu.Unlock()
+	delay := max(time.Until(timer.PhaseEndsAt), 0) + time.Second
+	time.AfterFunc(delay, func() {
+		b.mu.Lock()
+		delete(b.scheduled, rm.ID)
+		b.mu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// The user id only shapes the Participant flag, which nothing in the
+		// broadcast path reads; the creator is a stable stand-in.
+		next, transitioned, err := b.app.normalizeTimer(ctx, rm.ID, rm.CreatorID)
+		if err != nil {
+			log.Printf("discord: phase wakeup %s: %v", rm.Code, err)
+			return
+		}
+		if transitioned {
+			b.app.broadcastTimerPhase(rm, next)
+		} else if next != nil {
+			// Deadline moved (pause, break-length change) — track the new one.
+			b.app.notifyDiscord(rm, next)
+		}
+	})
 }
 
 // handleRegister connects the guild to a room: an existing one when a room
@@ -436,7 +504,7 @@ func (b *discordBot) handleStart(s *discordgo.Session, i *discordgo.InteractionC
 	if !a.isRoomMember(ctx, rm.ID, u.ID) {
 		a.addRoomMember(ctx, rm.ID, u.ID)
 	}
-	timer, created, err := a.startRoomTimerAndSchedule(ctx, rm, u.ID, rm.FocusMinutes, u.DisplayName)
+	_, created, err := a.startRoomTimerAndSchedule(ctx, rm, u.ID, rm.FocusMinutes, u.DisplayName)
 	if err != nil {
 		log.Printf("discord: start timer %s: %v", rm.Code, err)
 		b.ephemeral(s, i, "Couldn't start the timer — try again.")
@@ -446,12 +514,9 @@ func (b *discordBot) handleStart(s *discordgo.Session, i *discordgo.InteractionC
 		b.ephemeral(s, i, "A run is already active in this room.")
 		return
 	}
-	if timer == nil {
-		b.ephemeral(s, i, "Started, but couldn't confirm the lobby countdown.")
-		return
-	}
-	b.reply(s, i, fmt.Sprintf("%s started a focus run in **%s** — starting %s. Tap Join before it begins!",
-		u.DisplayName, rm.Name, discordTimestamp(timer.PhaseEndsAt)), joinComponents())
+	// The shared start path posts the live countdown message to the channel;
+	// this reply just closes the interaction for the starter.
+	b.ephemeral(s, i, "Run started — countdown posted below. You're in.")
 }
 
 func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -510,6 +575,7 @@ func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	if ended {
 		a.hub.broadcast(rm.Code, "timer-end")
+		a.notifyDiscord(rm, nil)
 	} else {
 		a.hub.broadcast(rm.Code, "timer-leave")
 	}
