@@ -91,6 +91,21 @@ var discordCommands = []*discordgo.ApplicationCommand{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "stats",
 				Description: "Your focus stats: today, this week, total, and streak",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "period",
+						Description: "Which window to show (default: full summary)",
+						Required:    false,
+						Choices: []*discordgo.ApplicationCommandOptionChoice{
+							{Name: "day", Value: "day"},
+							{Name: "week", Value: "week"},
+							{Name: "month", Value: "month"},
+							{Name: "year", Value: "year"},
+							{Name: "all time", Value: "all"},
+						},
+					},
+				},
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -186,7 +201,11 @@ func (b *discordBot) handleCommand(s *discordgo.Session, i *discordgo.Interactio
 	case "status":
 		b.handleStatus(s, i)
 	case "stats":
-		b.handleStats(s, i)
+		period := ""
+		if len(sub.Options) > 0 {
+			period, _ = sub.Options[0].Value.(string)
+		}
+		b.handleStats(s, i, period)
 	case "link":
 		b.handleLink(s, i)
 	case "help":
@@ -643,10 +662,17 @@ func formatFocusMinutes(minutes int) string {
 	return fmt.Sprintf("%dh %dm", minutes/60, minutes%60)
 }
 
-// handleStats replies (privately) with the caller's focus numbers from the
-// same activity table the web profile reads: today, the trailing 7 days, the
-// all-time total, the current daily streak, and rooms joined.
-func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionCreate) {
+// statsWindowDays maps a stats period choice to its trailing-day window;
+// 0 means the single current day, -1 means no cutoff (all time).
+var statsWindowDays = map[string]int{"day": 0, "week": 7, "month": 30, "year": 365, "all": -1}
+
+var statsWindowLabels = map[string]string{"day": "today", "week": "last 7 days", "month": "last 30 days", "year": "last 365 days", "all": "all time"}
+
+// handleStats posts the caller's focus numbers to the channel, from the same
+// activity table the web profile reads. Without a period it's the full
+// summary — today, trailing 7 days, all time, current daily streak, rooms
+// joined; with one it's that window's total and active-day count.
+func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionCreate, period string) {
 	a := b.app
 	ctx := context.Background()
 	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
@@ -654,6 +680,28 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 		b.replyLinkRequired(s, i)
 		return
 	}
+
+	if days, ok := statsWindowDays[period]; ok {
+		cutoff := `activity_date > CURRENT_DATE - $2::int`
+		args := []any{u.ID, days}
+		switch days {
+		case 0:
+			cutoff, args = `activity_date = CURRENT_DATE`, []any{u.ID}
+		case -1:
+			cutoff, args = `TRUE`, []any{u.ID}
+		}
+		var minutes, activeDays int
+		_ = a.db.QueryRow(ctx, `
+			SELECT COALESCE(SUM(focus_minutes), 0), COUNT(*) FILTER (WHERE focus_minutes > 0)
+			FROM activity WHERE user_id = $1 AND `+cutoff, args...).Scan(&minutes, &activeDays)
+		reply := fmt.Sprintf("**%s** — %s: %s focused", u.DisplayName, statsWindowLabels[period], formatFocusMinutes(minutes))
+		if period != "day" && activeDays > 0 {
+			reply += fmt.Sprintf(" across %d day(s)", activeDays)
+		}
+		b.reply(s, i, reply, nil)
+		return
+	}
+
 	var today, week, total, activeDays int
 	_ = a.db.QueryRow(ctx, `
 		SELECT
@@ -698,7 +746,7 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 		reply += fmt.Sprintf("\nStreak: %d day(s)", streak)
 	}
 	reply += fmt.Sprintf("\nRooms joined: %d", rooms)
-	b.ephemeral(s, i, reply)
+	b.reply(s, i, reply, nil)
 }
 
 // handleLink mints a single-use link token (mirroring createConnectLink,
@@ -772,5 +820,5 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie join` — join now, or be queued in for the next break/run\n"+
 		"`/junkie leave` — leave the run (or cancel a queued join)\n"+
 		"`/junkie status` — where the timer is right now\n"+
-		"`/junkie stats` — your focus stats")
+		"`/junkie stats [day|week|month|year|all time]` — your focus stats")
 }
