@@ -322,11 +322,11 @@ func discordStatusContent(rm room, timer *timerRun) string {
 	case timer.Phase == "focus":
 		return fmt.Sprintf("**%s** — focus · session %d of %d. Break %s. Tap Join to hop in at the break.", rm.Name, timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt))
 	case timer.BreakPending():
-		return fmt.Sprintf("**%s** — break ready, waiting for someone to start it. Tap Join to be in the next session.", rm.Name)
+		return fmt.Sprintf("**%s** — session %d of %d done! Break's ready, waiting for someone to start it. Tap Join to be in the next session.", rm.Name, timer.CurrentSession, timer.TotalSessions)
 	case timer.PausedAt != nil:
 		return fmt.Sprintf("**%s** — break paused. Tap Join to be in the next session.", rm.Name)
 	default:
-		return fmt.Sprintf("**%s** — break · focus resumes %s. Tap Join to be in the next session!", rm.Name, discordTimestamp(timer.PhaseEndsAt))
+		return fmt.Sprintf("**%s** — session %d of %d done! Break · focus resumes %s. Tap Join to be in the next session!", rm.Name, timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt))
 	}
 }
 
@@ -349,8 +349,14 @@ func (a *app) notifyDiscord(rm room, timer *timerRun) {
 	if timer == nil {
 		components = nil
 	}
-	fresh := timer != nil && timer.Phase == "lobby"
-	if !fresh && messageID != "" {
+	// Post a fresh message at the moments people want to be told about — a
+	// new run's lobby, a finished focus block (the joinable break window),
+	// and run completion — because Discord only marks *new* messages unread;
+	// silent in-place edits cover everything else (break->focus,
+	// pause/resume). Transitioned distinguishes a real focus->break flip
+	// from a pause tweak that merely re-renders the break.
+	repost := timer == nil || timer.Phase == "lobby" || (timer.Phase == "break" && timer.Transitioned)
+	if !repost && messageID != "" {
 		edit := &discordgo.MessageEdit{Channel: channelID, ID: messageID, Content: &content, Components: &components}
 		if _, err := a.discord.session.ChannelMessageEditComplex(edit); err == nil {
 			a.discord.scheduleNext(rm, timer)
@@ -363,6 +369,12 @@ func (a *app) notifyDiscord(rm room, timer *timerRun) {
 	if err != nil {
 		log.Printf("discord: notify %s: %v", rm.Code, err)
 		return
+	}
+	// Superseded in-run messages get cleaned up so the channel holds one
+	// live message per run; a new lobby keeps the previous run's completion
+	// message as its record.
+	if repost && messageID != "" && (timer == nil || timer.Phase != "lobby") {
+		_ = a.discord.session.ChannelMessageDelete(channelID, messageID)
 	}
 	_, _ = a.db.Exec(ctx, `UPDATE discord_guilds SET live_message_id = $1 WHERE room_id = $2`, msg.ID, rm.ID)
 	a.discord.scheduleNext(rm, timer)
