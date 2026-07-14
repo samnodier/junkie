@@ -162,6 +162,15 @@ type publicProfileView struct {
 	ActivityTotalMinutes int
 }
 
+// roomMemberView pairs a room member with whether the viewer may open their
+// public profile: only for themselves or an existing connection, matching
+// the privacy rule in publicProfilePage.
+type roomMemberView struct {
+	Member    user
+	Self      bool
+	Connected bool
+}
+
 type pageData struct {
 	Title                string
 	User                 user
@@ -186,6 +195,7 @@ type pageData struct {
 	AuthSignup           bool
 	AuthBanner           string
 	MemberCount          int
+	RoomMembers          []roomMemberView
 	Admin                adminPageData
 	ForbiddenMessage     string
 }
@@ -283,6 +293,7 @@ func main() {
 	mux.HandleFunc("POST /join/confirm", a.requireAuth(a.joinRoomConfirmPost))
 	mux.HandleFunc("GET /r/{code}/timer-status", a.requireAuth(a.roomTimerStatus))
 	mux.HandleFunc("GET /r/{code}/todos-fragment", a.requireAuth(a.roomTodosFragment))
+	mux.HandleFunc("GET /r/{code}/members", a.requireAuth(a.roomMembersPage))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
@@ -1963,6 +1974,58 @@ func (a *app) roomMemberCount(ctx context.Context, roomID string) (int, error) {
 	var count int
 	err := a.db.QueryRow(ctx, `SELECT COUNT(*) FROM room_members WHERE room_id = $1`, roomID).Scan(&count)
 	return count, err
+}
+
+// roomMemberUsers lists the users belonging to a room, alphabetically by
+// display name.
+func (a *app) roomMemberUsers(ctx context.Context, roomID string) ([]user, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT u.id, u.username, u.display_name, u.avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+		FROM room_members rm
+		JOIN users u ON u.id = rm.user_id
+		WHERE rm.room_id = $1
+		ORDER BY u.display_name`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []user
+	for rows.Next() {
+		var m user
+		if err := rows.Scan(&m.ID, &m.Username, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion); err != nil {
+			return nil, err
+		}
+		members = append(members, m)
+	}
+	return members, rows.Err()
+}
+
+// roomMembersPage serves /r/{code}/members: the room roster. Each member's
+// profile link is gated the same way publicProfilePage is -- only the
+// viewer's own row or an existing connection is clickable, everyone else is
+// name and avatar only.
+func (a *app) roomMembersPage(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		http.Error(w, "room membership required", http.StatusForbidden)
+		return
+	}
+	members, _ := a.roomMemberUsers(r.Context(), rm.ID)
+	views := make([]roomMemberView, len(members))
+	for i, m := range members {
+		views[i] = roomMemberView{
+			Member:    m,
+			Self:      m.ID == u.ID,
+			Connected: m.ID == u.ID || a.areConnected(r.Context(), u.ID, m.ID),
+		}
+	}
+	a.render(w, "room-members", pageData{Title: "Room members", User: u, Room: rm, RoomMembers: views})
 }
 
 func (a *app) currentUser(r *http.Request) (user, bool) {

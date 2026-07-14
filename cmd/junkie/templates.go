@@ -159,15 +159,9 @@ const layoutTemplates = `
         const fallbackM = Number(input.defaultValue) || minM;
         const clampM = (n) => Math.min(maxM, Math.max(minM, n));
 
-        const syncDigits = () => {
-          const label = input.closest('.circle-timer-time');
-          label?.classList.toggle('digits-3', String(input.value).length >= 3);
-        };
-
         const syncRing = () => {
           const minutes = clampM(Number(input.value) || fallbackM);
           input.value = minutes;
-          syncDigits();
           setRing(timer, minutes / maxM);
         };
 
@@ -289,12 +283,53 @@ const layoutTemplates = `
         });
       });
 
+      const showStartConfirm = (message) => new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'join-prompt-backdrop';
+        const card = document.createElement('div');
+        card.className = 'join-prompt-card panel';
+        card.setAttribute('role', 'dialog');
+        card.setAttribute('aria-modal', 'true');
+        const heading = document.createElement('h2');
+        heading.textContent = message;
+        const actions = document.createElement('div');
+        actions.className = 'join-prompt-actions';
+        const startBtn = document.createElement('button');
+        startBtn.type = 'button';
+        startBtn.className = 'btn-primary';
+        startBtn.textContent = 'Start';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn-ghost';
+        cancelBtn.textContent = 'Cancel';
+        actions.append(startBtn, cancelBtn);
+        card.append(heading, actions);
+        backdrop.appendChild(card);
+        const finish = (result) => {
+          document.removeEventListener('keydown', onKey);
+          backdrop.remove();
+          resolve(result);
+        };
+        const onKey = (event) => { if (event.key === 'Escape') finish(false); };
+        startBtn.addEventListener('click', () => finish(true));
+        cancelBtn.addEventListener('click', () => finish(false));
+        backdrop.addEventListener('click', (event) => { if (event.target === backdrop) finish(false); });
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(backdrop);
+        startBtn.focus();
+      });
+
       document.querySelectorAll('form[action="/solo/start"], form[action$="/timer-start"]').forEach((form) => {
         form.addEventListener('submit', (event) => {
           window.junkieNotify?.requestPermission();
           const roomName = form.dataset.roomName;
-          if (roomName && !confirm('You\'re about to start a focus block for ' + roomName + '.')) {
+          if (roomName && !form.dataset.startConfirmed) {
             event.preventDefault();
+            showStartConfirm('You’re about to start a focus block for ' + roomName + '.').then((ok) => {
+              if (!ok) return;
+              form.dataset.startConfirmed = 'true';
+              form.requestSubmit();
+            });
           }
         });
       });
@@ -1812,6 +1847,7 @@ const layoutTemplates = `
 {{define "room-invite"}}{{template "shell" .}}{{end}}
 {{define "public-profile"}}{{template "shell" .}}{{end}}
 {{define "connections"}}{{template "shell" .}}{{end}}
+{{define "room-members"}}{{template "shell" .}}{{end}}
 
 {{define "menu-drawer-guest"}}
 <div class="menu-drawer-backdrop" hidden></div>
@@ -2309,6 +2345,32 @@ const layoutTemplates = `
         <button type="submit" name="action" value="cancel" class="ghost">Cancel</button>
       </form>
     </section>
+  {{else if eq .Title "Room members"}}
+    <section class="panel profile-page room-members-page">
+      <div class="panel-title">
+        <h1>{{.Room.Name}} members</h1>
+      </div>
+      <div class="connections-list">
+        {{range .RoomMembers}}
+        <article class="connection-row">
+          <div class="connection-head">
+            <span class="todo-avatar connection-avatar" aria-hidden="true">{{if .Member.HasAvatar}}<img class="avatar-img" src="/avatar/{{.Member.ID}}?v={{.Member.AvatarVersion}}" alt="">{{else}}{{initial .Member.DisplayName}}{{end}}</span>
+            {{if .Self}}
+            <a href="/profile" class="connection-name">{{.Member.DisplayName}}</a>
+            {{else if .Connected}}
+            <a href="/{{.Member.Username}}" class="connection-name">{{.Member.DisplayName}}</a>
+            {{else}}
+            <span class="connection-name room-member-locked" title="Not connected">{{.Member.DisplayName}}</span>
+            {{end}}
+            <span class="mono muted">@{{.Member.Username}}</span>
+          </div>
+        </article>
+        {{else}}
+        <p class="muted">No one else has joined this room yet.</p>
+        {{end}}
+      </div>
+      <p class="muted"><a href="/r/{{.Room.Code}}">Back to {{.Room.Name}}</a></p>
+    </section>
   {{else}}
     <span hidden data-room-ws="{{.Room.Code}}" data-room-name="{{.Room.Name}}"></span>
     {{if .FocusMode}}
@@ -2359,7 +2421,7 @@ const layoutTemplates = `
         </div>
         <div class="room-members-meta">
           {{if and .Timer (gt (len .Timer.Participants) 1)}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
-          <span class="label">{{if .MemberCount}}{{.MemberCount}}{{else}}0{{end}} members</span>
+          <a class="label room-members-link" href="/r/{{.Room.Code}}/members">{{if .MemberCount}}{{.MemberCount}}{{else}}0{{end}} members</a>
         </div>
       </div>
 
@@ -2794,8 +2856,8 @@ code {
 }
 .topbar-user:hover { opacity: 0.85; }
 .topbar-avatar {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2rem;
+  height: 2rem;
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
@@ -3392,6 +3454,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .connection-avatar { width: 28px; height: 28px; font-size: 0.8rem; }
 .connection-name { font-weight: 600; text-decoration: none; }
 .connection-name:hover { text-decoration: underline; }
+span.room-member-locked { color: var(--muted); cursor: default; }
 .public-profile-page .connection-head { margin-bottom: 0; }
 .profile-username-form {
   display: flex;
@@ -3480,9 +3543,14 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   background: transparent;
   padding: 0;
   color: inherit;
+  container-type: inline-size;
 }
-.circle-timer.idle { width: min(300px, 82vw); }
-.circle-timer.running, .room-focus-ring, .room-active-ring { width: min(340px, 90vw); cursor: default; }
+.circle-timer.idle { width: clamp(200px, 78vw, 300px); }
+.circle-timer.running,
+.room-focus-ring,
+.room-active-ring,
+.circle-timer.break-offer,
+.circle-timer.break-running { width: clamp(220px, 84vw, 340px); cursor: default; }
 .circle-timer.idle:hover .circle-timer-progress { stroke: var(--accent-hover); }
 .circle-timer-svg {
   position: absolute;
@@ -3504,8 +3572,6 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .circle-timer.break-offer .circle-timer-progress,
 .circle-timer.break-running .circle-timer-track,
 .circle-timer.break-running .circle-timer-progress { stroke-width: 5; }
-.circle-timer.break-offer,
-.circle-timer.break-running { width: min(340px, 90vw); cursor: default; }
 .circle-timer.break-offer .circle-timer-progress,
 .circle-timer.break-running .circle-timer-progress { stroke: var(--warn); }
 .circle-timer.breather { animation: breather 4s ease-in-out infinite; }
@@ -3536,7 +3602,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   -moz-appearance: textfield;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 3.75rem;
+  font-size: clamp(2rem, 15cqw, 3rem);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
@@ -3552,7 +3618,6 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   -webkit-appearance: none;
 }
 .circle-timer-time input:focus { box-shadow: none; border: none; }
-.circle-timer-time.digits-3 input { font-size: 3rem; }
 .circle-timer-countdown, .countdown {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -3560,11 +3625,11 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   letter-spacing: -0.04em;
   line-height: 1;
 }
-.circle-timer-countdown { font-size: 5.125rem; }
-.countdown { font-size: 4.875rem; }
+.circle-timer-countdown { font-size: clamp(2.5rem, 24cqw, 5.125rem); }
+.countdown:not(.circle-timer-countdown) { font-size: inherit; letter-spacing: normal; }
 .circle-timer-step {
-  width: 36px;
-  height: 36px;
+  width: clamp(26px, 11cqw, 36px);
+  height: clamp(26px, 11cqw, 36px);
   min-height: 0;
   padding: 0;
   border-radius: 50%;
@@ -3942,6 +4007,8 @@ body.menu-drawer-open { overflow: hidden; }
 }
 .participant-avatars-sm .participant-avatar { width: 28px; height: 28px; font-size: 0.7rem; }
 .room-members-meta { text-align: right; display: grid; gap: var(--sp-2); justify-items: end; }
+.room-members-link { color: var(--faint); }
+.room-members-link:hover { color: var(--ink); }
 .copy-chip, .room-share-code {
   font-family: var(--font-mono);
   font-size: var(--fs-small);
@@ -3986,8 +4053,11 @@ body.menu-drawer-open { overflow: hidden; }
   padding-top: var(--sp-5);
   border-top: 1px solid var(--border);
 }
+.profile-preference > div { flex: 1 1 auto; min-width: 0; }
 .profile-preference strong { display: block; margin-bottom: var(--sp-1); }
 .profile-preference p { margin: 0; }
+.profile-preference > button,
+.profile-preference > a.btn { flex: 0 0 auto; white-space: nowrap; }
 .toggle-control { flex: 0 0 auto; cursor: pointer; }
 .toggle-control input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .toggle-control span {
@@ -4156,9 +4226,6 @@ body.menu-drawer-open { overflow: hidden; }
   .desk-timer-card,
   .desk-todos-panel { height: auto; min-height: 28rem; }
   .desk-timer-card { overflow: visible; }
-  .circle-timer.idle { width: min(250px, 88vw); }
-  .circle-timer.running, .room-focus-ring { width: min(260px, 92vw); }
-  .circle-timer-step { width: 44px; height: 44px; }
   .focus-todos-toggle {
     top: auto;
     bottom: 0;
