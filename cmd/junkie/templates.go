@@ -3009,6 +3009,10 @@ code {
   color: var(--ink);
   font-size: var(--fs-small);
 }
+.auth-card .context-banner {
+  margin: 0 0 var(--sp-4);
+  text-align: center;
+}
 .context-banner-dismiss {
   display: flex;
   align-items: center;
