@@ -625,16 +625,10 @@ func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.Interaction
 	content := discordStatusContent(rm, timer)
 	if timer == nil {
 		content = fmt.Sprintf("**%s** — no run active. `/junkie start` to begin, or tap Join to be in automatically when someone starts.", rm.Name)
-	} else if timer.Participant {
-		content += "\nYou're in this run."
 	}
-	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral, Components: joinComponents()},
-	})
-	if err != nil {
-		log.Printf("discord: status reply: %v", err)
-	}
+	// Public on purpose: the asker wants the room to see where things stand,
+	// and the Join button is useful to everyone else scrolling past.
+	b.reply(s, i, content, joinComponents())
 }
 
 // formatFocusMinutes renders a minute count the way people say it: "45 min"
