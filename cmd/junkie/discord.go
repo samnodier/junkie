@@ -524,6 +524,10 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 		b.replyNotRegistered(s, i)
 		return
 	}
+	if a.roomRunActive(ctx, rm.ID) {
+		b.ephemeral(s, i, "Timer settings can't change while a run is active — wait for it to finish.")
+		return
+	}
 	parts := strings.Split(strings.TrimSpace(shorthand), "/")
 	if len(parts) != 3 {
 		b.ephemeral(s, i, "Use the form `focus-minutes/break-minutes/sessions`, e.g. `30/5/3`.")
@@ -537,6 +541,9 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 		b.ephemeral(s, i, "Couldn't save that configuration — try again.")
 		return
 	}
+	// Same broadcast the web settings form sends, so open room pages pick
+	// up the new numbers live.
+	a.hub.broadcast(rm.Code, "settings")
 	b.reply(s, i, fmt.Sprintf("Configured **%s**: %d min focus, %d min break, %d session(s).", rm.Name, focus, breaks, sessions), nil)
 }
 

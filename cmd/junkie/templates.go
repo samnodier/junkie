@@ -2585,7 +2585,7 @@ const layoutTemplates = `
             {{end}}
           </article>
           {{end}}
-          {{if or (not .Timer) (eq .Timer.Phase "break")}}
+          {{if not .Timer}}
           <details class="room-details panel" data-room-section="settings">
             <summary><span class="label">Timer settings · {{.Room.AutoSessions}}×{{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
             <form class="settings stack" method="post" action="/r/{{.Room.Code}}/settings">

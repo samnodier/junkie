@@ -1423,6 +1423,10 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			_, _ = a.db.Exec(r.Context(), `UPDATE rooms SET name = $1, updated_at = now() WHERE id = $2`, name, rm.ID)
 		}
 	case "settings":
+		if a.roomRunActive(r.Context(), rm.ID) {
+			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Timer settings can't change while a run is active."), http.StatusSeeOther)
+			return
+		}
 		focus := clampInt(r.FormValue("focus_minutes"), 5, 180, rm.FocusMinutes)
 		breaks := clampInt(r.FormValue("break_minutes"), 1, 60, rm.BreakMinutes)
 		sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, rm.AutoSessions)
@@ -1790,6 +1794,16 @@ func requestedRoomFocusMinutes(r *http.Request, fallback int) (int, error) {
 		return 0, errors.New("focus minutes must be a whole number from 5 to 180")
 	}
 	return minutes, nil
+}
+
+// roomRunActive reports whether the room has a live (unended) timer run in
+// any phase. Timer settings are locked while one exists: a run snapshots its
+// config at start, so a mid-run change would silently apply to the *next*
+// run while looking like it changed the current one.
+func (a *app) roomRunActive(ctx context.Context, roomID string) bool {
+	var active bool
+	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM timer_runs WHERE room_id = $1 AND ended_at IS NULL AND phase <> 'ended')`, roomID).Scan(&active)
+	return err == nil && active
 }
 
 // applyRoomSettings persists a room's timer configuration. Shared by the web
