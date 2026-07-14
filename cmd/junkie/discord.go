@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -556,6 +557,10 @@ func (b *discordBot) handleStart(s *discordgo.Session, i *discordgo.InteractionC
 		a.addRoomMember(ctx, rm.ID, u.ID)
 	}
 	_, created, err := a.startRoomTimerAndSchedule(ctx, rm, u.ID, rm.FocusMinutes, u.DisplayName)
+	if errors.Is(err, errTooManyRooms) {
+		b.ephemeral(s, i, "You're already in 3 rooms' live sessions — leave one first.")
+		return
+	}
 	if err != nil {
 		log.Printf("discord: start timer %s: %v", rm.Code, err)
 		b.ephemeral(s, i, "Couldn't start the timer — try again.")
@@ -600,6 +605,8 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 		b.ephemeral(s, i, "A focus session is in progress — you'll join automatically when the break starts. `/junkie leave` cancels.")
 	case joinedAlready:
 		b.ephemeral(s, i, "You're already in this run.")
+	case joinedLimit:
+		b.ephemeral(s, i, "You're already in 3 rooms' live sessions — leave one first. (Focus time only counts toward the room you joined earliest.)")
 	default:
 		b.ephemeral(s, i, "You're in for this run.")
 	}

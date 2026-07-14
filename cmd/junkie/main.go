@@ -1462,14 +1462,20 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if _, _, err := a.startRoomTimerAndSchedule(r.Context(), rm, u.ID, focusMinutes, u.DisplayName); err != nil {
+		if _, _, err := a.startRoomTimerAndSchedule(r.Context(), rm, u.ID, focusMinutes, u.DisplayName); errors.Is(err, errTooManyRooms) {
+			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape(fmt.Sprintf("You're already in %d rooms' live sessions — leave one first.", maxActiveRooms)), http.StatusSeeOther)
+			return
+		} else if err != nil {
 			log.Printf("start room timer %s: %v", rm.Code, err)
 			http.Error(w, "could not start timer", http.StatusInternalServerError)
 			return
 		}
 		action = ""
 	case "timer-join":
-		_, _, _ = a.joinTimer(r.Context(), rm, u.ID)
+		if _, outcome, _ := a.joinTimer(r.Context(), rm, u.ID); outcome == joinedLimit {
+			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape(fmt.Sprintf("You're already in %d rooms' live sessions — leave one first.", maxActiveRooms)), http.StatusSeeOther)
+			return
+		}
 	case "timer-pause":
 		if timer, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not pause break", http.StatusInternalServerError)
@@ -1650,9 +1656,29 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			}
 			timer.Transitioned = true
 		} else if timer.Phase == "focus" {
+			// Users may sit in up to maxActiveRooms rooms' runs at once, but
+			// a finished block only credits participants for whom THIS run is
+			// the earliest-joined of their still-active room runs. That's
+			// Sam's priority-of-joining rule: join a, b, c and only a counts;
+			// leave a and counting shifts to b; rejoin a later and it queues
+			// behind c, because rejoining writes a fresh joined_at. The
+			// run-id tiebreak keeps simultaneous joins deterministic. Solo
+			// timers are separate and unaffected.
 			if _, err = tx.Exec(ctx, `
 				INSERT INTO activity (user_id, activity_date, focus_minutes)
-				SELECT user_id, CURRENT_DATE, $1 FROM timer_participants WHERE timer_run_id = $2
+				SELECT tp.user_id, CURRENT_DATE, $1
+				FROM timer_participants tp
+				WHERE tp.timer_run_id = $2
+					AND NOT EXISTS (
+						SELECT 1 FROM timer_participants earlier
+						JOIN timer_runs tr2 ON tr2.id = earlier.timer_run_id
+						WHERE earlier.user_id = tp.user_id
+							AND earlier.timer_run_id <> tp.timer_run_id
+							AND tr2.room_id IS NOT NULL
+							AND tr2.ended_at IS NULL AND tr2.phase <> 'ended'
+							AND (earlier.joined_at < tp.joined_at
+								OR (earlier.joined_at = tp.joined_at AND earlier.timer_run_id < tp.timer_run_id))
+					)
 				ON CONFLICT (user_id, activity_date)
 				DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, timer.FocusMinutes, timer.ID); err != nil {
 				return nil, false, err
@@ -1785,7 +1811,37 @@ const (
 	joinedQueuedStart                    // no active run; in when the next one starts
 	joinedQueuedBreak                    // focus running; in when the break starts
 	joinedAlready                        // was already a participant
+	joinedLimit                          // refused: already in maxActiveRooms rooms
 )
+
+// maxActiveRooms caps how many rooms' live sessions one user can be part of
+// at once (participating or waiting). Three is not a magic number — it's the
+// sanity ceiling Sam picked so "join everything" can't get silly, and it
+// pairs with the priority rule in normalizeTimer: however many you're in,
+// focus minutes only ever count toward the one you joined first.
+const maxActiveRooms = 3
+
+var errTooManyRooms = errors.New("already in the maximum number of rooms' live sessions")
+
+// activeRoomTimerCount counts the rooms other than roomID where userID is
+// currently part of a live run or parked in the waiting list — the number
+// the maxActiveRooms cap is checked against.
+func (a *app) activeRoomTimerCount(ctx context.Context, userID, roomID string) int {
+	var n int
+	err := a.db.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM timer_participants tp
+				JOIN timer_runs tr ON tr.id = tp.timer_run_id
+				WHERE tp.user_id = $1 AND tr.room_id IS NOT NULL AND tr.room_id <> $2
+					AND tr.ended_at IS NULL AND tr.phase <> 'ended')
+			+
+			(SELECT COUNT(*) FROM room_waiting WHERE user_id = $1 AND room_id <> $2)`,
+		userID, roomID).Scan(&n)
+	if err != nil {
+		return 0
+	}
+	return n
+}
 
 // joinTimer joins userID to rm's active run, or — Forest-style — parks them
 // in the room's waiting list when there's nothing joinable right now (no run,
@@ -1802,11 +1858,16 @@ func (a *app) joinTimer(ctx context.Context, rm room, userID string) (*timerRun,
 		_, err := a.db.Exec(ctx, `INSERT INTO room_waiting (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, rm.ID, userID)
 		return timer, outcome, err
 	}
+	if timer != nil && timer.Participant {
+		return timer, joinedAlready, nil
+	}
+	// The cap counts other rooms only, so re-joining or re-queueing the same
+	// room is never blocked by the user's own presence here.
+	if a.activeRoomTimerCount(ctx, userID, rm.ID) >= maxActiveRooms {
+		return timer, joinedLimit, nil
+	}
 	if timer == nil {
 		return wait(joinedQueuedStart)
-	}
-	if timer.Participant {
-		return timer, joinedAlready, nil
 	}
 	if timer.Phase == "focus" {
 		return wait(joinedQueuedBreak)
@@ -1842,6 +1903,13 @@ func (a *app) roomWaiting(ctx context.Context, roomID, userID string) bool {
 }
 
 func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusMinutes int) (bool, error) {
+	// Starting makes you a participant, so the maxActiveRooms cap applies
+	// here as much as to joins. Checked outside the transaction: a race can
+	// briefly overshoot the cap, which is harmless — the priority rule in
+	// normalizeTimer decides what counts regardless.
+	if a.activeRoomTimerCount(ctx, userID, rm.ID) >= maxActiveRooms {
+		return false, errTooManyRooms
+	}
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return false, err
