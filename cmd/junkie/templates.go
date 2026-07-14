@@ -1741,7 +1741,7 @@ const layoutTemplates = `
     <p class="label label-warn">Private break ready</p>
     <div class="room-ready-time mono">{{.SoloTimer.BreakMinutes}}:00</div>
     <form method="post" action="/solo/break/start"><button type="submit" class="btn-primary">Start break</button></form>
-    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button></form>
+    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
     {{else}}
     <p class="label label-warn">Private break</p>
     <div class="circle-timer break-running breather" role="timer" aria-label="Private break countdown">
@@ -1753,7 +1753,7 @@ const layoutTemplates = `
         <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{secondsUntil .SoloTimer.PhaseEndsAt}}" data-total="{{mul .SoloTimer.BreakMinutes 60}}">--:--</div>
       </div>
     </div>
-    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button></form>
+    <form method="post" action="/solo/break/skip"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
     {{end}}
   </article>
   {{else}}
@@ -1821,19 +1821,21 @@ const layoutTemplates = `
       </form>
       {{end}}
       {{if eq .Timer.Phase "break"}}
+      {{if not .Timer.BreakPending}}
+      <form id="pause-resume-form-{{.Room.Code}}" method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}" hidden>
+        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+      </form>
+      {{end}}
+      <form id="skip-break-form-{{.Room.Code}}" method="post" action="/r/{{.Room.Code}}/timer-skip-break" hidden>
+        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+      </form>
       <div class="desk-timer-actions-row">
         {{if .Timer.BreakPending}}
         <button type="submit" form="break-length-form-{{.Room.Code}}" class="btn-primary">Start break</button>
         {{else}}
-        <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
-          <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
-          <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
-        </form>
+        <button type="submit" form="pause-resume-form-{{.Room.Code}}" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
         {{end}}
-        <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
-          <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
-          <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
-        </form>
+        <button type="submit" form="skip-break-form-{{.Room.Code}}" class="btn-ghost timer-cancel">Skip break</button>
       </div>
       {{end}}
       {{if .Timer.Participant}}
@@ -2118,7 +2120,7 @@ const layoutTemplates = `
             <button type="submit" class="btn-primary timer-cancel">Start break</button>
           </form>
           <form method="post" action="/solo/break/skip">
-            <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
+            <button type="submit" class="btn-ghost timer-cancel">Skip break</button>
           </form>
         </article>
         {{else}}
@@ -2134,7 +2136,7 @@ const layoutTemplates = `
             </div>
           </div>
           <form method="post" action="/solo/break/skip">
-            <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
+            <button type="submit" class="btn-ghost timer-cancel">Skip break</button>
           </form>
         </article>
         {{end}}
@@ -2512,7 +2514,7 @@ const layoutTemplates = `
             </form>
             {{end}}
             <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
-              <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
+              <button type="submit" class="btn-ghost timer-cancel">Skip break</button>
             </form>
             {{if .Timer.Participant}}
             <form method="post" action="/r/{{.Room.Code}}/timer-leave"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
@@ -3141,11 +3143,6 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 }
 .desk-timer-card > .label { margin: 0; text-align: center; }
 .desk-timer-card > form { margin: 0; }
-.desk-timer-card .circle-timer.running,
-.desk-timer-card .circle-timer.break-running {
-  width: min(18rem, 100%);
-  flex: 0 1 auto;
-}
 .desk-timer-footer {
   display: flex;
   flex-direction: column;
@@ -3158,9 +3155,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-timer-footer .timer-cancel { margin-top: 0; }
 .desk-timer-footer .label { width: 100%; text-align: center; }
 .desk-timer-actions-row { display: flex; gap: var(--sp-3); width: 100%; }
-.desk-timer-actions-row > form { flex: 1; display: flex; margin: 0; }
-.desk-timer-actions-row > button,
-.desk-timer-actions-row > form > button { flex: 1; width: 100%; }
+.desk-timer-actions-row > button { flex: 1; min-width: 0; }
 .desk-ring-hint { text-align: center; }
 .desk-join-link {
   margin: var(--sp-4) 0 0;
@@ -4278,6 +4273,8 @@ body.menu-drawer-open { overflow: hidden; }
   .room-header-new { flex-direction: column; }
   .room-members-meta { text-align: left; justify-items: start; }
   .timer-cancel, .btn-ghost.timer-cancel { width: 100%; }
+  .desk-timer-actions-row { flex-direction: column; }
+  .desk-timer-actions-row > button { flex: none; }
   .admin-header { flex-direction: column; }
   .admin-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
