@@ -2,13 +2,11 @@
 
 `junkie` is a small shared focus app for study groups. Open it in a browser, track what you need to finish, run solo or shared focus timers, and see progress on a GitHub-inspired work map of focused minutes per day.
 
-There is no planting mechanic — progress is measured in time spent focusing.
-
 ## How to use junkie
 
 ### Guest mode (no account)
 
-You can use junkie without signing up. Everything stays in **browser `localStorage` on this device only** — it is not stored on the server:
+You can use junkie without signing up. Everything stays in **browser** `localStorage` **on this device only** — it is not stored on the server:
 
 - **Private todos** — add, complete, remove, and restore tasks on the desk.
 - **Solo timer** — run private focus sessions with optional breaks.
@@ -32,7 +30,9 @@ Create an account when you want shared rooms or data that follows you across dev
 - **Username** — change it from Profile → Account. Your focus history stays with the account. The **owner** account's username is pinned (see Admin and owner access) and cannot be renamed in the app.
 - **Password change** — Profile → Security. Updating your password **signs out all other devices**; only the browser you used to change it keeps the session.
 - **Account deletion** — Profile → Danger zone (not available for the owner account). Permanently deletes your account, rooms you created, todos, and activity history. Requires your current password.
-- **Profile picture** — upload or remove from Profile → Preferences. Shown next to your name on room todos. Images are resized in the browser before upload.
+- **Profile picture** — upload or remove from Profile → Preferences. Shown next to your name on room todos and in the participant stack on room timers. Images are resized in the browser before upload.
+
+
 
 ### Solo focus (signed in)
 
@@ -42,6 +42,8 @@ Logged-in solo focus works like guest mode, but timer runs and completed focus m
 - Breaks can be taken, adjusted, or skipped with **Skip break & continue** to roll straight into the next focus block.
 - Other tabs or devices signed into the same account pick up private todo changes live; solo timer phase changes still reload the desk (same as starting a session in another tab).
 
+
+
 ### Rooms
 
 Accounts are required to create or join shared rooms. Each room has a persistent code and lives at `/r/{code}`.
@@ -49,6 +51,7 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 **Joining and inviting**
 
 - Create a room from the menu, or join with a room code or invite link.
+- Each account can have up to **5 rooms**; deleting a room frees its slot.
 - Invite links land on a confirmation screen before you join.
 - When someone starts a focus lobby while junkie is in the background, you can get a **room invite notification** (toggle in Profile → Preferences).
 
@@ -65,6 +68,7 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 
 - Shared focus runs from **server timestamps**; clients count down locally.
 - Flow: **lobby** (optional join window) → **focus** → **break** → next focus session, for the configured number of sessions.
+- The lobby card shows **who's joined so far** — an avatar stack and count right under the countdown ring, updated live.
 - Anyone in the room can rename the room and edit timer defaults (focus length, break length, session count, auto-roll).
 - Only the **room creator** can delete the room.
 - During focus, late joins are locked out until the next break.
@@ -73,38 +77,45 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 - **Leave focus block** ends your participation in the active timer. Hiding or closing a tab does **not** leave — participant rings show who intentionally joined the block, not who has a tab open.
 - **Focus mode** during an active session hides the full todo board so the timer stays central.
 
+
+
 ### Connections
 
 Connections are a separate, mutual link between two accounts — not room membership.
 
 - From Profile → Connections, copy a **one-time connect link** and send it to someone. Each link works once; generate a new one for the next person.
+- Opening a connect link shows a **confirmation screen** first — nothing is linked until the recipient clicks to accept (the Discord account link works the same way).
 - After connecting, you each see the other's **focus heatmap only** on `/connections` and on public profile pages at `/{username}`.
 - Profiles are **invisible to non-connections** — no public directory.
 - There is no in-app way to disconnect or remove a connection yet, and the feed shows heatmaps only (no todos, rooms, or timers).
+
+
 
 ### Cross-device sync
 
 Sign in on each device with the same account.
 
-| What | Sync |
-|------|------|
-| Private todos | Live across your tabs/devices (`/ws/me`) |
-| Room todos & timers | Live for all room members (room WebSocket) |
-| Solo timer phase | Other tabs reload the desk when phase changes |
-| Work map / activity | Stored server-side; same on every device |
-| Guest data | Never syncs — local only |
+
+| What                | Sync                                          |
+| ------------------- | --------------------------------------------- |
+| Private todos       | Live across your tabs/devices (`/ws/me`)      |
+| Room todos & timers | Live for all room members (room WebSocket)    |
+| Solo timer phase    | Other tabs reload the desk when phase changes |
+| Work map / activity | Stored server-side; same on every device      |
+| Guest data          | Never syncs — local only                      |
+
 
 On supported mobile browsers, junkie requests a **screen wake lock** while a timer is visible or a focus session is active so the phone is less likely to lock mid-session.
 
 ## Discord bot
 
-junkie has a Discord bot that runs a server's focus room from chat: live countdown messages, break notifications, join buttons, stats, and a heatmap picture — no browser needed once you're set up.
+junkie has a Discord bot that runs a server's focus room from chat: live countdown messages showing who's in, break notifications, join buttons, stats, and a heatmap picture — no browser needed once you're set up.
 
 **Add it to a server** (needs Manage Server permission there):
 
-> https://discord.com/oauth2/authorize?client_id=1526585859044933684&scope=bot+applications.commands&permissions=2048
+> [https://discord.com/oauth2/authorize?client_id=1526585859044933684&scope=bot+applications.commands&permissions=2048](https://discord.com/oauth2/authorize?client_id=1526585859044933684&scope=bot+applications.commands&permissions=2048)
 
-The bot only asks for Send Messages. Once added: each participant runs `/junkie link` once to connect their junkie account, then an admin runs `/junkie register` in the channel the timer should post to (pass an existing room code to connect it, or omit to create a fresh room). `/junkie help` lists all commands.
+The bot only asks for Send Messages. Once added: each participant runs `/junkie link` once to connect their junkie account, then an admin runs `/junkie register` in the channel the timer should post to (pass an existing room code to connect it, or omit to create a fresh room). Move notifications later with `/junkie channel [#channel]`. `/junkie help` lists all commands.
 
 Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, and `PUBLIC_BASE_URL` are set (see `.env.example`), and you'd mint your own invite link with your application's client id.
 
@@ -120,6 +131,8 @@ Browser `localStorage` only:
 - Solo timer state (`junkie:soloTimer`)
 - Work map / focus minutes per day (`junkie:activity`)
 
+
+
 ### With an account
 
 PostgreSQL on the server:
@@ -129,6 +142,8 @@ PostgreSQL on the server:
 - Solo timer runs and completed focus minutes (work map)
 - Room membership, room settings, room todos, and shared room timers
 - Profile pictures, connections, and connect invite tokens
+
+
 
 ### Why guest data stays local
 
@@ -236,7 +251,10 @@ junkie marks session cookies `Secure` when the request arrived over TLS or with 
 - Session cookies are `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS, and only a SHA-256 hash of the token is stored in PostgreSQL. Expired sessions are swept hourly.
 - Responses carry a Content-Security-Policy plus `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and (over HTTPS) `Strict-Transport-Security`. All scripts are served from the app itself.
 
+
+
 ## Later
 
 - Terminal client using the same account and room API.
 - Discord sign-in (the bot exists — see the Discord bot section above; OAuth sign-in does not yet).
+
