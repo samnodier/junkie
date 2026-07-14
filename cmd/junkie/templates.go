@@ -4003,15 +4003,31 @@ body.menu-drawer-open { overflow: hidden; }
 .room-share-block { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .room-desk-grid { grid-template-columns: 1fr 400px; gap: 48px; align-items: start; }
 .room-timer-column { display: grid; gap: var(--sp-4); }
+/* Every card in the timer column shares the ready card's centered layout,
+   with grid gap owning the vertical rhythm between label, ring, and
+   actions. */
+.room-timer-column .timer-card {
+  display: grid;
+  gap: var(--sp-3);
+  text-align: center;
+  padding: var(--sp-6) var(--sp-5);
+}
+.room-timer-column .timer-card > * { margin: 0; }
+.room-timer-column .timer-card .circle-timer,
+.room-timer-column .timer-card .big-action { margin: 0 auto; }
 .ready-card { text-align: center; padding: var(--sp-8) var(--sp-6); }
 .room-ready-time {
   font-family: var(--font-mono);
   font-size: 3.5rem;
   font-weight: 600;
   letter-spacing: -0.03em;
-  margin: var(--sp-4) 0;
 }
-.room-ready-hint { font-size: var(--fs-small); margin-top: var(--sp-4); }
+.room-ready-hint { font-size: var(--fs-small); }
+@media (max-width: 960px) {
+  /* The fixed 400px todos column starves the timer between 720 and 960px;
+     stack earlier than the general breakpoint. */
+  .room-desk-grid { grid-template-columns: 1fr; gap: var(--sp-6); }
+}
 .room-details { margin: 0; }
 .big-action { width: 100%; max-width: 280px; }
 .room-focus-page {
