@@ -1537,17 +1537,17 @@ const layoutTemplates = `
 {{end}}
 
 {{define "participant-avatar-stack"}}
-{{$names := index . "Names"}}
+{{$members := index . "Names"}}
 {{$small := index . "Small"}}
 {{$max := 5}}
-<div class="participant-avatars participant-avatars-stack{{if $small}} participant-avatars-sm{{end}}" aria-label="{{len $names}} focusing">
-  {{range $i, $name := $names}}
+<div class="participant-avatars participant-avatars-stack{{if $small}} participant-avatars-sm{{end}}" aria-label="{{len $members}} focusing">
+  {{range $i, $m := $members}}
     {{if lt $i $max}}
-    <span class="participant-avatar">{{initial $name}}</span>
+    <span class="participant-avatar" title="{{$m.DisplayName}}">{{if $m.HasAvatar}}<img class="avatar-img" src="/avatar/{{$m.ID}}?v={{$m.AvatarVersion}}" alt="{{$m.DisplayName}}">{{else}}{{initial $m.DisplayName}}{{end}}</span>
     {{end}}
   {{end}}
-  {{if gt (len $names) $max}}
-  <span class="participant-avatar participant-avatar-overflow" title="{{len $names}} focusing">+{{avatarOverflow (len $names) $max}}</span>
+  {{if gt (len $members) $max}}
+  <span class="participant-avatar participant-avatar-overflow" title="{{len $members}} focusing">+{{avatarOverflow (len $members) $max}}</span>
   {{end}}
 </div>
 {{end}}

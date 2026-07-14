@@ -127,7 +127,7 @@ type timerRun struct {
 	PausedAt               *time.Time
 	PausedRemainingSeconds *int
 	Participant            bool
-	Participants           []string
+	Participants           []user
 	Transitioned           bool
 }
 
@@ -1821,17 +1821,21 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			return nil, false, err
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT u.display_name FROM timer_participants tp JOIN users u ON u.id = tp.user_id WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, timer.ID)
+	rows, err := tx.Query(ctx, `
+		SELECT u.id, u.display_name, u.avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+		FROM timer_participants tp JOIN users u ON u.id = tp.user_id
+		WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, timer.ID)
 	if err != nil {
 		return nil, false, err
 	}
 	for rows.Next() {
-		var name string
-		if err = rows.Scan(&name); err != nil {
+		var m user
+		if err = rows.Scan(&m.ID, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion); err != nil {
 			rows.Close()
 			return nil, false, err
 		}
-		timer.Participants = append(timer.Participants, name)
+		timer.Participants = append(timer.Participants, m)
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -2197,7 +2201,7 @@ func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun,
 		return nil, nil
 	}
 	timer.Participant = true
-	timer.Participants = []string{"You"}
+	timer.Participants = []user{{DisplayName: "You"}}
 	return timer, nil
 }
 
@@ -2247,20 +2251,27 @@ func (a *app) endTimerIfNoParticipants(ctx context.Context, runID string) bool {
 	return true
 }
 
-func (a *app) timerParticipants(ctx context.Context, runID string) ([]string, error) {
-	rows, err := a.db.Query(ctx, `SELECT u.display_name FROM timer_participants tp JOIN users u ON u.id = tp.user_id WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, runID)
+// timerParticipants returns a run's participants with the identity bits the
+// avatar stack needs (id + avatar presence/version), not just display names,
+// so participant lists can show profile pictures like every other surface.
+func (a *app) timerParticipants(ctx context.Context, runID string) ([]user, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT u.id, u.display_name, u.avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+		FROM timer_participants tp JOIN users u ON u.id = tp.user_id
+		WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var names []string
+	var members []user
 	for rows.Next() {
-		var name string
-		if rows.Scan(&name) == nil {
-			names = append(names, name)
+		var m user
+		if rows.Scan(&m.ID, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion) == nil {
+			members = append(members, m)
 		}
 	}
-	return names, nil
+	return members, rows.Err()
 }
 
 func (a *app) authPageData(r *http.Request, signup bool, next, errMsg string) pageData {

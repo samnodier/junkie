@@ -339,8 +339,12 @@ func discordStatusContent(rm room, timer *timerRun) string {
 
 // discordNameList renders participant display names for the live message,
 // capped so a big room can't balloon it.
-func discordNameList(names []string) string {
+func discordNameList(members []user) string {
 	const cap = 8
+	names := make([]string, 0, len(members))
+	for _, m := range members {
+		names = append(names, m.DisplayName)
+	}
 	if len(names) > cap {
 		return strings.Join(names[:cap], ", ") + fmt.Sprintf(" +%d more", len(names)-cap)
 	}

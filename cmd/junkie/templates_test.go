@@ -42,7 +42,7 @@ func TestDashboardRendersIndependentSoloAndRoomTimers(t *testing.T) {
 				CurrentSession: 2,
 				PhaseEndsAt:    now.Add(10 * time.Minute),
 				Participant:    false,
-				Participants:   []string{"Alex"},
+				Participants:   []user{{DisplayName: "Alex"}},
 			},
 		}},
 	}
@@ -95,7 +95,7 @@ func TestDashboardRendersRoomLobby(t *testing.T) {
 				CurrentSession: 1,
 				PhaseEndsAt:    now.Add(10 * time.Second),
 				Participant:    true,
-				Participants:   []string{"Sam"},
+				Participants:   []user{{DisplayName: "Sam"}},
 			},
 		}},
 	}
@@ -138,7 +138,7 @@ func TestRoomRendersPausedBreakControls(t *testing.T) {
 			PausedAt:               &now,
 			PausedRemainingSeconds: &remaining,
 			Participant:            true,
-			Participants:           []string{"Sam"},
+			Participants:           []user{{DisplayName: "Sam"}},
 		},
 	}
 
@@ -182,7 +182,7 @@ func TestRoomRendersPendingBreakControls(t *testing.T) {
 			PausedAt:               &now,
 			PausedRemainingSeconds: &remaining,
 			Participant:            true,
-			Participants:           []string{"Sam"},
+			Participants:           []user{{DisplayName: "Sam"}},
 		},
 	}
 
