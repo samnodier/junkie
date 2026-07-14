@@ -1888,6 +1888,8 @@ const layoutTemplates = `
 {{define "public-profile"}}{{template "shell" .}}{{end}}
 {{define "connections"}}{{template "shell" .}}{{end}}
 {{define "room-members"}}{{template "shell" .}}{{end}}
+{{define "privacy"}}{{template "shell" .}}{{end}}
+{{define "terms"}}{{template "shell" .}}{{end}}
 
 {{define "menu-drawer-guest"}}
 <div class="menu-drawer-backdrop" hidden></div>
@@ -2225,6 +2227,7 @@ const layoutTemplates = `
         <span>Stored on this device</span>
       </div>
       <div id="guest-profile-work-map"></div>
+      <p class="muted legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
       <script src="/assets/guest.js"></script>
     </section>
     {{else}}
@@ -2347,6 +2350,7 @@ const layoutTemplates = `
         </form>
       </article>
       {{end}}
+      <p class="muted legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
     </section>
     {{end}}
   {{else if eq .Title "Connections"}}
@@ -2399,6 +2403,23 @@ const layoutTemplates = `
         <button type="submit" name="action" value="join">Join room</button>
         <button type="submit" name="action" value="cancel" class="ghost">Cancel</button>
       </form>
+    </section>
+  {{else if eq .Title "Privacy"}}
+    <section class="panel profile-page legal-page">
+      <h1>Privacy</h1>
+      <p>junkie stores only what it needs to work: your username, a hashed password, an optional display name and profile picture, your focus activity, your todos, and the rooms and connections you're part of. No email address, no real name, no analytics, no tracking, no ads — and nothing is ever sold or shared with anyone.</p>
+      <p>A single cookie keeps you signed in; that's the only cookie there is.</p>
+      <p>Linking Discord is optional. It stores just your Discord ID and username so the bot's commands can act as your account, and you can disconnect it anytime from your profile.</p>
+      <p>Deleting your account permanently removes everything above.</p>
+      <p class="muted"><a href="/">Back to junkie</a></p>
+    </section>
+  {{else if eq .Title "Terms of Service"}}
+    <section class="panel profile-page legal-page">
+      <h1>Terms of Service</h1>
+      <p>junkie is a free shared focus timer, provided as-is, without warranty of any kind.</p>
+      <p>Todos you post in a room are visible to that room's members — be decent to the people you focus with, and don't abuse the service.</p>
+      <p>You can delete your account at any time from your profile, which permanently removes your data. These terms may change as junkie evolves; continuing to use it means you accept the current version.</p>
+      <p class="muted"><a href="/">Back to junkie</a></p>
     </section>
   {{else if eq .Title "Room members"}}
     <section class="panel profile-page room-members-page">
@@ -4292,6 +4313,10 @@ body.menu-drawer-open { overflow: hidden; }
 .role-badge { color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
 .role-admin, .status-active { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-soft-border); }
 .role-owner { color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); }
+.legal-page { max-width: 640px; margin: var(--sp-6) auto; display: grid; gap: var(--sp-4); }
+.legal-page h1 { font-family: var(--font-serif); }
+.legal-links { text-align: center; font-size: var(--fs-small); }
+.legal-links a { color: inherit; }
 .forbidden-card { text-align: center; }
 .forbidden-card .muted { margin-bottom: 0; }
 .forbidden-card .btn { margin-top: var(--sp-5); }

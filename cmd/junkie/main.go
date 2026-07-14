@@ -296,6 +296,14 @@ func main() {
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
 	mux.HandleFunc("GET /connections", a.requireAuth(a.connectionsPage))
+	mux.HandleFunc("GET /privacy", func(w http.ResponseWriter, r *http.Request) {
+		u, _ := a.currentUser(r)
+		a.render(w, "privacy", pageData{Title: "Privacy", User: u})
+	})
+	mux.HandleFunc("GET /terms", func(w http.ResponseWriter, r *http.Request) {
+		u, _ := a.currentUser(r)
+		a.render(w, "terms", pageData{Title: "Terms of Service", User: u})
+	})
 	mux.HandleFunc("GET /discord/link/{token}", a.requireAuth(a.discordLinkConfirm))
 	mux.HandleFunc("POST /profile/discord/unlink", a.requireAuth(a.discordUnlink))
 	// Exact routes above win over this single-segment pattern; usernames

@@ -31,6 +31,7 @@ var reservedUsernames = map[string]bool{
 	"avatar": true, "ws": true, "r": true, "dashboard": true, "solo": true,
 	"connect": true, "connections": true, "settings": true, "api": true,
 	"favicon.ico": true, "robots.txt": true, "sitemap.xml": true,
+	"terms": true, "privacy": true, "discord": true,
 }
 
 func validUsername(username string) bool {
