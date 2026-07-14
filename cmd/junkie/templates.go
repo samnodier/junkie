@@ -850,7 +850,7 @@ const layoutTemplates = `
         if (document.getElementById('focus-join-prompt')) return;
         if (document.querySelector('.room-focus-shell')) return;
 
-        const deadline = Date.parse(lobbyDeadline || '') || Date.now() + 10000;
+        const deadline = Date.parse(lobbyDeadline || '') || Date.now() + 30000;
         const backdrop = document.createElement('div');
         backdrop.id = 'focus-join-prompt';
         backdrop.className = 'join-prompt-backdrop';
@@ -1813,7 +1813,7 @@ const layoutTemplates = `
         <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
       </svg>
       <div class="circle-timer-core">
-        <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="{{if eq .Timer.Phase "lobby"}}10{{else if eq .Timer.Phase "focus"}}{{mul .Timer.FocusMinutes 60}}{{else}}{{mul .Timer.BreakMinutes 60}}{{end}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}">--:--</div>
+        <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="{{if eq .Timer.Phase "lobby"}}30{{else if eq .Timer.Phase "focus"}}{{mul .Timer.FocusMinutes 60}}{{else}}{{mul .Timer.BreakMinutes 60}}{{end}}" data-paused="{{if .Timer.PausedAt}}true{{else}}false{{end}}">--:--</div>
       </div>
     </div>
     {{end}}
@@ -2316,6 +2316,21 @@ const layoutTemplates = `
           </div>
           <button type="button" id="connect-link-copy" class="btn-ghost btn-compact">Copy connect link</button>
         </div>
+        <div class="profile-preference">
+          <div>
+            <strong><svg class="discord-mark" viewBox="0 0 127 96" fill="currentColor" aria-hidden="true" width="18" height="14" style="vertical-align:-2px"><path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15ZM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69Zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69Z"/></svg> Discord</strong>
+            {{if .DiscordLinked}}
+            <p class="muted">Connected as <span class="mono">@{{.DiscordUsername}}</span>. Use <span class="mono">/junkie</span> commands in servers running the junkie bot.</p>
+            {{else}}
+            <p class="muted">Not connected. In a server with the junkie bot, run <span class="mono">/junkie link</span> and open the link it gives you.</p>
+            {{end}}
+          </div>
+          {{if .DiscordLinked}}
+          <form method="post" action="/profile/discord/unlink">
+            <button type="submit" class="btn-ghost btn-compact">Disconnect</button>
+          </form>
+          {{end}}
+        </div>
       </article>
       {{if ne .User.Role "owner"}}
       <article class="panel profile-card profile-card-danger">
@@ -2477,7 +2492,7 @@ const layoutTemplates = `
                 <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
               </svg>
               <div class="circle-timer-core">
-                <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="10">--:--</div>
+                <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="30">--:--</div>
               </div>
             </div>
             {{if not .Timer.Participant}}
@@ -2497,7 +2512,12 @@ const layoutTemplates = `
               </div>
             </div>
             {{if not .Timer.Participant}}
-            <p class="label label-warn">Watching · join on next break</p>
+            {{if .TimerWaiting}}
+            <p class="label label-accent">In for the break · you'll join automatically</p>
+            <form method="post" action="/r/{{.Room.Code}}/timer-leave"><button type="submit" class="btn-ghost timer-cancel">Cancel</button></form>
+            {{else}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join at the break</button></form>
+            {{end}}
             {{else}}
             <form method="post" action="/r/{{.Room.Code}}/timer-leave">
               <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
@@ -2535,7 +2555,13 @@ const layoutTemplates = `
             <p class="label label-accent">Ready · {{.Room.AutoSessions}} × {{.Room.FocusMinutes}}/{{.Room.BreakMinutes}}</p>
             <div class="room-ready-time mono">{{.Room.FocusMinutes}}:00</div>
             <form method="post" action="/r/{{.Room.Code}}/timer-start" data-room-name="{{.Room.Name}}"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
-            <p class="muted room-ready-hint">Start alone or with others — members get a join prompt when you start.</p>
+            {{if .TimerWaiting}}
+            <p class="label label-accent">Waiting · you'll join automatically when someone starts</p>
+            <form method="post" action="/r/{{.Room.Code}}/timer-leave"><button type="submit" class="btn-ghost timer-cancel">Stop waiting</button></form>
+            {{else}}
+            <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-ghost">Join when it starts</button></form>
+            <p class="muted room-ready-hint">Start alone or with others — or wait here and get pulled in automatically when anyone starts.</p>
+            {{end}}
           </article>
           {{end}}
           {{if or (not .Timer) (eq .Timer.Phase "break")}}

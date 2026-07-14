@@ -229,6 +229,22 @@ func (b *discordBot) replyLinkRequired(s *discordgo.Session, i *discordgo.Intera
 	b.ephemeral(s, i, "Link your Discord account to junkie first — run `/junkie link` and open the link it gives you.")
 }
 
+// discordLinkForUser reports the Discord username linked to a junkie
+// account, for the profile page's connected indicator.
+func (a *app) discordLinkForUser(ctx context.Context, userID string) (string, bool) {
+	var username string
+	err := a.db.QueryRow(ctx, `SELECT discord_username FROM discord_links WHERE user_id = $1`, userID).Scan(&username)
+	return username, err == nil
+}
+
+// discordUnlink removes the viewer's Discord link; the bot treats them as
+// unlinked from the next interaction on.
+func (a *app) discordUnlink(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	_, _ = a.db.Exec(r.Context(), `DELETE FROM discord_links WHERE user_id = $1`, u.ID)
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Discord account disconnected."), http.StatusSeeOther)
+}
+
 // discordLinkedUser resolves a Discord user id to the junkie account it's
 // linked to, if any.
 func (a *app) discordLinkedUser(ctx context.Context, discordUserID string) (user, bool) {
@@ -401,7 +417,7 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 		b.ephemeral(s, i, "Couldn't save that configuration — try again.")
 		return
 	}
-	b.reply(s, i, fmt.Sprintf("Configured `%s`: %d min focus, %d min break, %d session(s).", rm.Code, focus, breaks, sessions), nil)
+	b.reply(s, i, fmt.Sprintf("Configured **%s**: %d min focus, %d min break, %d session(s).", rm.Name, focus, breaks, sessions), nil)
 }
 
 func (b *discordBot) handleStart(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -454,18 +470,23 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 	if !a.isRoomMember(ctx, rm.ID, u.ID) {
 		a.addRoomMember(ctx, rm.ID, u.ID)
 	}
-	timer, err := a.joinTimer(ctx, rm, u.ID)
+	_, outcome, err := a.joinTimer(ctx, rm, u.ID)
 	if err != nil {
 		log.Printf("discord: join timer %s: %v", rm.Code, err)
 		b.ephemeral(s, i, "Couldn't join the run — try again.")
 		return
 	}
-	if timer == nil {
-		b.ephemeral(s, i, "No active run to join right now — use `/junkie start`.")
-		return
-	}
 	a.hub.broadcast(rm.Code, "timer-phase")
-	b.ephemeral(s, i, "You're in for this run.")
+	switch outcome {
+	case joinedQueuedStart:
+		b.ephemeral(s, i, "You're in — you'll join automatically when the next run starts. `/junkie leave` cancels.")
+	case joinedQueuedBreak:
+		b.ephemeral(s, i, "A focus session is in progress — you'll join automatically when the break starts. `/junkie leave` cancels.")
+	case joinedAlready:
+		b.ephemeral(s, i, "You're already in this run.")
+	default:
+		b.ephemeral(s, i, "You're in for this run.")
+	}
 }
 
 func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -505,11 +526,17 @@ func (b *discordBot) handleLink(s *discordgo.Session, i *discordgo.InteractionCr
 		b.ephemeral(s, i, "Too many link attempts — try again later.")
 		return
 	}
+	discordUsername := ""
+	if i.Member != nil && i.Member.User != nil {
+		discordUsername = i.Member.User.Username
+	} else if i.User != nil {
+		discordUsername = i.User.Username
+	}
 	token := randomHex(32)
 	expires := time.Now().Add(24 * time.Hour)
 	if _, err := a.db.Exec(context.Background(), `
-		INSERT INTO discord_link_tokens (token_hash, discord_user_id, expires_at) VALUES ($1, $2, $3)`,
-		hashToken(token), discordUserID, expires); err != nil {
+		INSERT INTO discord_link_tokens (token_hash, discord_user_id, discord_username, expires_at) VALUES ($1, $2, $3, $4)`,
+		hashToken(token), discordUserID, discordUsername, expires); err != nil {
 		log.Printf("discord: create link token: %v", err)
 		b.ephemeral(s, i, "Couldn't create a link right now — try again.")
 		return
@@ -524,30 +551,30 @@ func (b *discordBot) handleLink(s *discordgo.Session, i *discordgo.InteractionCr
 // consumeConnectToken's delete-first redemption so a token can't be replayed.
 func (a *app) discordLinkConfirm(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
-	var discordUserID string
+	var discordUserID, discordUsername string
 	err := a.db.QueryRow(r.Context(), `
 		DELETE FROM discord_link_tokens
 		WHERE token_hash = $1 AND expires_at > now()
-		RETURNING discord_user_id`, hashToken(r.PathValue("token"))).Scan(&discordUserID)
+		RETURNING discord_user_id, discord_username`, hashToken(r.PathValue("token"))).Scan(&discordUserID, &discordUsername)
 	if err != nil {
-		http.Redirect(w, r, "/?error="+url.QueryEscape("That Discord link is invalid or has expired — run /junkie link again."), http.StatusSeeOther)
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape("That Discord link is invalid or has expired — run /junkie link again."), http.StatusSeeOther)
 		return
 	}
 	// One row per Discord user and per junkie account (both uniquely keyed):
 	// re-linking either side replaces the old pairing.
 	if _, err := a.db.Exec(r.Context(), `
-		INSERT INTO discord_links (discord_user_id, user_id) VALUES ($1, $2)
-		ON CONFLICT (discord_user_id) DO UPDATE SET user_id = EXCLUDED.user_id, linked_at = now()`,
-		discordUserID, u.ID); err != nil {
+		INSERT INTO discord_links (discord_user_id, user_id, discord_username) VALUES ($1, $2, $3)
+		ON CONFLICT (discord_user_id) DO UPDATE SET user_id = EXCLUDED.user_id, discord_username = EXCLUDED.discord_username, linked_at = now()`,
+		discordUserID, u.ID, discordUsername); err != nil {
 		if isUniqueViolation(err) {
-			http.Redirect(w, r, "/?error="+url.QueryEscape("This junkie account is already linked to a different Discord account."), http.StatusSeeOther)
+			http.Redirect(w, r, "/profile?error="+url.QueryEscape("This junkie account is already linked to a different Discord account."), http.StatusSeeOther)
 			return
 		}
 		log.Printf("discord: confirm link: %v", err)
-		http.Redirect(w, r, "/?error="+url.QueryEscape("Could not complete the Discord link — try again."), http.StatusSeeOther)
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape("Could not complete the Discord link — try again."), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/?notice="+url.QueryEscape("Discord account linked! You can now use /junkie commands."), http.StatusSeeOther)
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Discord account linked! You can now use /junkie commands."), http.StatusSeeOther)
 }
 
 func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCreate) {

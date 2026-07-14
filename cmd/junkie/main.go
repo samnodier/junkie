@@ -199,6 +199,13 @@ type pageData struct {
 	RoomMembers          []roomMemberView
 	Admin                adminPageData
 	ForbiddenMessage     string
+	// TimerWaiting: the viewer is parked in the room's waiting list, to be
+	// absorbed into the next joinable window (run start or break).
+	TimerWaiting bool
+	// DiscordUsername is the Discord account linked to the viewer, if any
+	// ("" when unlinked); shown on the profile page.
+	DiscordUsername string
+	DiscordLinked   bool
 }
 
 type activityDay struct {
@@ -290,6 +297,7 @@ func main() {
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
 	mux.HandleFunc("GET /connections", a.requireAuth(a.connectionsPage))
 	mux.HandleFunc("GET /discord/link/{token}", a.requireAuth(a.discordLinkConfirm))
+	mux.HandleFunc("POST /profile/discord/unlink", a.requireAuth(a.discordUnlink))
 	// Exact routes above win over this single-segment pattern; usernames
 	// that would collide with them are reserved at signup.
 	mux.HandleFunc("GET /{username}", a.publicProfilePage)
@@ -499,6 +507,7 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 	}
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	heatmap, _ := a.activity(r.Context(), u.ID)
+	discordUsername, discordLinked := a.discordLinkForUser(r.Context(), u.ID)
 	a.render(w, "profile", pageData{
 		Title:                "Profile",
 		User:                 u,
@@ -508,6 +517,8 @@ func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
 		ActivityWeeks:        heatmap.Weeks,
 		ActivityTotalMinutes: heatmap.TotalMinutes,
 		Connections:          a.connectionViews(r.Context(), u.ID),
+		DiscordUsername:      discordUsername,
+		DiscordLinked:        discordLinked,
 		Error:                r.URL.Query().Get("error"),
 		Notice:               r.URL.Query().Get("notice"),
 	})
@@ -1305,7 +1316,11 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
 	memberCount, _ := a.roomMemberCount(r.Context(), rm.ID)
-	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount, Error: r.URL.Query().Get("error")})
+	waiting := false
+	if timer == nil || (timer.Phase == "focus" && !timer.Participant) {
+		waiting = a.roomWaiting(r.Context(), rm.ID, u.ID)
+	}
+	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount, TimerWaiting: waiting, Error: r.URL.Query().Get("error")})
 }
 
 // roomTodosFragment serves the current todo-groups markup for a room so
@@ -1450,7 +1465,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		}
 		action = ""
 	case "timer-join":
-		_, _ = a.joinTimer(r.Context(), rm, u.ID)
+		_, _, _ = a.joinTimer(r.Context(), rm, u.ID)
 	case "timer-pause":
 		if _, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not pause break", http.StatusInternalServerError)
@@ -1656,6 +1671,17 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 				timer.PausedAt = &pausedAt
 				timer.PausedRemainingSeconds = &remaining
 			}
+			// The break is the joinable window: pull in everyone who asked to
+			// join while focus was running (or before the run existed).
+			if _, err = tx.Exec(ctx, `
+				INSERT INTO timer_participants (timer_run_id, user_id)
+				SELECT $1, user_id FROM room_waiting WHERE room_id = $2
+				ON CONFLICT DO NOTHING`, timer.ID, roomID); err != nil {
+				return nil, false, err
+			}
+			if _, err = tx.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1`, roomID); err != nil {
+				return nil, false, err
+			}
 			timer.Transitioned = true
 		} else if timer.Phase == "break" {
 			timer.Phase = "focus"
@@ -1673,6 +1699,13 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			return nil, false, err
 		}
 		return nil, true, nil
+	}
+	// A focus->break transition above may have absorbed userID from the
+	// waiting list, making the flag read at the top of the query stale.
+	if timer.Transitioned && !timer.Participant {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2)`, timer.ID, userID).Scan(&timer.Participant); err != nil {
+			return nil, false, err
+		}
 	}
 	rows, err := tx.Query(ctx, `SELECT u.display_name FROM timer_participants tp JOIN users u ON u.id = tp.user_id WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, timer.ID)
 	if err != nil {
@@ -1729,26 +1762,55 @@ func (a *app) applyRoomSettings(ctx context.Context, roomID string, focusMinutes
 	return err
 }
 
-// joinTimer adds userID as a participant of rm's active lobby or break run,
-// if one exists. Shared by the web "timer-join" room action and the Discord
-// /junkie join command (and its Join button).
-func (a *app) joinTimer(ctx context.Context, rm room, userID string) (*timerRun, error) {
+// joinOutcome tells the caller what a join attempt actually did, so both
+// surfaces (web and Discord) can word their feedback honestly instead of
+// claiming "you're in" while focus is running.
+type joinOutcome int
+
+const (
+	joinedNow         joinOutcome = iota // participant of the current lobby/break
+	joinedQueuedStart                    // no active run; in when the next one starts
+	joinedQueuedBreak                    // focus running; in when the break starts
+	joinedAlready                        // was already a participant
+)
+
+// joinTimer joins userID to rm's active run, or — Forest-style — parks them
+// in the room's waiting list when there's nothing joinable right now (no run,
+// or mid-focus). Waiters are absorbed as participants by startRoomTimer and
+// by the focus->break transition in normalizeTimer, so joining never requires
+// catching the lobby countdown live. Shared by the web "timer-join" room
+// action and the Discord /junkie join command (and its Join button).
+func (a *app) joinTimer(ctx context.Context, rm room, userID string) (*timerRun, joinOutcome, error) {
 	timer, _, err := a.normalizeTimer(ctx, rm.ID, userID)
-	if err != nil || timer == nil {
-		return timer, err
+	if err != nil {
+		return nil, joinedNow, err
 	}
-	if timer.Phase == "lobby" || timer.Phase == "break" {
-		if _, err := a.db.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, userID); err != nil {
-			return timer, err
-		}
+	wait := func(outcome joinOutcome) (*timerRun, joinOutcome, error) {
+		_, err := a.db.Exec(ctx, `INSERT INTO room_waiting (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, rm.ID, userID)
+		return timer, outcome, err
 	}
-	return timer, nil
+	if timer == nil {
+		return wait(joinedQueuedStart)
+	}
+	if timer.Participant {
+		return timer, joinedAlready, nil
+	}
+	if timer.Phase == "focus" {
+		return wait(joinedQueuedBreak)
+	}
+	if _, err := a.db.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, userID); err != nil {
+		return timer, joinedNow, err
+	}
+	_, _ = a.db.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1 AND user_id = $2`, rm.ID, userID)
+	return timer, joinedNow, nil
 }
 
-// leaveTimer removes userID from rm's active run, ending the run if that was
-// the last participant. Shared by the web "timer-leave" room action and the
-// Discord /junkie leave command.
+// leaveTimer removes userID from rm's active run (ending the run if that was
+// the last participant) and from the waiting list, so it also cancels a
+// queued join. Shared by the web "timer-leave" room action and the Discord
+// /junkie leave command.
 func (a *app) leaveTimer(ctx context.Context, rm room, userID string) (ended bool, err error) {
+	_, _ = a.db.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1 AND user_id = $2`, rm.ID, userID)
 	timer, _, err := a.normalizeTimer(ctx, rm.ID, userID)
 	if err != nil || timer == nil || !timer.Participant {
 		return false, err
@@ -1757,6 +1819,13 @@ func (a *app) leaveTimer(ctx context.Context, rm room, userID string) (ended boo
 		return false, err
 	}
 	return a.endTimerIfNoParticipants(ctx, timer.ID), nil
+}
+
+// roomWaiting reports whether userID is parked in rm's waiting list.
+func (a *app) roomWaiting(ctx context.Context, roomID, userID string) bool {
+	var waiting bool
+	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM room_waiting WHERE room_id = $1 AND user_id = $2)`, roomID, userID).Scan(&waiting)
+	return err == nil && waiting
 }
 
 func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusMinutes int) (bool, error) {
@@ -1783,7 +1852,7 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 		return false, tx.Commit(ctx)
 	}
 
-	ends := time.Now().Add(10 * time.Second)
+	ends := time.Now().Add(30 * time.Second)
 	var runID string
 	if err = tx.QueryRow(ctx, `
 		INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at)
@@ -1792,6 +1861,17 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 		return false, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2)`, runID, userID); err != nil {
+		return false, err
+	}
+	// Anyone parked in the waiting list is in from the first session, no
+	// need to catch the lobby countdown live.
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO timer_participants (timer_run_id, user_id)
+		SELECT $1, user_id FROM room_waiting WHERE room_id = $2
+		ON CONFLICT DO NOTHING`, runID, rm.ID); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1`, rm.ID); err != nil {
 		return false, err
 	}
 	if err = tx.Commit(ctx); err != nil {

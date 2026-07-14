@@ -108,7 +108,7 @@ func TestDashboardRendersRoomLobby(t *testing.T) {
 	for _, expected := range []string{
 		`Starting · join now`,
 		`class="timer-card panel desk-timer-card lobby"`,
-		`data-total="10"`,
+		`data-total="30"`,
 		`data-phase="lobby"`,
 		`data-paused="false" data-paused-remaining="0"`,
 		`data-user-id="starter-id"`,
