@@ -102,7 +102,7 @@ var discordCommands = []*discordgo.ApplicationCommand{
 							{Name: "week", Value: "week"},
 							{Name: "month", Value: "month"},
 							{Name: "year", Value: "year"},
-							{Name: "all time", Value: "all"},
+							{Name: "alltime", Value: "all"},
 						},
 					},
 				},
@@ -820,5 +820,5 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie join` — join now, or be queued in for the next break/run\n"+
 		"`/junkie leave` — leave the run (or cancel a queued join)\n"+
 		"`/junkie status` — where the timer is right now\n"+
-		"`/junkie stats [day|week|month|year|all time]` — your focus stats")
+		"`/junkie stats [day|week|month|year|alltime]` — your focus stats")
 }
