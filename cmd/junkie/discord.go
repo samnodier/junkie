@@ -84,6 +84,16 @@ var discordCommands = []*discordgo.ApplicationCommand{
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "status",
+				Description: "See where the room's timer is right now",
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "stats",
+				Description: "Your focus stats: today, this week, total, and streak",
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "link",
 				Description: "Link your Discord account to your junkie account",
 			},
@@ -173,6 +183,10 @@ func (b *discordBot) handleCommand(s *discordgo.Session, i *discordgo.Interactio
 		b.handleJoin(s, i)
 	case "leave":
 		b.handleLeave(s, i)
+	case "status":
+		b.handleStatus(s, i)
+	case "stats":
+		b.handleStats(s, i)
 	case "link":
 		b.handleLink(s, i)
 	case "help":
@@ -582,6 +596,117 @@ func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionC
 	b.ephemeral(s, i, "You've left the run.")
 }
 
+// handleStatus privately shows where the room's timer is right now — focus
+// with time remaining, break with a Join button, or idle — for someone who
+// walked in late. Linked accounts only; the nudge to link is ephemeral so
+// unlinked users cause no channel noise.
+func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	a := b.app
+	ctx := context.Background()
+	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+	if !linked {
+		b.replyLinkRequired(s, i)
+		return
+	}
+	rm, _, ok := a.discordRoom(ctx, i.GuildID)
+	if !ok {
+		b.replyNotRegistered(s, i)
+		return
+	}
+	timer, transitioned, err := a.normalizeTimer(ctx, rm.ID, u.ID)
+	if err != nil {
+		log.Printf("discord: status %s: %v", rm.Code, err)
+		b.ephemeral(s, i, "Couldn't read the timer — try again.")
+		return
+	}
+	if transitioned {
+		a.broadcastTimerPhase(rm, timer)
+	}
+	content := discordStatusContent(rm, timer)
+	if timer == nil {
+		content = fmt.Sprintf("**%s** — no run active. `/junkie start` to begin, or tap Join to be in automatically when someone starts.", rm.Name)
+	} else if timer.Participant {
+		content += "\nYou're in this run."
+	}
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral, Components: joinComponents()},
+	})
+	if err != nil {
+		log.Printf("discord: status reply: %v", err)
+	}
+}
+
+// formatFocusMinutes renders a minute count the way people say it: "45 min"
+// under an hour, "3h 20m" above.
+func formatFocusMinutes(minutes int) string {
+	if minutes < 60 {
+		return fmt.Sprintf("%d min", minutes)
+	}
+	if minutes%60 == 0 {
+		return fmt.Sprintf("%dh", minutes/60)
+	}
+	return fmt.Sprintf("%dh %dm", minutes/60, minutes%60)
+}
+
+// handleStats replies (privately) with the caller's focus numbers from the
+// same activity table the web profile reads: today, the trailing 7 days, the
+// all-time total, the current daily streak, and rooms joined.
+func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	a := b.app
+	ctx := context.Background()
+	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+	if !linked {
+		b.replyLinkRequired(s, i)
+		return
+	}
+	var today, week, total, activeDays int
+	_ = a.db.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(focus_minutes) FILTER (WHERE activity_date = CURRENT_DATE), 0),
+			COALESCE(SUM(focus_minutes) FILTER (WHERE activity_date > CURRENT_DATE - 7), 0),
+			COALESCE(SUM(focus_minutes), 0),
+			COUNT(*) FILTER (WHERE focus_minutes > 0)
+		FROM activity WHERE user_id = $1`, u.ID).Scan(&today, &week, &total, &activeDays)
+	var rooms int
+	_ = a.db.QueryRow(ctx, `SELECT COUNT(*) FROM room_members WHERE user_id = $1`, u.ID).Scan(&rooms)
+
+	// Streak: consecutive days with focus, counting back from today — or
+	// from yesterday, so a streak isn't "broken" before today's first block.
+	streak := 0
+	if rows, err := a.db.Query(ctx, `
+		SELECT activity_date FROM activity
+		WHERE user_id = $1 AND focus_minutes > 0 AND activity_date > CURRENT_DATE - 366
+		ORDER BY activity_date DESC`, u.ID); err == nil {
+		expect := time.Now()
+		first := true
+		for rows.Next() {
+			var day time.Time
+			if rows.Scan(&day) != nil {
+				break
+			}
+			if first && day.Format("2006-01-02") != expect.Format("2006-01-02") {
+				expect = expect.AddDate(0, 0, -1)
+			}
+			first = false
+			if day.Format("2006-01-02") != expect.Format("2006-01-02") {
+				break
+			}
+			streak++
+			expect = expect.AddDate(0, 0, -1)
+		}
+		rows.Close()
+	}
+
+	reply := fmt.Sprintf("**%s** — focus stats\nToday: %s · Last 7 days: %s\nAll time: %s across %d day(s)",
+		u.DisplayName, formatFocusMinutes(today), formatFocusMinutes(week), formatFocusMinutes(total), activeDays)
+	if streak > 0 {
+		reply += fmt.Sprintf("\nStreak: %d day(s)", streak)
+	}
+	reply += fmt.Sprintf("\nRooms joined: %d", rooms)
+	b.ephemeral(s, i, reply)
+}
+
 // handleLink mints a single-use link token (mirroring createConnectLink,
 // main.go) and DMs the URL that completes the link once the recipient signs
 // in on the web.
@@ -650,6 +775,8 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie deregister` — disconnect this server from its room\n"+
 		"`/junkie config focus/break/sessions` — set the timer, e.g. `30/5/3`\n"+
 		"`/junkie start` — start a focus run\n"+
-		"`/junkie join` — join the active run\n"+
-		"`/junkie leave` — leave the active run")
+		"`/junkie join` — join now, or be queued in for the next break/run\n"+
+		"`/junkie leave` — leave the run (or cancel a queued join)\n"+
+		"`/junkie status` — where the timer is right now\n"+
+		"`/junkie stats` — your focus stats")
 }
