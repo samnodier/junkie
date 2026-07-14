@@ -51,11 +51,21 @@
     }
   }
 
+  function onBreakInvite(roomName, onClick) {
+    if (!roomInvitesEnabled() || document.visibilityState === 'visible' && document.hasFocus()) return;
+    notify(
+      'Break time in ' + roomName,
+      'Join now to be included in the next focus block.',
+      onClick
+    );
+  }
+
   window.junkieNotify = {
     requestPermission,
     notify,
     onTimerEnd,
     onRoomInvite,
+    onBreakInvite,
     roomInvitesEnabled,
     setRoomInvitesEnabled,
   };

@@ -904,7 +904,7 @@ func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		roomTimer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 		if transitioned {
-			a.hub.broadcast(rm.Code, "timer-phase")
+			a.broadcastTimerPhase(rm, roomTimer)
 		}
 		deskRoomTodos = append(deskRoomTodos, roomTodosGroup{Room: rm, Grouped: groupRoomTodos(roomTodoList, u.ID), Timer: roomTimer})
 	}
@@ -1286,7 +1286,7 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	}
 	timer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
 	if transitioned {
-		a.hub.broadcast(rm.Code, "timer-phase")
+		a.broadcastTimerPhase(rm, timer)
 	}
 	todos, _ := a.roomTodos(r.Context(), rm.ID)
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
@@ -1331,7 +1331,7 @@ func (a *app) roomTimerStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if transitioned {
-		a.hub.broadcast(rm.Code, "timer-phase")
+		a.broadcastTimerPhase(rm, timer)
 	}
 
 	status := timerStatus{Phase: "idle"}
@@ -1564,6 +1564,21 @@ func (a *app) userWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// broadcastTimerPhase tells a room's live viewers a phase changed so they
+// can refresh, and -- when the run just moved into break -- also sends a
+// richer invite so members who never joined the ending focus block (and
+// aren't looking at the app) get a device notification that there's a
+// window to join before the next block starts.
+func (a *app) broadcastTimerPhase(rm room, timer *timerRun) {
+	a.hub.broadcast(rm.Code, "timer-phase")
+	if timer != nil && timer.Phase == "break" {
+		a.hub.broadcastJSON(rm.Code, map[string]interface{}{
+			"type": "timer-break-invite", "roomCode": rm.Code, "roomName": rm.Name,
+			"breakDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+}
+
 func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
@@ -1755,10 +1770,10 @@ func (a *app) scheduleLobbyDeadline(rm room, userID string, deadline time.Time) 
 	time.AfterFunc(delay, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, transitioned, err := a.normalizeTimer(ctx, rm.ID, userID); err != nil {
+		if timer, transitioned, err := a.normalizeTimer(ctx, rm.ID, userID); err != nil {
 			log.Printf("normalize room lobby %s: %v", rm.Code, err)
 		} else if transitioned {
-			a.hub.broadcast(rm.Code, "timer-phase")
+			a.broadcastTimerPhase(rm, timer)
 		}
 	})
 }

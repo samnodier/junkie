@@ -905,7 +905,7 @@ const layoutTemplates = `
       // Transient top-right toasts, stacked, dismissible, self-expiring
       // after 10s. Screen readers get them through the container's polite
       // live region.
-      const toast = (message) => {
+      const toast = (message, onClick) => {
         let holder = document.getElementById('junkie-toasts');
         if (!holder) {
           holder = document.createElement('div');
@@ -931,7 +931,17 @@ const layoutTemplates = `
           el.classList.remove('toast-show');
           setTimeout(() => el.remove(), 300);
         };
-        close.addEventListener('click', dismiss);
+        close.addEventListener('click', (event) => {
+          event.stopPropagation();
+          dismiss();
+        });
+        if (typeof onClick === 'function') {
+          el.classList.add('toast-clickable');
+          el.addEventListener('click', () => {
+            onClick();
+            dismiss();
+          });
+        }
         setTimeout(() => el.classList.add('toast-show'), 20);
         setTimeout(dismiss, 10000);
       };
@@ -967,6 +977,24 @@ const layoutTemplates = `
             event?.starterName || 'A room member',
             event?.lobbyDeadline || ''
           );
+          return;
+        }
+        if (type === 'timer-break-invite') {
+          const breakRoomCode = event?.roomCode || code;
+          const breakRoomName = event?.roomName || roomName;
+          // The broadcast goes to everyone in the room, including people who
+          // were already focusing and are now naturally on a break -- only
+          // members who never joined the ending block should be invited to
+          // join before the next one starts, so check participation first.
+          fetch('/r/' + encodeURIComponent(breakRoomCode) + '/timer-status', { headers: { 'Cache-Control': 'no-store' } })
+            .then((resp) => (resp.ok ? resp.json() : null))
+            .then((status) => {
+              if (!status || status.phase !== 'break' || status.participant) return;
+              const goToRoom = () => { window.location = '/r/' + encodeURIComponent(breakRoomCode); };
+              toast('Break time in ' + breakRoomName + ' — join before the next focus block.', goToRoom);
+              window.junkieNotify?.onBreakInvite(breakRoomName, goToRoom);
+            })
+            .catch(() => {});
           return;
         }
         if (type === 'deleted') {
@@ -1757,7 +1785,7 @@ const layoutTemplates = `
       {{if eq .Timer.Phase "lobby"}}Starting · join now{{else if eq .Timer.Phase "focus"}}Focus · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{else if .Timer.BreakPending}}Break ready · set the length{{else if .Timer.PausedAt}}Break paused{{else}}Break · session {{.Timer.CurrentSession}} of {{.Timer.TotalSessions}}{{end}}
     </p>
     {{if .Timer.BreakPending}}
-    <form class="circle-timer-form" method="post" action="/r/{{.Room.Code}}/timer-break-length">
+    <form class="circle-timer-form" id="break-length-form-{{.Room.Code}}" method="post" action="/r/{{.Room.Code}}/timer-break-length">
       <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
       <div class="circle-timer break-running breather" role="group" aria-label="Set break length for {{.Room.Name}}">
         <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
@@ -1770,7 +1798,6 @@ const layoutTemplates = `
           <button type="button" class="circle-timer-step" data-delta="5" aria-label="Increase break by 5 minutes">+</button>
         </div>
       </div>
-      <button type="submit" class="btn-primary">Start break</button>
     </form>
     {{else}}
     <div class="circle-timer {{if or (eq .Timer.Phase "focus") (eq .Timer.Phase "lobby")}}running{{else}}break-running breather{{end}}" role="timer" aria-label="{{.Timer.Phase}} countdown">
@@ -1794,16 +1821,20 @@ const layoutTemplates = `
       </form>
       {{end}}
       {{if eq .Timer.Phase "break"}}
-      {{if not .Timer.BreakPending}}
-      <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
-        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
-        <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
-      </form>
-      {{end}}
-      <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
-        <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
-        <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
-      </form>
+      <div class="desk-timer-actions-row">
+        {{if .Timer.BreakPending}}
+        <button type="submit" form="break-length-form-{{.Room.Code}}" class="btn-primary">Start break</button>
+        {{else}}
+        <form method="post" action="/r/{{.Room.Code}}/{{if .Timer.PausedAt}}timer-resume{{else}}timer-pause{{end}}">
+          <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+          <button type="submit" class="{{if .Timer.PausedAt}}btn-primary{{else}}btn-ghost{{end}}">{{if .Timer.PausedAt}}Resume break{{else}}Pause break{{end}}</button>
+        </form>
+        {{end}}
+        <form method="post" action="/r/{{.Room.Code}}/timer-skip-break">
+          <input type="hidden" name="next" value="/?todos=room&amp;room={{.Room.Code}}">
+          <button type="submit" class="btn-ghost timer-cancel">Skip break &amp; continue</button>
+        </form>
+      </div>
       {{end}}
       {{if .Timer.Participant}}
       <form method="post" action="/r/{{.Room.Code}}/timer-leave">
@@ -3126,6 +3157,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-timer-footer p { margin: 0; }
 .desk-timer-footer .timer-cancel { margin-top: 0; }
 .desk-timer-footer .label { width: 100%; text-align: center; }
+.desk-timer-actions-row { display: flex; gap: var(--sp-3); width: 100%; }
+.desk-timer-actions-row > form { flex: 1; display: flex; margin: 0; }
+.desk-timer-actions-row > button,
+.desk-timer-actions-row > form > button { flex: 1; width: 100%; }
 .desk-ring-hint { text-align: center; }
 .desk-join-link {
   margin: var(--sp-4) 0 0;
@@ -3269,6 +3304,8 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   border-radius: 50%;
 }
 #junkie-toasts .toast-close:hover { color: var(--ink); background: var(--surface-2); }
+#junkie-toasts .toast-clickable { cursor: pointer; }
+#junkie-toasts .toast-clickable:hover { border-color: var(--border-strong); }
 .settings-auto-roll {
   display: flex;
   align-items: center;
