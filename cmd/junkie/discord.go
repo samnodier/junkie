@@ -440,6 +440,13 @@ func (b *discordBot) handleRegister(s *discordgo.Session, i *discordgo.Interacti
 		b.replyLinkRequired(s, i)
 		return
 	}
+	// Binding the server to a room is a server-shaping act, so it takes the
+	// same Manage Server permission that deregistering does — otherwise any
+	// linked member could claim the binding and its creator role.
+	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageGuild == 0 {
+		b.ephemeral(s, i, "Registering needs the Manage Server permission — ask a server admin to run this.")
+		return
+	}
 	if _, _, ok := a.discordRoom(ctx, i.GuildID); ok {
 		b.ephemeral(s, i, "This server already has a junkie room. `/junkie deregister` first to connect a different one.")
 		return
@@ -454,6 +461,10 @@ func (b *discordBot) handleRegister(s *discordgo.Session, i *discordgo.Interacti
 		}
 		roomID, code = rm.ID, rm.Code
 	} else {
+		if !a.limiter.allow("createroom:"+u.ID, 20, time.Hour) {
+			b.ephemeral(s, i, "Too many rooms created; try again later.")
+			return
+		}
 		name := "Discord room"
 		if g, err := s.Guild(i.GuildID); err == nil && g.Name != "" {
 			name = g.Name + " focus room"
@@ -519,9 +530,21 @@ func (b *discordBot) handleDeregister(s *discordgo.Session, i *discordgo.Interac
 func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.InteractionCreate, shorthand string) {
 	a := b.app
 	ctx := context.Background()
+	// Same bar as the web settings form: a linked account that's a member
+	// of the room. Without this, any Discord user in the guild could
+	// reconfigure the timer anonymously.
+	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+	if !linked {
+		b.replyLinkRequired(s, i)
+		return
+	}
 	rm, _, ok := a.discordRoom(ctx, i.GuildID)
 	if !ok {
 		b.replyNotRegistered(s, i)
+		return
+	}
+	if !a.isRoomMember(ctx, rm.ID, u.ID) {
+		b.ephemeral(s, i, "Join this room first (`/junkie join`) before changing its settings.")
 		return
 	}
 	if a.roomRunActive(ctx, rm.ID) {

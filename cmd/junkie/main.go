@@ -1192,6 +1192,10 @@ func (a *app) todoActionDenied(w http.ResponseWriter, r *http.Request, roomCode,
 
 func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
+	if !a.limiter.allow("createroom:"+u.ID, 20, time.Hour) {
+		http.Redirect(w, r, "/?error="+url.QueryEscape("Too many rooms created; try again later."), http.StatusSeeOther)
+		return
+	}
 	name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)
 	if name == "" {
 		name = u.DisplayName + "'s focus room"
