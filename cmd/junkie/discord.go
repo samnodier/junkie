@@ -62,6 +62,20 @@ var discordCommands = []*discordgo.ApplicationCommand{
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "channel",
+				Description: "Move the bot's notifications to another channel",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:         discordgo.ApplicationCommandOptionChannel,
+						Name:         "channel",
+						Description:  "Channel to post in; omit to use the channel you run this in",
+						Required:     false,
+						ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildText, discordgo.ChannelTypeGuildNews},
+					},
+				},
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "config",
 				Description: "Set the timer: focus-minutes/break-minutes/sessions, e.g. 30/5/3",
 				Options: []*discordgo.ApplicationCommandOption{
@@ -193,6 +207,12 @@ func (b *discordBot) handleCommand(s *discordgo.Session, i *discordgo.Interactio
 		b.handleRegister(s, i, code)
 	case "deregister":
 		b.handleDeregister(s, i)
+	case "channel":
+		target := ""
+		if len(sub.Options) > 0 {
+			target, _ = sub.Options[0].Value.(string)
+		}
+		b.handleChannel(s, i, target)
 	case "config":
 		shorthand := ""
 		if len(sub.Options) > 0 {
@@ -554,6 +574,66 @@ func (b *discordBot) handleDeregister(s *discordgo.Session, i *discordgo.Interac
 		return
 	}
 	b.reply(s, i, fmt.Sprintf("Deregistered. Room `%s` still exists on the web, but this server is no longer connected to it. Run `/junkie register` to connect a new room.", rm.Code), nil)
+}
+
+// handleChannel moves the bot's announcements to a different channel — the
+// one named in the option, or the one the command was run in. Same bar as
+// deregister (Manage Server or the registering member), since redirecting the
+// server's notifications is the same kind of server-shaping act.
+func (b *discordBot) handleChannel(s *discordgo.Session, i *discordgo.InteractionCreate, channelID string) {
+	a := b.app
+	ctx := context.Background()
+	rm, oldChannelID, ok := a.discordRoom(ctx, i.GuildID)
+	if !ok {
+		b.replyNotRegistered(s, i)
+		return
+	}
+	canManage := i.Member != nil && i.Member.Permissions&discordgo.PermissionManageGuild != 0
+	if !canManage {
+		var registeredBy string
+		_ = a.db.QueryRow(ctx, `SELECT COALESCE(linked_by::text, '') FROM discord_guilds WHERE guild_id = $1`, i.GuildID).Scan(&registeredBy)
+		u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+		if !linked || u.ID != registeredBy {
+			b.ephemeral(s, i, "Only the member who registered this room or someone with Manage Server permission can move its notifications.")
+			return
+		}
+	}
+	if channelID == "" {
+		channelID = i.ChannelID
+	}
+	// The option's ChannelTypes filter is client-side; confirm the target is
+	// really a text channel in this guild before pointing posts at it.
+	ch, err := s.Channel(channelID)
+	if err != nil || ch.GuildID != i.GuildID || (ch.Type != discordgo.ChannelTypeGuildText && ch.Type != discordgo.ChannelTypeGuildNews) {
+		b.ephemeral(s, i, "Pick a text channel in this server.")
+		return
+	}
+	if perms, err := s.UserChannelPermissions(s.State.User.ID, channelID); err == nil && perms&discordgo.PermissionSendMessages == 0 {
+		b.ephemeral(s, i, fmt.Sprintf("I can't send messages in <#%s> — fix the channel permissions first, then rerun this.", channelID))
+		return
+	}
+	if channelID == oldChannelID {
+		b.ephemeral(s, i, fmt.Sprintf("Notifications already post to <#%s>.", channelID))
+		return
+	}
+	var oldMessageID string
+	_ = a.db.QueryRow(ctx, `SELECT live_message_id FROM discord_guilds WHERE guild_id = $1`, i.GuildID).Scan(&oldMessageID)
+	if _, err := a.db.Exec(ctx, `UPDATE discord_guilds SET channel_id = $1, live_message_id = '' WHERE guild_id = $2`, channelID, i.GuildID); err != nil {
+		log.Printf("discord: move channel %s: %v", rm.Code, err)
+		b.ephemeral(s, i, "Couldn't move notifications — try again.")
+		return
+	}
+	// Remove the live status message left behind in the old channel so a
+	// stale countdown never points at the old location.
+	if oldMessageID != "" {
+		_ = s.ChannelMessageDelete(oldChannelID, oldMessageID)
+	}
+	b.reply(s, i, fmt.Sprintf("Notifications for room `%s` now post to <#%s>.", rm.Code, channelID), nil)
+	// If a run is live right now, put its status message in the new channel
+	// immediately instead of waiting for the next phase change.
+	if timer, err := a.activeTimer(ctx, rm.ID, rm.CreatorID); err == nil && timer != nil {
+		a.notifyDiscord(rm, timer, false)
+	}
 }
 
 func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.InteractionCreate, shorthand string) {
@@ -987,6 +1067,7 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie link` — connect your Discord account to your junkie account\n"+
 		"`/junkie register [code]` — connect an existing room by code, or create a new one (posts to this channel)\n"+
 		"`/junkie deregister` — disconnect this server from its room\n"+
+		"`/junkie channel [#channel]` — move the bot's notifications to another channel\n"+
 		"`/junkie config focus/break/sessions` — set the timer, e.g. `30/5/3`\n"+
 		"`/junkie start` — start a focus run\n"+
 		"`/junkie join` — join now, or be queued in for the next break/run\n"+
