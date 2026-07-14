@@ -337,12 +337,22 @@ func discordStatusContent(rm room, timer *timerRun) string {
 	}
 }
 
+// discordNameList renders participant display names for the live message,
+// capped so a big room can't balloon it.
+func discordNameList(names []string) string {
+	const cap = 8
+	if len(names) > cap {
+		return strings.Join(names[:cap], ", ") + fmt.Sprintf(" +%d more", len(names)-cap)
+	}
+	return strings.Join(names, ", ")
+}
+
 // notifyDiscord keeps the room's live status message in the linked channel
-// current: a lobby posts a fresh message (one per run), every later phase
+// current: a new run posts a fresh message (freshRun), every later phase
 // change edits it in place, and timer == nil marks the run complete. It also
 // arms the phase-end wakeup so Discord-only rooms advance without a web
 // viewer polling. No-op when the bot isn't running or the room isn't linked.
-func (a *app) notifyDiscord(rm room, timer *timerRun) {
+func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	if a.discord == nil {
 		return
 	}
@@ -351,7 +361,18 @@ func (a *app) notifyDiscord(rm room, timer *timerRun) {
 	if err := a.db.QueryRow(ctx, `SELECT channel_id, live_message_id FROM discord_guilds WHERE room_id = $1`, rm.ID).Scan(&channelID, &messageID); err != nil {
 		return
 	}
+	// Re-fetch the participant list every time: joins and leaves call in
+	// with a snapshot taken before their own write, and the whole point of
+	// the names line is showing who's in *now*.
+	if timer != nil {
+		fresh := *timer
+		fresh.Participants, _ = a.timerParticipants(ctx, timer.ID)
+		timer = &fresh
+	}
 	content := discordStatusContent(rm, timer)
+	if timer != nil && len(timer.Participants) > 0 {
+		content += "\nIn: " + discordNameList(timer.Participants)
+	}
 	components := joinComponents()
 	if timer == nil {
 		components = nil
@@ -359,10 +380,10 @@ func (a *app) notifyDiscord(rm room, timer *timerRun) {
 	// Post a fresh message at the moments people want to be told about — a
 	// new run's lobby, a finished focus block (the joinable break window),
 	// and run completion — because Discord only marks *new* messages unread;
-	// silent in-place edits cover everything else (break->focus,
-	// pause/resume). Transitioned distinguishes a real focus->break flip
-	// from a pause tweak that merely re-renders the break.
-	repost := timer == nil || timer.Phase == "lobby" || (timer.Phase == "break" && timer.Transitioned)
+	// silent in-place edits cover everything else (join/leave updates,
+	// break->focus, pause/resume). Transitioned distinguishes a real
+	// focus->break flip from a pause tweak that merely re-renders the break.
+	repost := freshRun || timer == nil || (timer.Phase == "break" && timer.Transitioned)
 	if !repost && messageID != "" {
 		edit := &discordgo.MessageEdit{Channel: channelID, ID: messageID, Content: &content, Components: &components}
 		if _, err := a.discord.session.ChannelMessageEditComplex(edit); err == nil {
@@ -422,7 +443,7 @@ func (b *discordBot) scheduleNext(rm room, timer *timerRun) {
 			b.app.broadcastTimerPhase(rm, next)
 		} else if next != nil {
 			// Deadline moved (pause, break-length change) — track the new one.
-			b.app.notifyDiscord(rm, next)
+			b.app.notifyDiscord(rm, next, false)
 		}
 	})
 }
@@ -625,13 +646,16 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 	if !a.isRoomMember(ctx, rm.ID, u.ID) {
 		a.addRoomMember(ctx, rm.ID, u.ID)
 	}
-	_, outcome, err := a.joinTimer(ctx, rm, u.ID)
+	timer, outcome, err := a.joinTimer(ctx, rm, u.ID)
 	if err != nil {
 		log.Printf("discord: join timer %s: %v", rm.Code, err)
 		b.ephemeral(s, i, "Couldn't join the run — try again.")
 		return
 	}
 	a.hub.broadcast(rm.Code, "timer-phase")
+	if outcome == joinedNow && timer != nil {
+		a.notifyDiscord(rm, timer, false)
+	}
 	switch outcome {
 	case joinedQueuedStart:
 		b.ephemeral(s, i, "You're in — you'll join automatically when the next run starts. `/junkie leave` cancels.")
@@ -667,9 +691,12 @@ func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	if ended {
 		a.hub.broadcast(rm.Code, "timer-end")
-		a.notifyDiscord(rm, nil)
+		a.notifyDiscord(rm, nil, false)
 	} else {
 		a.hub.broadcast(rm.Code, "timer-leave")
+		if timer, err := a.activeTimer(ctx, rm.ID, u.ID); err == nil && timer != nil {
+			a.notifyDiscord(rm, timer, false)
+		}
 	}
 	b.ephemeral(s, i, "You've left the run.")
 }

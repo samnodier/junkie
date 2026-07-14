@@ -1540,9 +1540,14 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		}
 		action = ""
 	case "timer-join":
-		if _, outcome, _ := a.joinTimer(r.Context(), rm, u.ID); outcome == joinedLimit {
+		timer, outcome, _ := a.joinTimer(r.Context(), rm, u.ID)
+		if outcome == joinedLimit {
 			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape(fmt.Sprintf("You're already in %d rooms' live sessions — leave one first.", maxActiveRooms)), http.StatusSeeOther)
 			return
+		}
+		if outcome == joinedNow && timer != nil {
+			// Refresh the Discord live message's who's-in line.
+			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-pause":
 		if timer, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
@@ -1551,7 +1556,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		} else if !changed {
 			action = ""
 		} else {
-			a.notifyDiscord(rm, timer)
+			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-resume":
 		if timer, changed, err := a.resumeRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
@@ -1560,7 +1565,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		} else if !changed {
 			action = ""
 		} else {
-			a.notifyDiscord(rm, timer)
+			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-skip-break":
 		if timer, changed, err := a.skipRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
@@ -1570,7 +1575,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			action = ""
 		} else {
 			action = "timer-phase"
-			a.notifyDiscord(rm, timer)
+			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-break-length":
 		minutes := clampInt(r.FormValue("minutes"), 1, 60, rm.BreakMinutes)
@@ -1593,13 +1598,15 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		} else {
 			action = "timer-phase"
 			if timer, err := a.activeTimer(r.Context(), rm.ID, u.ID); err == nil {
-				a.notifyDiscord(rm, timer)
+				a.notifyDiscord(rm, timer, false)
 			}
 		}
 	case "timer-leave":
 		if ended, _ := a.leaveTimer(r.Context(), rm, u.ID); ended {
 			action = "timer-end"
-			a.notifyDiscord(rm, nil)
+			a.notifyDiscord(rm, nil, false)
+		} else if timer, err := a.activeTimer(r.Context(), rm.ID, u.ID); err == nil && timer != nil {
+			a.notifyDiscord(rm, timer, false)
 		}
 	default:
 		http.NotFound(w, r)
@@ -1677,7 +1684,7 @@ func (a *app) broadcastTimerPhase(rm room, timer *timerRun) {
 			"breakDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
-	a.notifyDiscord(rm, timer)
+	a.notifyDiscord(rm, timer, false)
 }
 
 func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
@@ -2058,7 +2065,7 @@ func (a *app) startRoomTimerAndSchedule(ctx context.Context, rm room, userID str
 		"runId": timer.ID, "lobbyDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
 		"starterName": starterName, "starterUserId": userID,
 	})
-	a.notifyDiscord(rm, timer)
+	a.notifyDiscord(rm, timer, true)
 	a.scheduleLobbyDeadline(rm, userID, timer.PhaseEndsAt)
 	return timer, created, nil
 }

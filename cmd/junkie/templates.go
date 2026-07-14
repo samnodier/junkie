@@ -2547,6 +2547,8 @@ const layoutTemplates = `
                 <div class="circle-timer-countdown countdown" aria-live="polite" data-seconds="{{timerSeconds .Timer}}" data-total="30">--:--</div>
               </div>
             </div>
+            {{if gt (len .Timer.Participants) 0}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
+            <p class="label label-accent">{{len .Timer.Participants}} joined · in when it starts</p>
             {{if not .Timer.Participant}}
             <form method="post" action="/r/{{.Room.Code}}/timer-join"><button type="submit" class="btn-primary">Join this block</button></form>
             {{else}}
@@ -2599,8 +2601,10 @@ const layoutTemplates = `
             <form method="post" action="/r/{{.Room.Code}}/timer-leave"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
             {{end}}
             {{end}}
+            {{if ne .Timer.Phase "lobby"}}
             {{if gt (len .Timer.Participants) 0}}{{template "participant-avatar-stack" dict "Names" .Timer.Participants "Small" true}}{{end}}
-            <p class="label">{{if eq .Timer.Phase "lobby"}}{{len .Timer.Participants}} joined{{else if eq (len .Timer.Participants) 1}}Focusing solo{{else}}{{len .Timer.Participants}} focusing{{end}}</p>
+            <p class="label">{{if eq (len .Timer.Participants) 1}}Focusing solo{{else}}{{len .Timer.Participants}} focusing{{end}}</p>
+            {{end}}
           </article>
           {{else}}
           <article class="timer-card panel idle ready-card">
