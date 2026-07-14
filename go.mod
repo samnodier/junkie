@@ -3,8 +3,14 @@ module github.com/samnodier/junkie
 go 1.26.4
 
 require (
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/jackc/pgx/v5 v5.10.0
 	golang.org/x/crypto v0.53.0
+)
+
+require (
+	github.com/gorilla/websocket v1.4.2 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 )
 
 require (

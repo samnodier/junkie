@@ -38,6 +38,7 @@ type app struct {
 	hub                 *hub
 	limiter             *rateLimiter
 	currentUserOverride func(*http.Request) (user, bool)
+	discord             *discordBot
 }
 
 type user struct {
@@ -247,6 +248,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Opt-in: no-op unless DISCORD_BOT_TOKEN is set, so existing deployments
+	// are unaffected.
+	discordBot, err := newDiscordBot(a)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if discordBot != nil {
+		a.discord = discordBot
+		defer discordBot.Close()
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /assets/app.css", a.css)
 	mux.HandleFunc("GET /assets/guest.js", a.serveStaticAsset("guest.js", "application/javascript; charset=utf-8"))
@@ -277,6 +289,7 @@ func main() {
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
 	mux.HandleFunc("GET /connections", a.requireAuth(a.connectionsPage))
+	mux.HandleFunc("GET /discord/link/{token}", a.requireAuth(a.discordLinkConfirm))
 	// Exact routes above win over this single-segment pattern; usernames
 	// that would collide with them are reserved at signup.
 	mux.HandleFunc("GET /{username}", a.publicProfilePage)
@@ -1394,7 +1407,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		if v := r.FormValue("auto_roll"); v != "" {
 			autoRoll = v == "1"
 		}
-		_, _ = a.db.Exec(r.Context(), `UPDATE rooms SET focus_minutes = $1, break_minutes = $2, auto_sessions = $3, auto_roll = $4, updated_at = now() WHERE id = $5`, focus, breaks, sessions, autoRoll, rm.ID)
+		_ = a.applyRoomSettings(r.Context(), rm.ID, focus, breaks, sessions, autoRoll)
 	case "delete":
 		if rm.CreatorID != u.ID {
 			http.Error(w, "only the creator can delete this room", http.StatusForbidden)
@@ -1426,29 +1439,18 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		created, err := a.startRoomTimer(r.Context(), rm, u.ID, focusMinutes)
+		timer, created, err := a.startRoomTimerAndSchedule(r.Context(), rm, u.ID, focusMinutes, u.DisplayName)
 		if err != nil {
 			log.Printf("start room timer %s: %v", rm.Code, err)
 			http.Error(w, "could not start timer", http.StatusInternalServerError)
 			return
 		}
 		if created {
-			timer, _ := a.activeTimer(r.Context(), rm.ID, u.ID)
-			if timer != nil {
-				a.hub.broadcastJSON(rm.Code, map[string]interface{}{
-					"type": "timer-lobby", "roomCode": rm.Code, "roomName": rm.Name,
-					"runId": timer.ID, "lobbyDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
-					"starterName": u.DisplayName, "starterUserId": u.ID,
-				})
-				a.scheduleLobbyDeadline(rm, u.ID, timer.PhaseEndsAt)
-			}
+			a.notifyDiscord(rm, "lobby", timer)
 		}
 		action = ""
 	case "timer-join":
-		timer, _, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
-		if timer != nil && (timer.Phase == "lobby" || timer.Phase == "break") {
-			_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, u.ID)
-		}
+		_, _ = a.joinTimer(r.Context(), rm, u.ID)
 	case "timer-pause":
 		if _, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not pause break", http.StatusInternalServerError)
@@ -1494,12 +1496,8 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			action = "timer-phase"
 		}
 	case "timer-leave":
-		timer, _, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
-		if timer != nil && timer.Participant {
-			_, _ = a.db.Exec(r.Context(), `DELETE FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2`, timer.ID, u.ID)
-			if a.endTimerIfNoParticipants(r.Context(), timer.ID) {
-				action = "timer-end"
-			}
+		if ended, _ := a.leaveTimer(r.Context(), rm, u.ID); ended {
+			action = "timer-end"
 		}
 	default:
 		http.NotFound(w, r)
@@ -1576,6 +1574,7 @@ func (a *app) broadcastTimerPhase(rm room, timer *timerRun) {
 			"type": "timer-break-invite", "roomCode": rm.Code, "roomName": rm.Name,
 			"breakDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
 		})
+		a.notifyDiscord(rm, "break", timer)
 	}
 }
 
@@ -1721,6 +1720,45 @@ func requestedRoomFocusMinutes(r *http.Request, fallback int) (int, error) {
 	return minutes, nil
 }
 
+// applyRoomSettings persists a room's timer configuration. Shared by the web
+// "settings" room action and the Discord /junkie config command so the two
+// surfaces can't drift.
+func (a *app) applyRoomSettings(ctx context.Context, roomID string, focusMinutes, breakMinutes, autoSessions int, autoRoll bool) error {
+	_, err := a.db.Exec(ctx, `UPDATE rooms SET focus_minutes = $1, break_minutes = $2, auto_sessions = $3, auto_roll = $4, updated_at = now() WHERE id = $5`,
+		focusMinutes, breakMinutes, autoSessions, autoRoll, roomID)
+	return err
+}
+
+// joinTimer adds userID as a participant of rm's active lobby or break run,
+// if one exists. Shared by the web "timer-join" room action and the Discord
+// /junkie join command (and its Join button).
+func (a *app) joinTimer(ctx context.Context, rm room, userID string) (*timerRun, error) {
+	timer, _, err := a.normalizeTimer(ctx, rm.ID, userID)
+	if err != nil || timer == nil {
+		return timer, err
+	}
+	if timer.Phase == "lobby" || timer.Phase == "break" {
+		if _, err := a.db.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, userID); err != nil {
+			return timer, err
+		}
+	}
+	return timer, nil
+}
+
+// leaveTimer removes userID from rm's active run, ending the run if that was
+// the last participant. Shared by the web "timer-leave" room action and the
+// Discord /junkie leave command.
+func (a *app) leaveTimer(ctx context.Context, rm room, userID string) (ended bool, err error) {
+	timer, _, err := a.normalizeTimer(ctx, rm.ID, userID)
+	if err != nil || timer == nil || !timer.Participant {
+		return false, err
+	}
+	if _, err := a.db.Exec(ctx, `DELETE FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2`, timer.ID, userID); err != nil {
+		return false, err
+	}
+	return a.endTimerIfNoParticipants(ctx, timer.ID), nil
+}
+
 func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusMinutes int) (bool, error) {
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
@@ -1760,6 +1798,29 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 		return false, err
 	}
 	return true, nil
+}
+
+// startRoomTimerAndSchedule starts rm's timer (if none is active), broadcasts
+// the lobby countdown over the web hub, and schedules the lobby->focus
+// transition. Shared by the web "timer-start" room action and the Discord
+// /junkie start command, which additionally uses the returned timer to build
+// its own reply rather than relying on the hub broadcast.
+func (a *app) startRoomTimerAndSchedule(ctx context.Context, rm room, userID string, focusMinutes int, starterName string) (*timerRun, bool, error) {
+	created, err := a.startRoomTimer(ctx, rm, userID, focusMinutes)
+	if err != nil || !created {
+		return nil, created, err
+	}
+	timer, err := a.activeTimer(ctx, rm.ID, userID)
+	if err != nil || timer == nil {
+		return timer, created, err
+	}
+	a.hub.broadcastJSON(rm.Code, map[string]interface{}{
+		"type": "timer-lobby", "roomCode": rm.Code, "roomName": rm.Name,
+		"runId": timer.ID, "lobbyDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
+		"starterName": starterName, "starterUserId": userID,
+	})
+	a.scheduleLobbyDeadline(rm, userID, timer.PhaseEndsAt)
+	return timer, created, nil
 }
 
 func (a *app) scheduleLobbyDeadline(rm room, userID string, deadline time.Time) {
