@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"log"
 	"net/http"
 	"net/url"
@@ -103,6 +108,7 @@ var discordCommands = []*discordgo.ApplicationCommand{
 							{Name: "month", Value: "month"},
 							{Name: "year", Value: "year"},
 							{Name: "alltime", Value: "all"},
+							{Name: "map", Value: "map"},
 						},
 					},
 				},
@@ -674,6 +680,45 @@ func formatFocusMinutes(minutes int) string {
 	return fmt.Sprintf("%dh %dm", minutes/60, minutes%60)
 }
 
+// heatColors mirrors the web heatmap's dark-theme palette (--heat-0..4 in
+// the stylesheet) on the app's dark background, so the map picture looks
+// like the profile page rendered in Discord's usual dark UI.
+var heatColors = [5]color.RGBA{
+	{0x20, 0x29, 0x20, 0xFF},
+	{0x27, 0x4C, 0x36, 0xFF},
+	{0x2F, 0x6B, 0x47, 0xFF},
+	{0x3F, 0x8F, 0x60, 0xFF},
+	{0x62, 0xBC, 0x85, 0xFF},
+}
+
+// renderHeatmapPNG draws the year's activity grid — weeks as columns,
+// weekdays as rows, exactly like the web heatmap — with the standard
+// library's image package, so it works in the minimal production container.
+func renderHeatmapPNG(h heatmapData) ([]byte, error) {
+	const cell, gap, pad = 12, 3, 14
+	const step = cell + gap
+	width := pad*2 + h.Weeks*step - gap
+	height := pad*2 + 7*step - gap
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{0x12, 0x17, 0x12, 0xFF}}, image.Point{}, draw.Src)
+	for week := 0; week < h.Weeks; week++ {
+		for dow := 0; dow < 7; dow++ {
+			c := h.Cells[week*7+dow]
+			if c.Empty {
+				continue
+			}
+			lvl := min(max(c.Level, 0), 4)
+			x, y := pad+week*step, pad+dow*step
+			draw.Draw(img, image.Rect(x, y, x+cell, y+cell), &image.Uniform{heatColors[lvl]}, image.Point{}, draw.Src)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // statsWindowDays maps a stats period choice to its trailing-day window;
 // 0 means the single current day, -1 means no cutoff (all time).
 var statsWindowDays = map[string]int{"day": 0, "week": 7, "month": 30, "year": 365, "all": -1}
@@ -690,6 +735,31 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
 	if !linked {
 		b.replyLinkRequired(s, i)
+		return
+	}
+
+	if period == "map" {
+		heat, err := a.activity(ctx, u.ID)
+		if err != nil || heat.Weeks == 0 {
+			b.ephemeral(s, i, "No focus activity to map yet — finish a session first.")
+			return
+		}
+		picture, err := renderHeatmapPNG(heat)
+		if err != nil {
+			log.Printf("discord: render heatmap: %v", err)
+			b.ephemeral(s, i, "Couldn't draw the map — try again.")
+			return
+		}
+		err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("**%s** — %s focused this past year", u.DisplayName, formatFocusMinutes(heat.TotalMinutes)),
+				Files:   []*discordgo.File{{Name: "focus-map.png", ContentType: "image/png", Reader: bytes.NewReader(picture)}},
+			},
+		})
+		if err != nil {
+			log.Printf("discord: stats map reply: %v", err)
+		}
 		return
 	}
 
@@ -832,5 +902,5 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie join` — join now, or be queued in for the next break/run\n"+
 		"`/junkie leave` — leave the run (or cancel a queued join)\n"+
 		"`/junkie status` — where the timer is right now\n"+
-		"`/junkie stats [day|week|month|year|alltime]` — your focus stats")
+		"`/junkie stats [day|week|month|year|alltime|map]` — your focus stats, or your year as a heatmap picture")
 }
