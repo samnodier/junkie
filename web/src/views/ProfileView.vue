@@ -72,6 +72,13 @@ function confirmDelete(event) {
   }
 }
 
+// Native file inputs can't be styled, so a hidden input backs a real button
+// and the chosen filename is echoed next to it.
+const avatarFileName = ref('');
+function onAvatarPicked() {
+  avatarFileName.value = avatarInput.value?.files?.[0]?.name || '';
+}
+
 const usernameDraft = ref('');
 
 onMounted(async () => {
@@ -154,8 +161,10 @@ onMounted(async () => {
         </div>
         <div class="profile-avatar-actions">
           <form id="avatar-form" @submit.prevent="submitAvatar">
-            <input type="file" name="avatar" id="avatar-input" ref="avatarInput" accept="image/*" required aria-label="Choose profile picture">
-            <button type="submit" class="btn-primary btn-compact">Upload picture</button>
+            <input type="file" name="avatar" id="avatar-input" ref="avatarInput" accept="image/*" class="visually-hidden" aria-label="Choose profile picture" @change="onAvatarPicked">
+            <button type="button" class="btn-ghost btn-compact" @click="avatarInput.click()">Choose picture</button>
+            <span class="avatar-file-name" aria-live="polite">{{ avatarFileName || 'No file chosen' }}</span>
+            <button type="submit" class="btn-primary btn-compact" :disabled="!avatarFileName">Upload picture</button>
           </form>
           <form v-if="auth.avatarURL" method="post" action="/profile/avatar/remove">
             <button type="submit" class="btn-ghost btn-compact">Remove picture</button>

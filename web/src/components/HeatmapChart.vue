@@ -1,7 +1,10 @@
 <script setup>
 // Focus work map, ported from the Go "heatmap" template block. Takes the
 // server's /api/... heatmap shape or the guest builder's identical output.
-import { computed } from 'vue';
+// On narrow screens the grid keeps readable fixed-size cells and scrolls
+// horizontally instead of squashing; it opens scrolled to the current
+// period (the right end), history to the left.
+import { computed, onMounted, ref } from 'vue';
 
 const props = defineProps({
   heatmap: { type: Object, required: true },
@@ -9,6 +12,11 @@ const props = defineProps({
 });
 
 const hours = computed(() => Math.round((props.heatmap.totalMinutes || 0) / 60));
+const wrap = ref(null);
+
+onMounted(() => {
+  if (wrap.value) wrap.value.scrollLeft = wrap.value.scrollWidth;
+});
 </script>
 
 <template>
@@ -19,15 +27,17 @@ const hours = computed(() => Math.round((props.heatmap.totalMinutes || 0) / 60))
         <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
       </div>
       <div class="heatmap-main">
-        <div class="heatmap-months" :style="{ '--weeks': heatmap.weeks }">
-          <span
-            v-for="(m, i) in heatmap.months"
-            :key="i"
-            class="heatmap-month"
-            :style="{ '--col': m.col }"
-          >{{ m.label }}</span>
-        </div>
-        <div class="heatmap-wrap">
+        <!-- Months live inside the scroll container so their labels stay
+             aligned with the weeks they name while scrolling. -->
+        <div class="heatmap-wrap" ref="wrap">
+          <div class="heatmap-months" :style="{ '--weeks': heatmap.weeks }">
+            <span
+              v-for="(m, i) in heatmap.months"
+              :key="i"
+              class="heatmap-month"
+              :style="{ '--col': m.col }"
+            >{{ m.label }}</span>
+          </div>
           <div class="heatmap" :style="{ '--weeks': heatmap.weeks }" aria-label="Focus activity heat map">
             <template v-for="(c, i) in heatmap.cells" :key="i">
               <span v-if="c.empty" class="cell cell-empty"></span>

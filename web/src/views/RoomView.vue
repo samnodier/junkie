@@ -189,6 +189,7 @@ onUnmounted(() => {
             <div class="room-title-row">
               <h1 class="room-name-display" v-show="!renaming">{{ room.room.name }}</h1>
               <button type="button" class="room-rename-trigger" aria-label="Rename room" v-show="!renaming" @click="startRename"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+              <a class="label room-members-link room-members-inline" :href="`/r/${room.code}/members`" v-show="!renaming">{{ room.memberCount || 0 }} members</a>
             </div>
             <form class="room-rename-form" v-show="renaming" @submit.prevent="saveRename">
               <input name="name" v-model="renameDraft" aria-label="Room name" required @keydown.esc="renaming = false">

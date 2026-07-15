@@ -790,7 +790,26 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   gap: var(--sp-3);
   margin-top: var(--sp-3);
 }
-.profile-avatar-actions form { display: flex; align-items: center; gap: var(--sp-3); }
+.profile-avatar-actions form { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; min-width: 0; }
+.avatar-file-name {
+  font-size: var(--fs-small);
+  color: var(--muted);
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 .profile-avatar-actions input[type="file"] {
   min-height: 0;
   padding: 0;
@@ -943,13 +962,16 @@ span.room-member-locked { color: var(--muted); cursor: default; }
   padding: 0;
   color: inherit;
   container-type: inline-size;
+  /* The vw-based ring widths below don't know about page/card padding, so
+     never let a ring push its card wider than the space it actually has. */
+  max-width: 100%;
 }
-.circle-timer.idle { width: clamp(200px, 78vw, 300px); }
+.circle-timer.idle { width: min(clamp(200px, 78vw, 300px), 100%); }
 .circle-timer.running,
 .room-focus-ring,
 .room-active-ring,
 .circle-timer.break-offer,
-.circle-timer.break-running { width: clamp(220px, 84vw, 340px); cursor: default; }
+.circle-timer.break-running { width: min(clamp(220px, 84vw, 340px), 100%); cursor: default; }
 .circle-timer.idle:hover .circle-timer-progress { stroke: var(--accent-hover); }
 .circle-timer-svg {
   position: absolute;
@@ -1336,6 +1358,15 @@ body.menu-drawer-open { overflow: hidden; }
 }
 .room-share-block { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .room-desk-grid { grid-template-columns: 1fr 400px; gap: 48px; align-items: start; }
+/* Bounded like the desk todos panel: the panel stops growing and the todo
+   groups scroll inside it instead of stretching the page. */
+.room-todos-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(36rem, calc(100dvh - 11rem));
+}
+.room-todos-panel .todo-groups { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .room-timer-column { display: grid; gap: var(--sp-4); }
 /* Every card in the timer column shares the ready card's centered layout,
    with grid gap owning the vertical rhythm between label, ring, and
@@ -1422,6 +1453,9 @@ body.menu-drawer-open { overflow: hidden; }
 }
 .participant-avatars-sm .participant-avatar { width: 28px; height: 28px; font-size: 0.7rem; }
 .room-members-meta { text-align: right; display: grid; gap: var(--sp-2); justify-items: end; }
+/* Mobile-only twin of the members link, rendered inside the title row so the
+   count sits beside the room name instead of stacking below it. */
+.room-members-inline { display: none; }
 .room-members-link { color: var(--faint); }
 .room-members-link:hover { color: var(--ink); }
 .copy-chip, .room-share-code {
@@ -1659,7 +1693,13 @@ body.menu-drawer-open { overflow: hidden; }
     translate: -50% 0;
   }
   .room-header-new { flex-direction: column; }
-  .room-members-meta { text-align: left; justify-items: start; }
+  .room-members-meta { display: none; }
+  .room-members-inline { display: inline-block; margin-left: auto; }
+  /* Readable heatmap on phones: fixed 11px cells (14px week pitch) inside
+     the horizontal scroller instead of cells squashed to invisibility. */
+  .heatmap { grid-auto-columns: 11px; gap: 3px; width: max-content; }
+  .heatmap .cell { width: 11px; min-width: 11px; }
+  .heatmap-months { grid-template-columns: repeat(var(--weeks), 14px); width: max-content; }
   .timer-cancel, .btn-ghost.timer-cancel { width: 100%; }
   .desk-timer-actions-row { flex-direction: column; }
   .desk-timer-actions-row > button { flex: none; }
