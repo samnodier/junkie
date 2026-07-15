@@ -364,6 +364,7 @@ func main() {
 	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
 
 	go a.sweepExpiredSessions(ctx)
+	go a.sweepInactiveTodos(ctx)
 
 	// Reject state-changing requests from other origins (CSRF). Requests
 	// without browser origin metadata (curl, health checks) still pass.
@@ -418,6 +419,30 @@ func (a *app) sweepExpiredSessions(ctx context.Context) {
 	for {
 		if _, err := a.db.Exec(ctx, `DELETE FROM sessions WHERE expires_at < now()`); err != nil {
 			log.Printf("sweep expired sessions: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// sweepInactiveTodos permanently deletes todos that have been done or removed
+// for over 24 hours, for every user and room. junkie deliberately doesn't
+// keep finished work around — the work map records the focus, not the list.
+// updated_at is safe to read as "when it became inactive": edits are rejected
+// on done/removed todos, so only state flips touch it, and un-completing or
+// restoring resets the clock.
+func (a *app) sweepInactiveTodos(ctx context.Context) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		tag, err := a.db.Exec(ctx, `DELETE FROM todos WHERE (done OR removed) AND updated_at < now() - interval '24 hours'`)
+		if err != nil {
+			log.Printf("sweep inactive todos: %v", err)
+		} else if n := tag.RowsAffected(); n > 0 {
+			log.Printf("swept %d inactive todos", n)
 		}
 		select {
 		case <-ctx.Done():

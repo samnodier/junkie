@@ -107,7 +107,7 @@ onMounted(async () => {
       <div id="guest-profile-work-map">
         <HeatmapChart v-if="guestHeatmap" :heatmap="guestHeatmap" />
       </div>
-      <p class="muted legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
+      <p class="muted legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="https://github.com/samnodier/junkie" target="_blank" rel="noopener">GitHub</a></p>
     </section>
 
     <!-- Signed-in variant -->
@@ -237,7 +237,7 @@ onMounted(async () => {
         </form>
       </article>
 
-      <p class="muted legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
+      <p class="muted legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="https://github.com/samnodier/junkie" target="_blank" rel="noopener">GitHub</a></p>
     </section>
   </AppShell>
 </template>

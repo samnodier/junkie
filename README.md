@@ -18,7 +18,7 @@
 
 You can use junkie without signing up. Everything stays in **browser** `localStorage` **on this device only** — it is not stored on the server:
 
-- **Private todos** — add, complete, remove, and restore tasks on the desk.
+- **Private todos** — add, complete, remove, and restore tasks on the desk. Completed and removed todos clean themselves up after 24 hours.
 - **Solo timer** — run private focus sessions with optional breaks.
 - **Work map** — a heatmap of focus minutes per day, stored locally.
 
@@ -71,6 +71,7 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 - Lists are grouped into **yours** and **everyone else's**.
 - You can complete your own todos; you see teammates' todos read-only (with their display name and profile picture).
 - Edits, removes, restores, and deletes apply only to **your** todos.
+- Completed and removed todos are deleted automatically after 24 hours — the room board stays focused on current work.
 - Room todo lists update **live** across the room page and the homepage desk switcher without full page reloads. When someone completes a task, other members see a short toast.
 - On the homepage desk you can switch between **Private todos** and **Room todos** per room you belong to. Inside `/r/{code}` there is no switcher — that page is scoped to one room.
 
@@ -143,6 +144,8 @@ Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `
 **Guest** — todos, solo timer state, and your work map stay in browser `localStorage` on that device. Nothing reaches the server.
 
 **Signed in** — everything lives in PostgreSQL and follows you across devices: account and session, todos, timer runs and focus minutes, rooms and their settings, profile pictures, and connections.
+
+**Finished todos don't stick around.** Once a todo has been completed or removed for 24 hours, junkie deletes it permanently — for every user, in private lists and rooms alike (guest todos follow the same rule locally). Un-completing or restoring a todo within that day resets its clock. Your work map keeps the focus history; the list stays about what's next.
 
 Guest data does not migrate into an account; sign up first if you want to keep progress long-term.
 

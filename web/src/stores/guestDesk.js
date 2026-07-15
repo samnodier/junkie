@@ -24,6 +24,41 @@ const save = (key, value) =>
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Done/removed todos carry the moment they went inactive; active todos don't.
+function stampInactive(t) {
+  if (t.done || t.removed) t.inactiveAt = new Date().toISOString();
+  else delete t.inactiveAt;
+  return t;
+}
+
+// Same policy as the server sweep: anything done or removed for over 24
+// hours is deleted. Pre-policy todos without a stamp get one now, so they
+// keep a full day of grace instead of vanishing on first load.
+function pruneInactive(todos) {
+  let changed = false;
+  const now = Date.now();
+  const kept = [];
+  for (const t of todos) {
+    if (!(t.done || t.removed)) {
+      kept.push(t);
+      continue;
+    }
+    if (!t.inactiveAt) {
+      kept.push(stampInactive({ ...t }));
+      changed = true;
+      continue;
+    }
+    if (now - new Date(t.inactiveAt).getTime() > DAY_MS) {
+      changed = true;
+      continue;
+    }
+    kept.push(t);
+  }
+  return { todos: kept, changed };
+}
+
 export const clampMinutes = (n) => Math.min(180, Math.max(5, n));
 
 export const breakMinutesForFocus = (focusMinutes) => {
@@ -62,16 +97,18 @@ export const useGuestDeskStore = defineStore('guestDesk', {
       this.persistTodos();
       return true;
     },
+    // Any state flip restamps inactiveAt (mirrors the server, where every
+    // flip touches updated_at and restarts the 24h deletion clock).
     toggleTodo(id) {
-      this.todos = this.todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+      this.todos = this.todos.map((t) => (t.id === id ? stampInactive({ ...t, done: !t.done }) : t));
       this.persistTodos();
     },
     removeTodo(id) {
-      this.todos = this.todos.map((t) => (t.id === id ? { ...t, removed: true } : t));
+      this.todos = this.todos.map((t) => (t.id === id ? stampInactive({ ...t, removed: true }) : t));
       this.persistTodos();
     },
     restoreTodo(id) {
-      this.todos = this.todos.map((t) => (t.id === id ? { ...t, removed: false } : t));
+      this.todos = this.todos.map((t) => (t.id === id ? stampInactive({ ...t, removed: false }) : t));
       this.persistTodos();
     },
     deleteTodo(id) {
@@ -115,7 +152,9 @@ export const useGuestDeskStore = defineStore('guestDesk', {
       // Re-read storage first, like guest.js did on every tick: another tab
       // (or anything else) may have changed the timer or todos.
       this.timer = load(TIMER_KEY, null);
-      this.todos = load(TODOS_KEY, []);
+      const pruned = pruneInactive(load(TODOS_KEY, []));
+      this.todos = pruned.todos;
+      if (pruned.changed) this.persistTodos();
       let t = this.timer;
       if (!t) return;
       if (!t.phase) t = { ...t, phase: 'focus' };
