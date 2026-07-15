@@ -142,6 +142,137 @@ func (a *app) apiProfile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type apiTodo struct {
+	ID          string `json:"id"`
+	Text        string `json:"text"`
+	Done        bool   `json:"done"`
+	Removed     bool   `json:"removed"`
+	UserID      string `json:"userId,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	ReadOnly    bool   `json:"readOnly,omitempty"`
+}
+
+func apiTodos(todos []todo) []apiTodo {
+	out := make([]apiTodo, 0, len(todos))
+	for _, t := range todos {
+		out = append(out, apiTodo{
+			ID: t.ID, Text: t.Text, Done: t.Done, Removed: t.Removed,
+			UserID: t.UserID, DisplayName: t.DisplayName, ReadOnly: t.ReadOnly,
+		})
+	}
+	return out
+}
+
+func apiUsers(users []user) []apiUser {
+	out := make([]apiUser, 0, len(users))
+	for _, p := range users {
+		out = append(out, apiUser{
+			ID: p.ID, Username: p.Username, DisplayName: p.DisplayName,
+			HasAvatar: p.HasAvatar, AvatarVersion: p.AvatarVersion,
+		})
+	}
+	return out
+}
+
+// apiRoomTimer serializes a room timer run for the SPA: the same fields the
+// desk/room templates rendered, including what timerStatus carries for the
+// legacy reconcile endpoint.
+func apiRoomTimer(timer *timerRun) map[string]any {
+	if timer == nil {
+		return nil
+	}
+	seconds := int(time.Until(timer.PhaseEndsAt).Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	paused := timer.PausedAt != nil
+	if paused && timer.PausedRemainingSeconds != nil {
+		seconds = *timer.PausedRemainingSeconds
+	}
+	return map[string]any{
+		"runId":          timer.ID,
+		"phase":          timer.Phase,
+		"endsAt":         timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
+		"secondsLeft":    seconds,
+		"focusMinutes":   timer.FocusMinutes,
+		"breakMinutes":   timer.BreakMinutes,
+		"currentSession": timer.CurrentSession,
+		"totalSessions":  timer.TotalSessions,
+		"participant":    timer.Participant,
+		"participants":   apiUsers(timer.Participants),
+		"paused":         paused,
+		"breakPending":   timer.BreakPending(),
+	}
+}
+
+// apiRooms lists the caller's rooms for the menu drawer on non-desk pages.
+func (a *app) apiRooms(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rooms, _ := a.roomsForUser(r.Context(), u.ID)
+	out := make([]map[string]any, 0, len(rooms))
+	for _, rm := range rooms {
+		out = append(out, map[string]any{
+			"code":         rm.Code,
+			"name":         rm.Name,
+			"focusMinutes": rm.FocusMinutes,
+			"breakMinutes": rm.BreakMinutes,
+			"autoSessions": rm.AutoSessions,
+		})
+	}
+	writeJSON(w, map[string]any{"rooms": out})
+}
+
+// apiDesk feeds the signed-in SPA desk: solo timer, private todos, and each
+// room's grouped todos + timer — the JSON twin of the dashboard handler.
+func (a *app) apiDesk(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	ctx := r.Context()
+	soloTimer, _ := a.normalizeSoloTimer(ctx, u.ID)
+	todos, _ := a.personalTodos(ctx, u.ID)
+	rooms, _ := a.roomsForUser(ctx, u.ID)
+
+	var solo map[string]any
+	if soloTimer != nil {
+		seconds := int(time.Until(soloTimer.PhaseEndsAt).Seconds())
+		if seconds < 0 {
+			seconds = 0
+		}
+		solo = map[string]any{
+			"phase":        soloTimer.Phase,
+			"focusMinutes": soloTimer.FocusMinutes,
+			"breakMinutes": soloTimer.BreakMinutes,
+			"secondsLeft":  seconds,
+			"breakPending": soloBreakPending(soloTimer),
+		}
+	}
+
+	roomsOut := make([]map[string]any, 0, len(rooms))
+	for _, rm := range rooms {
+		roomTodoList, _ := a.roomTodos(ctx, rm.ID)
+		grouped := groupRoomTodos(roomTodoList, u.ID)
+		roomTimer, transitioned, _ := a.normalizeTimer(ctx, rm.ID, u.ID)
+		if transitioned {
+			a.broadcastTimerPhase(rm, roomTimer)
+		}
+		roomsOut = append(roomsOut, map[string]any{
+			"code":         rm.Code,
+			"name":         rm.Name,
+			"focusMinutes": rm.FocusMinutes,
+			"breakMinutes": rm.BreakMinutes,
+			"autoSessions": rm.AutoSessions,
+			"timer":        apiRoomTimer(roomTimer),
+			"mine":         apiTodos(grouped.Mine),
+			"others":       apiTodos(grouped.Others),
+		})
+	}
+
+	writeJSON(w, map[string]any{
+		"soloTimer": solo,
+		"todos":     apiTodos(todos),
+		"rooms":     roomsOut,
+	})
+}
+
 // apiConnections lists the caller's connections with their heatmaps, newest
 // first — the JSON twin of connectionViews for the SPA connections page.
 func (a *app) apiConnections(w http.ResponseWriter, r *http.Request) {

@@ -3,7 +3,7 @@
 // menu-drawer-user blocks. Room create/join/logout still post to the legacy
 // endpoints (native form submits + server redirects) until those flows are
 // ported; that keeps behavior identical during the transition.
-import { nextTick, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 
 const props = defineProps({
@@ -19,6 +19,26 @@ const emit = defineEmits(['close']);
 
 const auth = useAuthStore();
 const drawerEl = ref(null);
+
+// Pages that don't already hold the room list (profile, connections, …) get
+// it fetched on first open, so the drawer shows your rooms everywhere — same
+// as the server-rendered drawer did.
+const fetchedRooms = ref(null);
+const roomList = computed(() =>
+  props.rooms.length ? props.rooms : fetchedRooms.value || []
+);
+watch(
+  () => props.open,
+  async (open) => {
+    if (!open || props.rooms.length || fetchedRooms.value || !auth.isAuthed) return;
+    try {
+      const res = await fetch('/api/rooms', { credentials: 'same-origin' });
+      if (res.ok) fetchedRooms.value = (await res.json()).rooms;
+    } catch {
+      fetchedRooms.value = [];
+    }
+  }
+);
 
 watch(
   () => props.open,
@@ -69,9 +89,9 @@ onUnmounted(() => {
       </div>
       <p class="label drawer-section-label">Your rooms</p>
       <div class="room-list">
-        <template v-if="rooms.length">
+        <template v-if="roomList.length">
           <a
-            v-for="room in rooms"
+            v-for="room in roomList"
             :key="room.code"
             class="room-row"
             :class="{ 'is-here': room.code === currentRoomCode }"

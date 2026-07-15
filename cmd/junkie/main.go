@@ -318,6 +318,8 @@ func main() {
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
 	mux.HandleFunc("GET /connections", a.spaPage) // ported to Vue; legacy: a.connectionsPage
 	mux.HandleFunc("GET /api/connections", a.requireAuth(a.apiConnections))
+	mux.HandleFunc("GET /api/desk", a.requireAuth(a.apiDesk))
+	mux.HandleFunc("GET /api/rooms", a.requireAuth(a.apiRooms))
 	mux.HandleFunc("GET /api/public-profile/{username}", a.requireAuth(a.apiPublicProfile))
 	mux.HandleFunc("GET /privacy", a.spaPage) // ported to Vue
 	mux.HandleFunc("GET /terms", a.spaPage)   // ported to Vue
@@ -968,11 +970,16 @@ func (a *app) serveAvatar(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
+	// Ported to Vue for guests and signed-in users; the SPA desk pulls its
+	// data from /api/desk. The legacy template path below stays as fallback
+	// until final cleanup.
+	a.spaPage(w, r)
+}
+
+func (a *app) dashboardLegacy(w http.ResponseWriter, r *http.Request) {
 	u, ok := a.currentUser(r)
 	if !ok {
-		// Guest desk ported to Vue; signed-in desk still renders the Go
-		// template until its port lands.
-		a.spaPage(w, r)
+		a.render(w, "dashboard", pageData{Title: "Dashboard", GuestMode: true})
 		return
 	}
 	soloTimer, _ := a.normalizeSoloTimer(r.Context(), u.ID)

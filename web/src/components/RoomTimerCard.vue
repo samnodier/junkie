@@ -1,0 +1,133 @@
+<script setup>
+// Room timer card on the desk, ported from desk-room-timer: idle start ring
+// (with the start-confirm dialog), lobby/focus/break countdowns, pending
+// break with adjustable length, pause/resume/skip, join/leave, participant
+// stack. Actions post to the legacy /r/{code}/... endpoints, then refresh.
+import { computed, ref } from 'vue';
+import { useDeskStore } from '@/stores/desk';
+import { requestPermission } from '@/lib/notify';
+import RingIdle from './RingIdle.vue';
+import RingCountdown from './RingCountdown.vue';
+import ParticipantStack from './ParticipantStack.vue';
+import StartConfirmModal from './StartConfirmModal.vue';
+
+const props = defineProps({
+  room: { type: Object, required: true },
+});
+const desk = useDeskStore();
+
+const timer = computed(() => props.room.timer);
+const phase = computed(() => timer.value?.phase || 'idle');
+const confirmStart = ref(0);
+const breakMinutes = ref(0);
+
+const phaseLabel = computed(() => {
+  const t = timer.value;
+  if (!t) return '';
+  if (t.phase === 'lobby') return 'Starting · join now';
+  if (t.phase === 'focus') return `Focus · session ${t.currentSession} of ${t.totalSessions}`;
+  if (t.breakPending) return 'Break ready · set the length';
+  if (t.paused) return 'Break paused';
+  return `Break · session ${t.currentSession} of ${t.totalSessions}`;
+});
+const totalSeconds = computed(() => {
+  const t = timer.value;
+  if (!t) return 1;
+  if (t.phase === 'lobby') return 30;
+  if (t.phase === 'focus') return t.focusMinutes * 60;
+  return t.breakMinutes * 60;
+});
+const endsAt = computed(() =>
+  new Date(Date.now() + (timer.value?.secondsLeft || 0) * 1000).toISOString()
+);
+
+function requestStart(minutes) {
+  requestPermission();
+  confirmStart.value = minutes;
+}
+async function reallyStart() {
+  const minutes = confirmStart.value;
+  confirmStart.value = 0;
+  await desk.roomTimer(props.room.code, 'timer-start', { focus_minutes: String(minutes) });
+}
+function startPendingBreak() {
+  desk.roomTimer(props.room.code, 'timer-break-length', {
+    minutes: String(breakMinutes.value || timer.value.breakMinutes),
+  });
+}
+function expired() {
+  setTimeout(() => desk.refresh(), 400);
+}
+</script>
+
+<template>
+  <div class="desk-timer-view" data-mode="room" :data-room="room.code" :data-room-sync="room.code">
+    <article v-if="timer" class="timer-card panel desk-timer-card" :class="phase">
+      <p class="label" :class="phase === 'focus' || phase === 'lobby' ? 'label-accent' : 'label-warn'">{{ phaseLabel }}</p>
+
+      <form v-if="timer.breakPending" class="circle-timer-form" @submit.prevent="startPendingBreak">
+        <RingIdle
+          :model-value="timer.breakMinutes"
+          :min="1"
+          :max="60"
+          :aria-label="`Set break length for ${room.name}`"
+          input-label="Break minutes"
+          @update:model-value="breakMinutes = $event"
+          @submit="startPendingBreak"
+        />
+      </form>
+      <template v-else>
+        <div v-if="timer.paused" class="circle-timer break-running breather" role="timer" aria-label="break countdown">
+          <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+            <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" :stroke-dashoffset="553 * (1 - timer.secondsLeft / totalSeconds)"/>
+          </svg>
+          <div class="circle-timer-core">
+            <div class="circle-timer-countdown" aria-live="polite">{{ String(Math.floor(timer.secondsLeft / 60)).padStart(2, '0') }}:{{ String(timer.secondsLeft % 60).padStart(2, '0') }}</div>
+          </div>
+        </div>
+        <RingCountdown
+          v-else
+          :key="`${timer.runId}-${timer.phase}-${endsAt}`"
+          :ends-at="endsAt"
+          :total-seconds="totalSeconds"
+          :ring-class="phase === 'focus' || phase === 'lobby' ? 'running' : 'break-running breather'"
+          :aria-label="`${phase} countdown`"
+          @expired="expired"
+        />
+      </template>
+
+      <p v-if="phase === 'focus' && !timer.participant" class="label label-warn">Watching · join on next break</p>
+
+      <footer class="desk-timer-footer">
+        <form v-if="(phase === 'lobby' || phase === 'break') && !timer.participant" @submit.prevent="desk.roomTimer(room.code, 'timer-join')">
+          <button type="submit" class="btn-primary">Join this block</button>
+        </form>
+        <div v-if="phase === 'break'" class="desk-timer-actions-row">
+          <button v-if="timer.breakPending" type="button" class="btn-primary" @click="startPendingBreak">Start break</button>
+          <button v-else type="button" :class="timer.paused ? 'btn-primary' : 'btn-ghost'" @click="desk.roomTimer(room.code, timer.paused ? 'timer-resume' : 'timer-pause')">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
+          <button type="button" class="btn-ghost timer-cancel" @click="desk.roomTimer(room.code, 'timer-skip-break')">Skip break</button>
+        </div>
+        <form v-if="timer.participant" @submit.prevent="desk.roomTimer(room.code, 'timer-leave')">
+          <button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button>
+        </form>
+        <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small />
+        <p class="label">{{ timer.participant ? 'Participating' : 'Watching' }} · {{ timer.participants?.length || 0 }} joined</p>
+      </footer>
+    </article>
+
+    <article v-else class="circle-timer-wrap timer-card panel idle desk-timer-card">
+      <form class="circle-timer-form" :data-room-name="room.name" @submit.prevent>
+        <RingIdle :model-value="room.focusMinutes" aria-label="Room focus minutes" input-label="Room focus minutes" @submit="requestStart" />
+      </form>
+      <p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to start room</p>
+    </article>
+
+    <StartConfirmModal
+      v-if="confirmStart"
+      :message="`You’re about to start a focus block for ${room.name}.`"
+      @confirm="reallyStart"
+      @cancel="confirmStart = 0"
+    />
+  </div>
+</template>
