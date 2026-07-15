@@ -4383,9 +4383,10 @@ body.menu-drawer-open { overflow: hidden; }
     overflow: visible;
   }
   .page:has(.desk-shell) { margin-bottom: 4rem; }
-  .desk-timer-card,
-  .desk-todos-panel { height: auto; min-height: 28rem; }
-  .desk-timer-card { overflow: visible; }
+  .desk-timer-card { height: auto; min-height: 28rem; overflow: visible; }
+  /* Keep the todos panel a bounded height on mobile so a long list scrolls
+     inside it instead of stretching the whole page (parity with desktop). */
+  .desk-todos-panel { height: min(32rem, calc(100dvh - 11rem)); min-height: 24rem; }
   .focus-todos-toggle {
     top: auto;
     bottom: 0;
