@@ -8,3 +8,4 @@ tmp/
 *.sqlite
 design-audit/
 docs/
+migration-baseline/*/
