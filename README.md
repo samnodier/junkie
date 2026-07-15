@@ -90,6 +90,17 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 
 
 
+### Temporary focus rooms
+
+Sometimes you just want a quick block with a few people, not a room that sticks around. From the menu, **Create temporary room** opens a config popup — set focus/break/sessions and whether breaks auto-run — and drops you onto a stripped-down screen at `/f/{code}` with a share link at the top.
+
+- **Joined by link** — anyone signed in who opens the link is added and queued for the block, no confirmation step. They land straight on the waiting screen, so you can see who's here before you start.
+- **Just the timer** — no todo board, no settings page, and the background grid is hidden for a distraction-free look. The invite link shows while you gather and during breaks, and disappears once focus starts.
+- **Disposable** — the room deletes itself the moment the run finishes or everyone leaves, and sends everyone back home. Focus minutes still count toward each participant's work map.
+- Temporary rooms **don't count** toward your 5-room limit and don't appear in your room list. Ones created but never started are cleaned up automatically.
+
+
+
 ### Connections
 
 Connections are a separate, mutual link between two accounts — not room membership.
