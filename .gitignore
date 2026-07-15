@@ -9,3 +9,5 @@ tmp/
 design-audit/
 docs/
 migration-baseline/*/
+web/node_modules/
+cmd/junkie/static/app/
