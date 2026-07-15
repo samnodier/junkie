@@ -11,6 +11,9 @@ const props = defineProps({
   rooms: { type: Array, default: () => [] },
   currentRoomCode: { type: String, default: '' },
   next: { type: String, default: '/' },
+  // Incremented by the shell when a page asks for the join-room section to
+  // be opened and focused (the desk's "Have a room code?" link).
+  joinRequest: { type: Number, default: 0 },
 });
 const emit = defineEmits(['close']);
 
@@ -24,6 +27,18 @@ watch(
     if (open) {
       await nextTick();
       drawerEl.value?.querySelector('a, button, input, summary')?.focus();
+    }
+  }
+);
+
+watch(
+  () => props.joinRequest,
+  async () => {
+    await nextTick();
+    const join = drawerEl.value?.querySelector('#drawer-join-section');
+    if (join) {
+      join.open = true;
+      join.querySelector('input')?.focus();
     }
   }
 );

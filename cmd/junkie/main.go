@@ -970,7 +970,9 @@ func (a *app) serveAvatar(w http.ResponseWriter, r *http.Request) {
 func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
 	u, ok := a.currentUser(r)
 	if !ok {
-		a.render(w, "dashboard", pageData{Title: "Dashboard", GuestMode: true})
+		// Guest desk ported to Vue; signed-in desk still renders the Go
+		// template until its port lands.
+		a.spaPage(w, r)
 		return
 	}
 	soloTimer, _ := a.normalizeSoloTimer(r.Context(), u.ID)

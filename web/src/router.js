@@ -11,6 +11,18 @@ const routes = [
     component: () => import('./views/PipelineCheckView.vue'),
   },
   {
+    // The Go handler serves the SPA here for guests only until the
+    // logged-in desk is ported.
+    path: '/',
+    name: 'desk',
+    component: () => import('./views/DeskView.vue'),
+  },
+  {
+    path: '/dashboard',
+    name: 'desk-dashboard',
+    component: () => import('./views/DeskView.vue'),
+  },
+  {
     path: '/login',
     name: 'login',
     component: () => import('./views/AuthView.vue'),
