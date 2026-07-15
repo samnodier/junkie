@@ -8,7 +8,7 @@
 // Assets are served from fixed, unhashed paths (/assets/app.css, etc.), so bump
 // CACHE_VERSION on every deploy that changes a precached asset to evict the old
 // copies.
-const CACHE_VERSION = 'junkie-v1';
+const CACHE_VERSION = 'junkie-v2';
 
 const PRECACHE = [
   '/assets/app.css',
