@@ -160,15 +160,17 @@ onMounted(async () => {
           <span class="profile-avatar"><img v-if="auth.avatarURL" class="avatar-img" :src="auth.avatarURL" alt="Your profile picture"><template v-else>{{ auth.initial }}</template></span>
         </div>
         <div class="profile-avatar-actions">
-          <form id="avatar-form" @submit.prevent="submitAvatar">
+          <form id="avatar-form" class="avatar-pick-row" @submit.prevent="submitAvatar">
             <input type="file" name="avatar" id="avatar-input" ref="avatarInput" accept="image/*" class="visually-hidden" aria-label="Choose profile picture" @change="onAvatarPicked">
             <button type="button" class="btn-ghost btn-compact" @click="avatarInput.click()">Choose picture</button>
             <span class="avatar-file-name" aria-live="polite">{{ avatarFileName || 'No file chosen' }}</span>
-            <button type="submit" class="btn-primary btn-compact" :disabled="!avatarFileName">Upload picture</button>
           </form>
-          <form v-if="auth.avatarURL" method="post" action="/profile/avatar/remove">
-            <button type="submit" class="btn-ghost btn-compact">Remove picture</button>
-          </form>
+          <div class="avatar-action-row">
+            <button type="submit" form="avatar-form" class="btn-primary btn-compact" :disabled="!avatarFileName">Upload picture</button>
+            <form v-if="auth.avatarURL" method="post" action="/profile/avatar/remove" class="avatar-remove-form">
+              <button type="submit" class="btn-ghost btn-compact">Remove picture</button>
+            </form>
+          </div>
         </div>
       </article>
 

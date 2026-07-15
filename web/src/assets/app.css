@@ -785,16 +785,23 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 }
 .profile-avatar-actions {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--sp-3);
   margin-top: var(--sp-3);
+  max-width: 26rem;
 }
-.profile-avatar-actions form { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; min-width: 0; }
+/* Two rows: "Choose picture" with the picked filename beside it, then
+   Upload / Remove side by side splitting the row. */
+.avatar-pick-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.avatar-action-row { display: flex; gap: var(--sp-3); width: 100%; }
+.avatar-action-row > button, .avatar-remove-form { flex: 1 1 0; min-width: 0; }
+.avatar-remove-form { display: flex; }
+.avatar-remove-form > button { flex: 1 1 auto; min-width: 0; }
 .avatar-file-name {
   font-size: var(--fs-small);
   color: var(--muted);
-  max-width: 12rem;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -962,16 +969,13 @@ span.room-member-locked { color: var(--muted); cursor: default; }
   padding: 0;
   color: inherit;
   container-type: inline-size;
-  /* The vw-based ring widths below don't know about page/card padding, so
-     never let a ring push its card wider than the space it actually has. */
-  max-width: 100%;
 }
-.circle-timer.idle { width: min(clamp(200px, 78vw, 300px), 100%); }
+.circle-timer.idle { width: clamp(200px, 78vw, 300px); }
 .circle-timer.running,
 .room-focus-ring,
 .room-active-ring,
 .circle-timer.break-offer,
-.circle-timer.break-running { width: min(clamp(220px, 84vw, 340px), 100%); cursor: default; }
+.circle-timer.break-running { width: clamp(220px, 84vw, 340px); cursor: default; }
 .circle-timer.idle:hover .circle-timer-progress { stroke: var(--accent-hover); }
 .circle-timer-svg {
   position: absolute;
@@ -1692,14 +1696,24 @@ body.menu-drawer-open { overflow: hidden; }
     right: auto;
     translate: -50% 0;
   }
-  .room-header-new { flex-direction: column; }
+  /* Stretch the stacked header children so the title row spans the full
+     width and the auto margin can push the member count to the right edge. */
+  .room-header-new { flex-direction: column; align-items: stretch; }
   .room-members-meta { display: none; }
   .room-members-inline { display: inline-block; margin-left: auto; }
   /* Readable heatmap on phones: fixed 11px cells (14px week pitch) inside
-     the horizontal scroller instead of cells squashed to invisibility. */
+     the horizontal scroller instead of cells squashed to invisibility.
+     Months keep their own 3px gap, so 11px columns give the same 14px
+     pitch as the cells and the labels stay over the weeks they name. */
   .heatmap { grid-auto-columns: 11px; gap: 3px; width: max-content; }
   .heatmap .cell { width: 11px; min-width: 11px; }
-  .heatmap-months { grid-template-columns: repeat(var(--weeks), 14px); width: max-content; }
+  .heatmap-months { grid-template-columns: repeat(var(--weeks), 11px); width: max-content; }
+  /* Room rings: cap against the viewport so the card can't overflow —
+     scoped to the room page only; desk and guest rings keep their original
+     clamp geometry untouched. Budget: grid padding 40px + card padding
+     40px + the room-shell's clamp(20px,4vw,32px)×2 ≈ 8vw, capped ≈ 88px. */
+  .room-timer-column .circle-timer,
+  .room-focus-shell .circle-timer { width: min(84vw, calc(92vw - 88px)); }
   .timer-cancel, .btn-ghost.timer-cancel { width: 100%; }
   .desk-timer-actions-row { flex-direction: column; }
   .desk-timer-actions-row > button { flex: none; }

@@ -12,7 +12,8 @@ defineProps({
 });
 
 const mineOpen = ref(true);
-const othersOpen = ref(true);
+// "Everyone else" starts collapsed so your own list stays front and center.
+const othersOpen = ref(false);
 </script>
 
 <template>
