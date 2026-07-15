@@ -273,6 +273,49 @@ func (a *app) apiDesk(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiAdmin feeds the SPA admin page: the same aggregates loadAdminPage gave
+// the template. The page-level requireAdmin gate stays; this re-checks the
+// role and answers 403 JSON so a stale SPA can render the forbidden card.
+func (a *app) apiAdmin(w http.ResponseWriter, r *http.Request) {
+	actor, _ := a.currentUser(r)
+	if !canAccessAdmin(actor.Role) {
+		writeJSONError(w, http.StatusForbidden, "This space is limited to platform administrators.")
+		return
+	}
+	data, err := a.loadAdminPage(r.Context(), actor.Role == roleOwner)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "could not load admin space")
+		return
+	}
+	users := make([]map[string]any, 0, len(data.Users))
+	for _, u := range data.Users {
+		row := map[string]any{
+			"id": u.ID, "username": u.Username, "role": u.Role,
+			"joinedAt": u.JoinedAt.Format("2006-01-02"), "joined": u.JoinedAt.Format("Jan 2, 2006"),
+			"roomsCount": u.RoomsCount, "focusMinutes": u.FocusMinutes,
+		}
+		if u.LastActivityAt != nil {
+			row["lastActivity"] = u.LastActivityAt.Format("Jan 2, 2006")
+		}
+		users = append(users, row)
+	}
+	rooms := make([]map[string]any, 0, len(data.Rooms))
+	for _, rm := range data.Rooms {
+		rooms = append(rooms, map[string]any{
+			"id": rm.ID, "name": rm.Name, "code": rm.Code, "creator": rm.Creator,
+			"membersCount": rm.MembersCount, "active": rm.Active,
+			"createdAt": rm.CreatedAt.Format("2006-01-02"), "created": rm.CreatedAt.Format("Jan 2, 2006"),
+		})
+	}
+	writeJSON(w, map[string]any{
+		"overview": map[string]int{
+			"users": data.Overview.Users, "rooms": data.Overview.Rooms,
+			"activeRoomTimers": data.Overview.ActiveRoomTimers, "totalFocusMinutes": data.Overview.TotalFocusMinutes,
+		},
+		"users": users, "rooms": rooms, "isOwner": data.IsOwner,
+	})
+}
+
 // apiRoom feeds the SPA room page. Non-members get the invite verdict (the
 // page-level handler already 404s unknown rooms); members get the full room
 // state — the JSON twin of roomPage.

@@ -358,7 +358,8 @@ func main() {
 		u, _ := a.currentUser(r)
 		a.renderPersonalTodosFragment(w, r, u.ID)
 	}))
-	mux.HandleFunc("GET /admin", a.requireAdmin(a.adminPage))
+	mux.HandleFunc("GET /admin", a.requireAdmin(a.spaPage)) // ported to Vue; legacy: a.adminPage
+	mux.HandleFunc("GET /api/admin", a.requireAuth(a.apiAdmin))
 	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
 	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
 
