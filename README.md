@@ -2,6 +2,17 @@
 
 `junkie` is a small shared focus app for study groups. Open it in a browser, track what you need to finish, run solo or shared focus timers, and see progress on a GitHub-inspired work map of focused minutes per day.
 
+<table>
+<tr>
+<td width="50%"><img src="assets/desk-light.png" alt="The junkie desk in light mode: a 50-minute focus ring beside a private todo list"></td>
+<td width="50%"><img src="assets/desk-dark.png" alt="The junkie desk in dark mode: a 50-minute focus ring beside a private todo list"></td>
+</tr>
+<tr>
+<td align="center">Light</td>
+<td align="center">Dark</td>
+</tr>
+</table>
+
 ## How to use junkie
 
 ### Guest mode (no account)
