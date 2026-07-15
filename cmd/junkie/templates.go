@@ -92,8 +92,23 @@ const layoutTemplates = `
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,wght@0,600;1,500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F2F0E6">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121712">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="junkie">
   <script src="/assets/htmx.min.js"></script>
   <script src="/assets/notifications.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () {});
+      });
+    }
+  </script>
 </head>
 <body{{if or .SoloTimer .FocusMode}} class="focus-active"{{end}}{{if .User.ID}} data-user-id="{{.User.ID}}"{{end}}>
   {{$menu := or (eq .Title "Dashboard") (eq .Title "Profile") (and (ne .Room.Code "") (ne .Title "Join room"))}}

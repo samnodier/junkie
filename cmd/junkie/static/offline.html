@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e3b2a">
+  <title>Offline · junkie</title>
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      background: #0e3b2a; color: #f7f5ec;
+      font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+      text-align: center; padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card { max-width: 22rem; }
+    .mark { width: 72px; height: 72px; margin: 0 0 20px; }
+    h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 8px; }
+    p { margin: 0 0 24px; line-height: 1.5; color: #cfe3d8; }
+    button {
+      font: inherit; font-weight: 600; cursor: pointer;
+      color: #0e3b2a; background: #6fcfa4; border: 0;
+      padding: 12px 22px; border-radius: 10px;
+    }
+    button:hover { background: #7ed9b1; }
+    button:focus-visible { outline: 2px solid #f7f5ec; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img class="mark" src="/assets/icon.svg" alt="junkie" width="72" height="72">
+    <h1>You're offline</h1>
+    <p>junkie needs a connection for timers and rooms. Reconnect and try again.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+</body>
+</html>
