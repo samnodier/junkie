@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth';
 import AppShell from '@/components/AppShell.vue';
 import HeatmapChart from '@/components/HeatmapChart.vue';
 import { buildGuestHeatmap } from '@/lib/guestActivity';
+import { useConnectLink } from '@/composables/connectLink';
 
 const NOTIFY_KEY = 'junkie:roomInviteNotifications';
 
@@ -37,25 +38,7 @@ function setInvites(on) {
   }
 }
 
-// One-time connect link: mint on the legacy endpoint, copy to clipboard.
-const connectLabel = ref('Copy connect link');
-async function copyConnectLink() {
-  const flash = (text) => {
-    connectLabel.value = text;
-    setTimeout(() => {
-      connectLabel.value = 'Copy connect link';
-    }, 4000);
-  };
-  try {
-    const resp = await fetch('/profile/connect-link', { method: 'POST', credentials: 'same-origin' });
-    if (!resp.ok) throw new Error('request failed');
-    const link = await resp.text();
-    await navigator.clipboard.writeText(link);
-    flash('Copied — works for one person');
-  } catch {
-    flash('Could not copy — try again');
-  }
-}
+const { label: connectLabel, copy: copyConnectLink } = useConnectLink();
 
 // Avatar upload: center-crop to a square, shrink to 128px, re-encode as JPEG
 // before upload — same client-side downscale as the legacy page.

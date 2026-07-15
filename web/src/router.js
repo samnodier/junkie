@@ -43,6 +43,20 @@ const routes = [
     name: 'profile',
     component: () => import('./views/ProfileView.vue'),
   },
+  {
+    path: '/connections',
+    name: 'connections',
+    component: () => import('./views/ConnectionsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    // Catch-all for /{username}; static routes above always win in vue-router
+    // scoring, and the Go handler 404s invalid names before the SPA loads.
+    path: '/:username([a-z0-9._-]{2,32})',
+    name: 'public-profile',
+    component: () => import('./views/PublicProfileView.vue'),
+    meta: { requiresAuth: true },
+  },
 ];
 
 const router = createRouter({

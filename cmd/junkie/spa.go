@@ -142,6 +142,84 @@ func (a *app) apiProfile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiConnections lists the caller's connections with their heatmaps, newest
+// first — the JSON twin of connectionViews for the SPA connections page.
+func (a *app) apiConnections(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	views := a.connectionViews(r.Context(), u.ID)
+	out := []map[string]any{}
+	for _, v := range views {
+		out = append(out, map[string]any{
+			"user": apiUser{
+				ID:            v.ProfileUser.ID,
+				Username:      v.ProfileUser.Username,
+				DisplayName:   v.ProfileUser.DisplayName,
+				HasAvatar:     v.ProfileUser.HasAvatar,
+				AvatarVersion: v.ProfileUser.AvatarVersion,
+			},
+			"heatmap": heatmapJSON(heatmapData{
+				Cells:        v.Activity,
+				Months:       v.ActivityMonths,
+				Weeks:        v.ActivityWeeks,
+				TotalMinutes: v.ActivityTotalMinutes,
+			}),
+		})
+	}
+	writeJSON(w, map[string]any{"connections": out})
+}
+
+// apiPublicProfile mirrors publicProfilePage's decision tree for the SPA:
+// the page-level handler already resolved guest/invalid-username cases with
+// real 404s/redirects, so this only serves signed-in viewers. A non-connection
+// gets the same body as a nonexistent username, preserving the privacy rule.
+func (a *app) apiPublicProfile(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	username := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
+	if !usernamePattern.MatchString(username) {
+		writeJSON(w, map[string]any{"notFound": true})
+		return
+	}
+	var target user
+	err := a.db.QueryRow(r.Context(), `
+		SELECT id, username, display_name, avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM avatar_updated_at), 0)::bigint
+		FROM users WHERE username = $1`, username).Scan(
+		&target.ID, &target.Username, &target.DisplayName, &target.HasAvatar, &target.AvatarVersion)
+	if err != nil {
+		writeJSON(w, map[string]any{"notFound": true})
+		return
+	}
+	if target.ID == u.ID {
+		writeJSON(w, map[string]any{"redirect": "/profile"})
+		return
+	}
+	token := r.URL.Query().Get("connect")
+	connected := a.areConnected(r.Context(), u.ID, target.ID)
+	if token != "" && !connected && a.peekConnectToken(r.Context(), target.ID, token) {
+		writeJSON(w, map[string]any{"confirm": map[string]any{
+			"username":    target.Username,
+			"displayName": target.DisplayName,
+			"token":       token,
+		}})
+		return
+	}
+	if !connected {
+		writeJSON(w, map[string]any{"notFound": true})
+		return
+	}
+	heat, _ := a.activity(r.Context(), target.ID)
+	writeJSON(w, map[string]any{"profile": map[string]any{
+		"user": apiUser{
+			ID:            target.ID,
+			Username:      target.Username,
+			DisplayName:   target.DisplayName,
+			HasAvatar:     target.HasAvatar,
+			AvatarVersion: target.AvatarVersion,
+		},
+		"heatmap": heatmapJSON(heat),
+	}})
+}
+
 // apiJoinContext mirrors joinRoomConfirm's decision tree for the SPA join
 // page: a `redirect` verdict for the cases the legacy handler solved with
 // http.Redirect, or the room to confirm joining.

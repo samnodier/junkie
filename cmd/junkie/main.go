@@ -316,7 +316,9 @@ func main() {
 	mux.HandleFunc("POST /profile/avatar/remove", a.requireAuth(a.removeAvatar))
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
-	mux.HandleFunc("GET /connections", a.requireAuth(a.connectionsPage))
+	mux.HandleFunc("GET /connections", a.spaPage) // ported to Vue; legacy: a.connectionsPage
+	mux.HandleFunc("GET /api/connections", a.requireAuth(a.apiConnections))
+	mux.HandleFunc("GET /api/public-profile/{username}", a.requireAuth(a.apiPublicProfile))
 	mux.HandleFunc("GET /privacy", a.spaPage) // ported to Vue
 	mux.HandleFunc("GET /terms", a.spaPage)   // ported to Vue
 	// Ported to Vue: the page is public shell (the Vue guard bounces guests to
@@ -884,7 +886,9 @@ func (a *app) publicProfilePage(w http.ResponseWriter, r *http.Request) {
 			// Confirm step: connecting is a state change, so the GET only
 			// offers it and the POST below (connectConfirmPost) performs it.
 			// A drive-by fetch of this URL can no longer force a connection.
-			a.render(w, "connect-confirm", pageData{Title: "Connect request", User: u, ConnectUser: target, ConnectToken: token})
+			// Ported to Vue: the SPA fetches /api/public-profile, which
+			// re-runs this decision tree and answers with the confirm card.
+			a.spaPage(w, r)
 			return
 		}
 		// A dead token still lands connected visitors on the profile; for
@@ -894,20 +898,10 @@ func (a *app) publicProfilePage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	heat, _ := a.activity(r.Context(), target.ID)
-	view := publicProfileView{
-		ProfileUser:          target,
-		Activity:             heat.Cells,
-		ActivityMonths:       heat.Months,
-		ActivityWeeks:        heat.Weeks,
-		ActivityTotalMinutes: heat.TotalMinutes,
-	}
-	a.render(w, "public-profile", pageData{
-		Title:         target.DisplayName,
-		User:          u,
-		PublicProfile: &view,
-		Notice:        r.URL.Query().Get("notice"),
-	})
+	// Ported to Vue; the gates above keep their exact HTTP semantics (404 for
+	// non-connections, redirects for guests/self) so the privacy rule is
+	// still enforced at page level, not just in the data API.
+	a.spaPage(w, r)
 }
 
 // connectionsPage is the feed of the caller's connections, one heatmap
