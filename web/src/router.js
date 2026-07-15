@@ -10,6 +10,11 @@ const routes = [
     name: 'pipeline-check',
     component: () => import('./views/PipelineCheckView.vue'),
   },
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('./views/AuthView.vue'),
+  },
 ];
 
 const router = createRouter({

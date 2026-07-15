@@ -288,12 +288,15 @@ func main() {
 	mux.HandleFunc("GET /.well-known/assetlinks.json", a.serveStaticAsset("assetlinks.json", "application/json"))
 	mux.HandleFunc("GET /app/", a.spaAsset)
 	mux.HandleFunc("GET /api/me", a.apiMe)
+	mux.HandleFunc("GET /api/auth-context", a.apiAuthContext)
+	mux.HandleFunc("POST /api/login", a.apiLogin)
+	mux.HandleFunc("POST /api/signup", a.apiSignup)
 	mux.HandleFunc("GET /__vue", a.spaPage)
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /", a.home)
 	mux.HandleFunc("GET /signup", a.signupForm)
 	mux.HandleFunc("POST /signup", a.signup)
-	mux.HandleFunc("GET /login", a.loginForm)
+	mux.HandleFunc("GET /login", a.spaPage) // ported to Vue; legacy: a.loginForm
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("GET /dashboard", func(w http.ResponseWriter, r *http.Request) {

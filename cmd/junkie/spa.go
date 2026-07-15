@@ -2,11 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"mime"
 	"net/http"
 	"path"
 	"strings"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // The Vue SPA (built from web/ by Vite into static/app/) is cut over one page
@@ -83,4 +87,82 @@ func writeJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("encode json response: %v", err)
 	}
+}
+
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.WriteHeader(status)
+	writeJSON(w, map[string]string{"error": msg})
+}
+
+// apiAuthContext supplies the auth card's contextual banner (e.g. "Sign in to
+// join <room>"), mirroring authBanner for the SPA login page.
+func (a *app) apiAuthContext(w http.ResponseWriter, r *http.Request) {
+	next := safeNext(r.URL.Query().Get("next"))
+	signup := r.URL.Query().Get("mode") == "signup"
+	writeJSON(w, map[string]string{"banner": a.authBanner(r, next, signup)})
+}
+
+// apiLogin and apiSignup are the JSON twins of login/signup: identical
+// validation messages, rate-limit keys, and session behavior, but a JSON
+// verdict instead of a rendered template. The legacy form handlers stay
+// untouched until cutover.
+func (a *app) apiLogin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
+	password := r.FormValue("password")
+	next := safeNext(r.FormValue("next"))
+	if !a.limiter.allow("login:"+clientIP(r), 20, 5*time.Minute) ||
+		(username != "" && !a.limiter.allow("login-user:"+username, 10, 15*time.Minute)) {
+		writeJSONError(w, http.StatusTooManyRequests, "Too many sign-in attempts. Try again in a few minutes.")
+		return
+	}
+	var id, hash string
+	err := a.db.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		writeJSONError(w, http.StatusUnauthorized, "Username or password is incorrect.")
+		return
+	}
+	a.createSession(w, r, id)
+	writeJSON(w, map[string]string{"next": next})
+}
+
+func (a *app) apiSignup(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
+	password := r.FormValue("password")
+	next := safeNext(r.FormValue("next"))
+	if username == "" || password == "" {
+		writeJSONError(w, http.StatusBadRequest, "Username and password are required.")
+		return
+	}
+	if !validUsername(username) {
+		writeJSONError(w, http.StatusBadRequest, "Usernames are 2–32 characters: lowercase letters, numbers, dots, dashes, underscores.")
+		return
+	}
+	if len([]rune(password)) < minPasswordLength {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Passwords must be at least %d characters.", minPasswordLength))
+		return
+	}
+	if len(password) > maxPasswordBytes {
+		writeJSONError(w, http.StatusBadRequest, "That password is too long.")
+		return
+	}
+	if !a.limiter.allow("signup:"+clientIP(r), 10, time.Hour) {
+		writeJSONError(w, http.StatusTooManyRequests, "Too many new accounts from this address. Try again later.")
+		return
+	}
+	displayName := displayNameFromUsername(username)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "could not hash password")
+		return
+	}
+	var id string
+	err = a.db.QueryRow(ctx, `INSERT INTO users (username, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id`, username, displayName, string(hash)).Scan(&id)
+	if err != nil {
+		writeJSONError(w, http.StatusConflict, "That username is already taken.")
+		return
+	}
+	a.createSession(w, r, id)
+	writeJSON(w, map[string]string{"next": next})
 }
