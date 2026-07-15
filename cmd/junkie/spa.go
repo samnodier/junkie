@@ -6,6 +6,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -100,6 +101,43 @@ func (a *app) apiAuthContext(w http.ResponseWriter, r *http.Request) {
 	next := safeNext(r.URL.Query().Get("next"))
 	signup := r.URL.Query().Get("mode") == "signup"
 	writeJSON(w, map[string]string{"banner": a.authBanner(r, next, signup)})
+}
+
+// apiJoinContext mirrors joinRoomConfirm's decision tree for the SPA join
+// page: a `redirect` verdict for the cases the legacy handler solved with
+// http.Redirect, or the room to confirm joining.
+func (a *app) apiJoinContext(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	code := normalizeRoomCode(r.URL.Query().Get("code"))
+	if code == "" {
+		writeJSON(w, map[string]string{"redirect": "/dashboard?error=" + url.QueryEscape("Enter a room code to join.")})
+		return
+	}
+	rm, ok := a.findRoom(r.Context(), code)
+	if !ok {
+		writeJSON(w, map[string]string{"redirect": "/dashboard?error=" + url.QueryEscape("No room found with that code.")})
+		return
+	}
+	if a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		writeJSON(w, map[string]string{"redirect": "/r/" + rm.Code})
+		return
+	}
+	writeJSON(w, map[string]any{"room": map[string]string{"name": rm.Name, "code": rm.Code}})
+}
+
+// apiDiscordLinkContext peeks (never consumes) a Discord link token, exactly
+// like discordLinkPage; redemption stays with the legacy POST handler.
+func (a *app) apiDiscordLinkContext(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	var discordUsername string
+	err := a.db.QueryRow(r.Context(), `
+		SELECT discord_username FROM discord_link_tokens
+		WHERE token_hash = $1 AND expires_at > now()`, hashToken(token)).Scan(&discordUsername)
+	if err != nil {
+		writeJSON(w, map[string]string{"redirect": "/profile?error=" + url.QueryEscape("That Discord link is invalid or has expired — run /junkie link again.")})
+		return
+	}
+	writeJSON(w, map[string]string{"discordUsername": discordUsername})
 }
 
 // apiLogin and apiSignup are the JSON twins of login/signup: identical

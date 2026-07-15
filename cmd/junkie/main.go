@@ -316,15 +316,12 @@ func main() {
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
 	mux.HandleFunc("GET /connections", a.requireAuth(a.connectionsPage))
-	mux.HandleFunc("GET /privacy", func(w http.ResponseWriter, r *http.Request) {
-		u, _ := a.currentUser(r)
-		a.render(w, "privacy", pageData{Title: "Privacy", User: u})
-	})
-	mux.HandleFunc("GET /terms", func(w http.ResponseWriter, r *http.Request) {
-		u, _ := a.currentUser(r)
-		a.render(w, "terms", pageData{Title: "Terms of Service", User: u})
-	})
-	mux.HandleFunc("GET /discord/link/{token}", a.requireAuth(a.discordLinkPage))
+	mux.HandleFunc("GET /privacy", a.spaPage) // ported to Vue
+	mux.HandleFunc("GET /terms", a.spaPage)   // ported to Vue
+	// Ported to Vue: the page is public shell (the Vue guard bounces guests to
+	// /login?next= exactly like requireAuth did); the data API keeps the auth.
+	mux.HandleFunc("GET /discord/link/{token}", a.spaPage)
+	mux.HandleFunc("GET /api/discord-link-context/{token}", a.requireAuth(a.apiDiscordLinkContext))
 	mux.HandleFunc("POST /discord/link/{token}", a.requireAuth(a.discordLinkConfirm))
 	mux.HandleFunc("POST /profile/discord/unlink", a.requireAuth(a.discordUnlink))
 	mux.HandleFunc("POST /connect/{username}", a.requireAuth(a.connectConfirmPost))
@@ -340,7 +337,8 @@ func main() {
 	mux.HandleFunc("POST /rooms", a.requireAuth(a.createRoom))
 	mux.HandleFunc("POST /rooms/join", a.requireAuth(a.joinRoom))
 	mux.HandleFunc("POST /rooms/join-intent", a.joinRoomIntent)
-	mux.HandleFunc("GET /join/confirm", a.requireAuth(a.joinRoomConfirm))
+	mux.HandleFunc("GET /join/confirm", a.spaPage) // ported to Vue; legacy: a.joinRoomConfirm
+	mux.HandleFunc("GET /api/join-context", a.requireAuth(a.apiJoinContext))
 	mux.HandleFunc("POST /join/confirm", a.requireAuth(a.joinRoomConfirmPost))
 	mux.HandleFunc("GET /r/{code}/timer-status", a.requireAuth(a.roomTimerStatus))
 	mux.HandleFunc("GET /r/{code}/todos-fragment", a.requireAuth(a.roomTodosFragment))

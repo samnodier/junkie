@@ -15,6 +15,28 @@ const routes = [
     name: 'login',
     component: () => import('./views/AuthView.vue'),
   },
+  {
+    path: '/privacy',
+    name: 'privacy',
+    component: () => import('./views/PrivacyView.vue'),
+  },
+  {
+    path: '/terms',
+    name: 'terms',
+    component: () => import('./views/TermsView.vue'),
+  },
+  {
+    path: '/join/confirm',
+    name: 'join-confirm',
+    component: () => import('./views/JoinConfirmView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/discord/link/:token',
+    name: 'discord-link',
+    component: () => import('./views/DiscordLinkView.vue'),
+    meta: { requiresAuth: true },
+  },
 ];
 
 const router = createRouter({
