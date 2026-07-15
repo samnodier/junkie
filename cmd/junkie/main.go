@@ -307,7 +307,8 @@ func main() {
 		}
 		http.Redirect(w, r, dest, http.StatusMovedPermanently)
 	})
-	mux.HandleFunc("GET /profile", a.profilePage)
+	mux.HandleFunc("GET /profile", a.spaPage) // ported to Vue; legacy: a.profilePage
+	mux.HandleFunc("GET /api/profile", a.requireAuth(a.apiProfile))
 	mux.HandleFunc("POST /profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /profile/delete", a.requireAuth(a.deleteAccount))
 	mux.HandleFunc("POST /profile/username", a.requireAuth(a.changeUsername))

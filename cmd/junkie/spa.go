@@ -103,6 +103,45 @@ func (a *app) apiAuthContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"banner": a.authBanner(r, next, signup)})
 }
 
+type apiHeatmapCell struct {
+	Empty   bool   `json:"empty,omitempty"`
+	Date    string `json:"date,omitempty"`
+	Minutes int    `json:"minutes"`
+	Level   int    `json:"level"`
+}
+
+type apiHeatmap struct {
+	Cells        []apiHeatmapCell `json:"cells"`
+	Months       []map[string]any `json:"months"`
+	Weeks        int              `json:"weeks"`
+	TotalMinutes int              `json:"totalMinutes"`
+}
+
+func heatmapJSON(h heatmapData) apiHeatmap {
+	out := apiHeatmap{Weeks: h.Weeks, TotalMinutes: h.TotalMinutes, Months: []map[string]any{}, Cells: []apiHeatmapCell{}}
+	for _, m := range h.Months {
+		out.Months = append(out.Months, map[string]any{"label": m.Label, "col": m.Col})
+	}
+	for _, c := range h.Cells {
+		out.Cells = append(out.Cells, apiHeatmapCell{Empty: c.Empty, Date: c.Date, Minutes: c.Minutes, Level: c.Level})
+	}
+	return out
+}
+
+// apiProfile feeds the SPA profile page: the same data profilePage passed to
+// the template, minus what /api/me already carries.
+func (a *app) apiProfile(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rooms, _ := a.roomsForUser(r.Context(), u.ID)
+	heat, _ := a.activity(r.Context(), u.ID)
+	discordUsername, discordLinked := a.discordLinkForUser(r.Context(), u.ID)
+	writeJSON(w, map[string]any{
+		"roomsCount": len(rooms),
+		"heatmap":    heatmapJSON(heat),
+		"discord":    map[string]any{"linked": discordLinked, "username": discordUsername},
+	})
+}
+
 // apiJoinContext mirrors joinRoomConfirm's decision tree for the SPA join
 // page: a `redirect` verdict for the cases the legacy handler solved with
 // http.Redirect, or the room to confirm joining.

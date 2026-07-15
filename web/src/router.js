@@ -37,6 +37,12 @@ const routes = [
     component: () => import('./views/DiscordLinkView.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    // Public: guests get the local-only profile variant, like the Go page.
+    path: '/profile',
+    name: 'profile',
+    component: () => import('./views/ProfileView.vue'),
+  },
 ];
 
 const router = createRouter({
