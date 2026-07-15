@@ -285,6 +285,7 @@ func main() {
 	mux.HandleFunc("GET /manifest.webmanifest", a.serveStaticAsset("manifest.webmanifest", "application/manifest+json"))
 	mux.HandleFunc("GET /sw.js", a.serveStaticAsset("sw.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /offline", a.serveStaticAsset("offline.html", "text/html; charset=utf-8"))
+	mux.HandleFunc("GET /.well-known/assetlinks.json", a.serveStaticAsset("assetlinks.json", "application/json"))
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /", a.home)
 	mux.HandleFunc("GET /signup", a.signupForm)

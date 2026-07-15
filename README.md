@@ -117,6 +117,15 @@ Sign in on each device with the same account.
 
 On supported mobile browsers, junkie requests a **screen wake lock** while a timer is visible or a focus session is active so the phone is less likely to lock mid-session.
 
+## Install on your phone
+
+junkie is a PWA, so it installs to your home screen and runs fullscreen with no browser chrome.
+
+- **iPhone / iPad** — open [junkie](https://junkie-blin.onrender.com) in Safari, tap Share, then **Add to Home Screen**.
+- **Android** — either open it in Chrome and tap **Install app**, or download the signed APK from the [latest release](https://github.com/samnodier/junkie/releases/latest) and open it (you may need to allow installing from unknown sources).
+
+Both are the same app pointing at the hosted site; the APK just wraps it so there's nothing to install from a browser.
+
 ## Discord bot
 
 junkie has a Discord bot that runs a server's focus room from chat: live countdown messages showing who's in, break notifications, join buttons, stats, and a heatmap picture — no browser needed once you're set up.

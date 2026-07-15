@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.onrender.junkie_blin.twa",
+      "sha256_cert_fingerprints": [
+        "5A:03:10:E6:32:D9:AB:3D:73:14:75:EB:AA:F3:81:00:36:DA:73:8D:01:01:E4:DD:85:66:B2:7F:90:93:D5:C7"
+      ]
+    }
+  }
+]
