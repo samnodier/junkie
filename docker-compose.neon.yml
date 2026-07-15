@@ -1,12 +1,15 @@
 services:
   # No local postgres service here — DATABASE_URL points at a managed
-  # database (e.g. Neon) instead. See "Path A" in DEPLOY.md.
+  # database (e.g. Neon) instead. See "Self-hosting with Docker" in DEPLOY.md.
   app:
     build: .
     environment:
       DATABASE_URL: ${DATABASE_URL}
       ADDR: :8080
       JUNKIE_OWNER_USERNAME: ${JUNKIE_OWNER_USERNAME:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     restart: unless-stopped
 
   caddy:

@@ -2,18 +2,17 @@
 
 `junkie` is a small shared focus app for study groups. Open it in a browser, track what you need to finish, run solo or shared focus timers, and see progress on a GitHub-inspired work map of focused minutes per day.
 
-<table>
-<tr>
-<td width="50%"><img src="assets/desk-light.png" alt="The junkie desk in light mode: a 50-minute focus ring beside a private todo list"></td>
-<td width="50%"><img src="assets/desk-dark.png" alt="The junkie desk in dark mode: a 50-minute focus ring beside a private todo list"></td>
-</tr>
-<tr>
-<td align="center">Light</td>
-<td align="center">Dark</td>
-</tr>
-</table>
+
+| Light | Dark |
+| ----- | ---- |
+| ![The junkie desk in light mode: a focus ring beside a private todo list](assets/desk-light.png) | ![The junkie desk in dark mode: a focus ring beside a private todo list](assets/desk-dark.png) |
+
+
+
 
 ## How to use junkie
+
+
 
 ### Guest mode (no account)
 
@@ -38,10 +37,10 @@ When a focus block ends, junkie offers a break. You can take it, adjust the brea
 Create an account when you want shared rooms or data that follows you across devices.
 
 - **Sign up / sign in** — username and password. Usernames are lowercase letters, numbers, dots, dashes, and underscores (2–32 characters).
-- **Username** — change it from Profile → Account. Your focus history stays with the account. The **owner** account's username is pinned (see Admin and owner access) and cannot be renamed in the app.
-- **Password change** — Profile → Security. Updating your password **signs out all other devices**; only the browser you used to change it keeps the session.
-- **Account deletion** — Profile → Danger zone (not available for the owner account). Permanently deletes your account, rooms you created, todos, and activity history. Requires your current password.
-- **Profile picture** — upload or remove from Profile → Preferences. Shown next to your name on room todos and in the participant stack on room timers. Images are resized in the browser before upload.
+- **Username** — change it from Profile → Account.
+- **Password change** — Profile → Security. Updating your password **signs out all other devices**.
+- **Account deletion** — Profile → Danger zone. Permanently deletes your account, rooms you created, todos, and activity history. Requires your current password.
+- **Profile picture** — upload or remove from Profile → Preferences.
 
 
 
@@ -132,65 +131,17 @@ Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `
 
 ## Where your data lives
 
-junkie splits storage by whether you have an account.
+**Guest** — todos, solo timer state, and your work map stay in browser `localStorage` on that device. Nothing reaches the server.
 
-### Without an account (guest / solo)
+**Signed in** — everything lives in PostgreSQL and follows you across devices: account and session, todos, timer runs and focus minutes, rooms and their settings, profile pictures, and connections.
 
-Browser `localStorage` only:
-
-- Private todos (`junkie:todos`)
-- Solo timer state (`junkie:soloTimer`)
-- Work map / focus minutes per day (`junkie:activity`)
-
-
-
-### With an account
-
-PostgreSQL on the server:
-
-- Account credentials and session
-- Private todos
-- Solo timer runs and completed focus minutes (work map)
-- Room membership, room settings, room todos, and shared room timers
-- Profile pictures, connections, and connect invite tokens
-
-
-
-### Why guest data stays local
-
-Keeping solo progress in the browser avoids anonymous database rows, cleanup overhead, and extra privacy complexity. It also keeps hosted databases small. Server storage is reserved for features that need it — mainly shared rooms and cross-device persistence.
-
-### Keeping progress long-term
-
-Create an account and use junkie while logged in. Your todos, timer history, and work map then live in PostgreSQL and follow you across devices. If you used junkie as a guest first, re-enter todos manually; guest `localStorage` does not migrate today.
+Guest data does not migrate into an account; sign up first if you want to keep progress long-term.
 
 ## Admin and owner access
 
-Every account has one database-backed role:
+Accounts have one of three roles. `user` is the default and cannot open `/admin`. `admin` adds operational aggregates, account and room metadata, and room deletion. `owner` adds per-user focus summaries and promoting or demoting admins. Admin actions are audited.
 
-- `user`: regular app access; cannot open `/admin`
-- `admin`: operational aggregates, account metadata, room metadata, and audited room deletion
-- `owner`: all admin access, aggregate per-user focus summaries, and audited promotion/demotion of admins
-
-There is intentionally no public or in-app navigation link to `/admin`. Authorization is enforced server-side. Admins never receive password hashes, session tokens, private todo text, or detailed per-user activity history.
-
-To bootstrap the first owner:
-
-1. Create or sign in to the intended account once.
-2. Set `JUNKIE_OWNER_USERNAME` to that account's username.
-3. Restart junkie.
-
-At startup, the configured account is promoted to `owner`. Changing or removing the variable never demotes an existing owner. A missing username is logged without exposing the configured value.
-
-A trusted database operator can instead promote an initial owner directly:
-
-```sql
-UPDATE users SET role = 'owner' WHERE username = 'your_username';
-```
-
-Keep at least one owner. Owner accounts cannot be demoted through the web admin interface; changing an owner role requires trusted database access.
-
-Admin mutations require same-origin browser requests, use `POST`, re-check actor and target roles from PostgreSQL, and write to `admin_audit_log`. Session cookies are `HttpOnly`, `SameSite=Lax`, and marked `Secure` when served over HTTPS.
+To bootstrap the first owner, sign in to the intended account once, set `JUNKIE_OWNER_USERNAME` to its username, and restart. That account is promoted at startup. Clearing the variable never demotes an existing owner, and owners can only be changed with database access.
 
 ## Local development
 
@@ -220,47 +171,19 @@ postgres://junkie:junkie@localhost:5432/junkie?sslmode=disable
 
 Override it with `DATABASE_URL` if needed. Migrations in `migrations/` run automatically at startup.
 
-## Deployment and PostgreSQL
+## Deployment
 
-For a start-to-finish free hosting walkthrough (Oracle Cloud Always Free with the bundled Caddy TLS proxy, or Render + Neon), see [DEPLOY.md](DEPLOY.md).
+The server needs PostgreSQL; SQLite is not supported. People *using* a deployed instance need only a browser.
 
-The server requires PostgreSQL. SQLite is not supported or bundled. People using a deployed junkie instance need only a browser; they do not need PostgreSQL or any local application installed.
+See [DEPLOY.md](DEPLOY.md) for Render + Neon or self-hosting with the bundled compose files and Caddy.
 
-Set `DATABASE_URL` to the connection string for your hosted PostgreSQL database:
+If you put junkie behind your own proxy, make sure it sets `X-Forwarded-Proto` and `X-Forwarded-For` — the app relies on them to mark cookies `Secure` and to tell clients apart. Caddy and most platform routers do this already. `GET /healthz` returns `200 ok` when the app can reach the database.
 
-```sh
-DATABASE_URL='postgres://user:password@host/database?sslmode=require'
-```
+## Security
 
-The server applies every idempotent SQL file in `migrations/` at startup, including role and audit-log schema changes. Run one app instance during a migration rollout, or apply the same migrations through your deployment pipeline before scaling out.
+Sessions are cookie-based and stored only as hashes. Cross-site requests and WebSocket handshakes are rejected, sign-in and signup are rate limited, and responses carry a Content-Security-Policy with all scripts served from the app itself.
 
-Managed PostgreSQL products such as Neon, Supabase, and Fly Managed Postgres are examples of deployment options. Plans and free-tier availability change, so check current pricing and limits rather than relying on a particular free offering.
-
-Guest mode remains entirely in that browser's `localStorage`. A hosted database only persists signed-in account data across devices.
-
-### Containerized deployment
-
-A `Dockerfile` builds a self-contained image (binary plus `migrations/`), and the compose file has an optional `app` service:
-
-```sh
-cp .env.example .env   # then set a strong POSTGRES_PASSWORD
-docker compose --profile app up -d --build
-```
-
-The app listens on `127.0.0.1:8080` and Postgres on `127.0.0.1:5432`, so neither is reachable from other hosts directly — put a reverse proxy (Caddy, nginx, or your host's ingress) in front for TLS.
-
-`GET /healthz` returns `200 ok` when the app can reach the database; point uptime checks and container health probes at it.
-
-### Running behind a reverse proxy
-
-junkie marks session cookies `Secure` when the request arrived over TLS or with `X-Forwarded-Proto: https`. Make sure your proxy sets `X-Forwarded-Proto` (and `X-Forwarded-For`, which the sign-in rate limiter uses to tell clients apart); Caddy and most platform routers do this by default.
-
-### Security measures
-
-- All state-changing requests are rejected when they originate from another site (`http.CrossOriginProtection`), and WebSocket handshakes enforce same-origin.
-- Sign-in is rate limited per IP and per username; signups are rate limited per IP.
-- Session cookies are `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS, and only a SHA-256 hash of the token is stored in PostgreSQL. Expired sessions are swept hourly.
-- Responses carry a Content-Security-Policy plus `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and (over HTTPS) `Strict-Transport-Security`. All scripts are served from the app itself.
+Found a vulnerability? Open an issue or contact the maintainer rather than filing a public exploit.
 
 
 
