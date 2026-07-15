@@ -8,13 +8,12 @@
 // Assets are served from fixed, unhashed paths (/assets/app.css, etc.), so bump
 // CACHE_VERSION on every deploy that changes a precached asset to evict the old
 // copies.
-const CACHE_VERSION = 'junkie-v2';
+const CACHE_VERSION = 'junkie-v3';
 
+// Since the Vue migration, page scripts/styles are content-hashed under
+// /app/ and served with immutable cache headers — the browser HTTP cache
+// handles them, so the worker precaches only the stable PWA shell files.
 const PRECACHE = [
-  '/assets/app.css',
-  '/assets/guest.js',
-  '/assets/htmx.min.js',
-  '/assets/notifications.js',
   '/assets/icon.svg',
   '/assets/icon-192.png',
   '/assets/icon-512.png',
