@@ -2,13 +2,13 @@
 // "X is starting a focus block — join?" dialog with the lobby countdown,
 // ported from showFocusJoinPrompt. Auto-dismisses when the lobby closes.
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { useDeskStore } from '@/stores/desk';
 
 const props = defineProps({
   prompt: { type: Object, required: true }, // {code, roomName, starterName, lobbyDeadline}
 });
-const emit = defineEmits(['dismiss']);
-const desk = useDeskStore();
+// The parent owns the join action and refresh; 'expired' fires when the
+// lobby closes without a decision.
+const emit = defineEmits(['dismiss', 'join', 'expired']);
 
 const deadline = Date.parse(props.prompt.lobbyDeadline || '') || Date.now() + 30000;
 const left = ref(10);
@@ -16,8 +16,8 @@ let interval = null;
 
 const display = computed(() => '00:' + String(Math.max(0, left.value)).padStart(2, '0'));
 
-async function join() {
-  await desk.roomTimer(props.prompt.code, 'timer-join');
+function join() {
+  emit('join');
   emit('dismiss');
 }
 
@@ -26,7 +26,7 @@ onMounted(() => {
     left.value = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     if (left.value === 0) {
       clearInterval(interval);
-      desk.refresh();
+      emit('expired');
       emit('dismiss');
     }
   };

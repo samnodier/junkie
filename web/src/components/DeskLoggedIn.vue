@@ -3,7 +3,7 @@
 // timer cards in the ring column, the private/room todos panel with the
 // mode switcher (same sessionStorage keys and ?todos=/&room= URL contract),
 // membership pill, and the WS-driven live sync.
-import { computed, inject, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue';
+import { computed, inject, onMounted, onUnmounted, provide, ref, watch, watchEffect } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useDeskStore } from '@/stores/desk';
 import SoloTimerCard from './SoloTimerCard.vue';
@@ -18,6 +18,10 @@ const ROOM_KEY = 'junkie:deskTodosRoom';
 const auth = useAuthStore();
 const desk = useDeskStore();
 const shell = inject('shellApi', null);
+provide('todoApi', {
+  todoAction: (id, action) => desk.todoAction(id, action),
+  editTodo: (id, text, patch) => desk.editTodo(id, text, patch),
+});
 
 const draft = ref('');
 const roomDraft = ref('');
@@ -181,6 +185,12 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <JoinPromptModal v-if="desk.joinPrompt" :prompt="desk.joinPrompt" @dismiss="desk.joinPrompt = null" />
+    <JoinPromptModal
+      v-if="desk.joinPrompt"
+      :prompt="desk.joinPrompt"
+      @join="desk.roomTimer(desk.joinPrompt.code, 'timer-join')"
+      @expired="desk.refresh()"
+      @dismiss="desk.joinPrompt = null"
+    />
   </div>
 </template>

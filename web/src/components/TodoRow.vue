@@ -2,13 +2,14 @@
 // One todo row, ported from the todo-row template: check toggle, click-text-
 // to-edit (900ms autosave, Enter/blur commits, Escape reverts), remove /
 // restore / delete. Read-only rows show the author instead of controls.
-import { nextTick, ref } from 'vue';
-import { useDeskStore } from '@/stores/desk';
+import { inject, nextTick, ref } from 'vue';
 
 const props = defineProps({
   todo: { type: Object, required: true },
 });
-const desk = useDeskStore();
+// The surface owning this row (desk or room page) provides the actions, so
+// the same row works against either store.
+const desk = inject('todoApi');
 
 const editing = ref(false);
 const editValue = ref('');

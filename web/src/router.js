@@ -62,6 +62,18 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/r/:code',
+    name: 'room',
+    component: () => import('./views/RoomView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/r/:code/members',
+    name: 'room-members',
+    component: () => import('./views/RoomMembersView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     // Catch-all for /{username}; static routes above always win in vue-router
     // scoring, and the Go handler 404s invalid names before the SPA loads.
     path: '/:username([a-z0-9._-]{2,32})',

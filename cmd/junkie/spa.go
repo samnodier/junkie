@@ -273,6 +273,77 @@ func (a *app) apiDesk(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiRoom feeds the SPA room page. Non-members get the invite verdict (the
+// page-level handler already 404s unknown rooms); members get the full room
+// state — the JSON twin of roomPage.
+func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "room not found")
+		return
+	}
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		writeJSON(w, map[string]any{"invite": map[string]string{"name": rm.Name, "code": rm.Code}})
+		return
+	}
+	timer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+	if transitioned {
+		a.broadcastTimerPhase(rm, timer)
+	}
+	todos, _ := a.roomTodos(r.Context(), rm.ID)
+	grouped := groupRoomTodos(todos, u.ID)
+	memberCount, _ := a.roomMemberCount(r.Context(), rm.ID)
+	waiting := false
+	if timer == nil || (timer.Phase == "focus" && !timer.Participant) {
+		waiting = a.roomWaiting(r.Context(), rm.ID, u.ID)
+	}
+	writeJSON(w, map[string]any{
+		"room": map[string]any{
+			"code":         rm.Code,
+			"name":         rm.Name,
+			"focusMinutes": rm.FocusMinutes,
+			"breakMinutes": rm.BreakMinutes,
+			"autoSessions": rm.AutoSessions,
+			"autoRoll":     rm.AutoRoll,
+		},
+		"isCreator":   rm.CreatorID == u.ID,
+		"memberCount": memberCount,
+		"timer":       apiRoomTimer(timer),
+		"waiting":     waiting,
+		"mine":        apiTodos(grouped.Mine),
+		"others":      apiTodos(grouped.Others),
+	})
+}
+
+// apiRoomMembers mirrors roomMembersPage: each member plus whether the
+// viewer may open their profile (self or an existing connection).
+func (a *app) apiRoomMembers(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "room not found")
+		return
+	}
+	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
+		writeJSONError(w, http.StatusForbidden, "room membership required")
+		return
+	}
+	members, _ := a.roomMemberUsers(r.Context(), rm.ID)
+	out := make([]map[string]any, 0, len(members))
+	for _, m := range members {
+		out = append(out, map[string]any{
+			"user":      apiUsers([]user{m})[0],
+			"self":      m.ID == u.ID,
+			"connected": m.ID != u.ID && a.areConnected(r.Context(), u.ID, m.ID),
+		})
+	}
+	writeJSON(w, map[string]any{
+		"room":    map[string]string{"code": rm.Code, "name": rm.Name},
+		"members": out,
+	})
+}
+
 // apiConnections lists the caller's connections with their heatmaps, newest
 // first — the JSON twin of connectionViews for the SPA connections page.
 func (a *app) apiConnections(w http.ResponseWriter, r *http.Request) {

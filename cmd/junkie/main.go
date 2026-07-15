@@ -320,6 +320,8 @@ func main() {
 	mux.HandleFunc("GET /api/connections", a.requireAuth(a.apiConnections))
 	mux.HandleFunc("GET /api/desk", a.requireAuth(a.apiDesk))
 	mux.HandleFunc("GET /api/rooms", a.requireAuth(a.apiRooms))
+	mux.HandleFunc("GET /api/room/{code}", a.requireAuth(a.apiRoom))
+	mux.HandleFunc("GET /api/room/{code}/members", a.requireAuth(a.apiRoomMembers))
 	mux.HandleFunc("GET /api/public-profile/{username}", a.requireAuth(a.apiPublicProfile))
 	mux.HandleFunc("GET /privacy", a.spaPage) // ported to Vue
 	mux.HandleFunc("GET /terms", a.spaPage)   // ported to Vue
@@ -1392,23 +1394,12 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
-		a.render(w, "room-invite", pageData{Title: "Join room", User: u, Room: rm})
-		return
-	}
-	timer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
-	if transitioned {
-		a.broadcastTimerPhase(rm, timer)
-	}
-	todos, _ := a.roomTodos(r.Context(), rm.ID)
-	rooms, _ := a.roomsForUser(r.Context(), u.ID)
-	focusMode := timer != nil && timer.Phase == "focus" && timer.Participant
-	memberCount, _ := a.roomMemberCount(r.Context(), rm.ID)
-	waiting := false
-	if timer == nil || (timer.Phase == "focus" && !timer.Participant) {
-		waiting = a.roomWaiting(r.Context(), rm.ID, u.ID)
-	}
-	a.render(w, "room", pageData{Title: rm.Name, User: u, Room: rm, Rooms: rooms, RoomTodosGrouped: groupRoomTodos(todos, u.ID), Timer: timer, FocusMode: focusMode, MemberCount: memberCount, TimerWaiting: waiting, Error: r.URL.Query().Get("error")})
+	// Ported to Vue: the SPA fetches /api/room/{code}, which re-runs the
+	// member gate and answers with either the invite card or the room state.
+	// The 404 gates above keep their exact HTTP semantics.
+	_ = u
+	_ = rm
+	a.spaPage(w, r)
 }
 
 // roomTodosFragment serves the current todo-groups markup for a room so
@@ -2366,16 +2357,9 @@ func (a *app) roomMembersPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "room membership required", http.StatusForbidden)
 		return
 	}
-	members, _ := a.roomMemberUsers(r.Context(), rm.ID)
-	views := make([]roomMemberView, len(members))
-	for i, m := range members {
-		views[i] = roomMemberView{
-			Member:    m,
-			Self:      m.ID == u.ID,
-			Connected: m.ID == u.ID || a.areConnected(r.Context(), u.ID, m.ID),
-		}
-	}
-	a.render(w, "room-members", pageData{Title: "Room members", User: u, Room: rm, RoomMembers: views})
+	// Ported to Vue; data comes from /api/room/{code}/members with the same
+	// gates, which stayed above at page level.
+	a.spaPage(w, r)
 }
 
 func (a *app) currentUser(r *http.Request) (user, bool) {
