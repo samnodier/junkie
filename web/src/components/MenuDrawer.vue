@@ -1,0 +1,113 @@
+<script setup>
+// Guest and user drawer, same markup as the Go templates' menu-drawer-guest /
+// menu-drawer-user blocks. Room create/join/logout still post to the legacy
+// endpoints (native form submits + server redirects) until those flows are
+// ported; that keeps behavior identical during the transition.
+import { nextTick, onUnmounted, ref, watch } from 'vue';
+import { useAuthStore } from '@/stores/auth';
+
+const props = defineProps({
+  open: { type: Boolean, default: false },
+  rooms: { type: Array, default: () => [] },
+  currentRoomCode: { type: String, default: '' },
+  next: { type: String, default: '/' },
+});
+const emit = defineEmits(['close']);
+
+const auth = useAuthStore();
+const drawerEl = ref(null);
+
+watch(
+  () => props.open,
+  async (open) => {
+    document.body.classList.toggle('menu-drawer-open', open);
+    if (open) {
+      await nextTick();
+      drawerEl.value?.querySelector('a, button, input, summary')?.focus();
+    }
+  }
+);
+
+function onKeydown(event) {
+  if (event.key === 'Escape') emit('close');
+}
+window.addEventListener('keydown', onKeydown);
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown);
+  document.body.classList.remove('menu-drawer-open');
+});
+</script>
+
+<template>
+  <div class="menu-drawer-backdrop" v-show="open" @click="emit('close')"></div>
+  <aside class="menu-drawer" :class="{ open }" :aria-hidden="String(!open)" ref="drawerEl">
+    <div class="menu-drawer-head">
+      <button type="button" class="menu-drawer-close" aria-label="Close" @click="emit('close')">×</button>
+    </div>
+
+    <template v-if="auth.isAuthed">
+      <div class="drawer-identity drawer-identity-user">
+        <a href="/profile" class="drawer-profile-row">
+          <span class="drawer-avatar"><img v-if="auth.avatarURL" class="avatar-img" :src="auth.avatarURL" alt=""><template v-else>{{ auth.initial }}</template></span>
+          <span class="drawer-name">{{ auth.user.displayName }}</span>
+        </a>
+      </div>
+      <p class="label drawer-section-label">Your rooms</p>
+      <div class="room-list">
+        <template v-if="rooms.length">
+          <a
+            v-for="room in rooms"
+            :key="room.code"
+            class="room-row"
+            :class="{ 'is-here': room.code === currentRoomCode }"
+            :href="`/r/${room.code}`"
+          >
+            <div class="room-row-main">
+              <strong>{{ room.name }}</strong>
+              <span class="mono room-row-code">{{ room.code }} · {{ room.autoSessions }}×{{ room.focusMinutes }}/{{ room.breakMinutes }}</span>
+            </div>
+            <span v-if="room.code === currentRoomCode" class="label here-tag">Here</span>
+          </a>
+        </template>
+        <p v-else class="empty">No rooms yet.</p>
+      </div>
+      <details class="drawer-details">
+        <summary><span class="label">Create room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <form class="room-create" method="post" action="/rooms">
+          <input name="name" placeholder="Room name (optional)">
+          <button type="submit" class="btn-primary btn-compact">Create</button>
+        </form>
+      </details>
+      <details class="drawer-details" id="drawer-join-section">
+        <summary><span class="label">Join room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <form class="room-join" method="post" action="/rooms/join">
+          <input type="hidden" name="next" :value="next">
+          <input class="room-code-input" name="code" placeholder="Code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
+          <button type="submit" class="btn-primary btn-compact">Join</button>
+        </form>
+      </details>
+      <form class="menu-drawer-logout" method="post" action="/logout">
+        <button type="submit" class="btn-ghost">Log out</button>
+      </form>
+    </template>
+
+    <template v-else>
+      <div class="drawer-identity">
+        <a href="/profile" class="drawer-profile-row">
+          <span class="drawer-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+          <span class="drawer-name">Profile</span>
+        </a>
+        <a :href="`/login${next && next !== '/' ? `?next=${encodeURIComponent(next)}` : ''}`" class="btn-primary drawer-signin">Sign in</a>
+        <p class="label drawer-guest-hint">Rooms need an account — sign in to study together.</p>
+      </div>
+      <details class="drawer-details" id="drawer-join-section">
+        <summary><span class="label">Join room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <form class="room-join" method="post" action="/rooms/join-intent">
+          <input type="hidden" name="next" :value="next">
+          <input class="room-code-input" name="code" placeholder="Code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
+          <button type="submit" class="btn-primary btn-compact">Join</button>
+        </form>
+      </details>
+    </template>
+  </aside>
+</template>

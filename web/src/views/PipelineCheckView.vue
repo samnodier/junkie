@@ -1,22 +1,18 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+// Throwaway page for exercising the migration scaffolding (deleted at
+// cutover). Renders the real app shell so topbar, drawer, theme, and toasts
+// can be verified against production without flipping any user-facing route.
+import { useAuthStore } from '@/stores/auth';
+import { useToastStore } from '@/stores/toasts';
+import AppShell from '@/components/AppShell.vue';
 
-const me = ref(null);
-const error = ref('');
-
-onMounted(async () => {
-  try {
-    const res = await fetch('/api/me', { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    me.value = await res.json();
-  } catch (e) {
-    error.value = String(e);
-  }
-});
+const auth = useAuthStore();
+const toasts = useToastStore();
+let toastCount = 0;
 </script>
 
 <template>
-  <main class="page">
+  <AppShell show-menu>
     <section class="panel" style="max-width: 28rem; margin: 3rem auto; padding: var(--sp-6);">
       <p class="eyebrow">Migration pipeline check</p>
       <h1>Vue is serving</h1>
@@ -24,11 +20,12 @@ onMounted(async () => {
         Built with Vite, embedded in the Go binary, styled by the ported
         stylesheet, talking to the JSON API.
       </p>
-      <p v-if="me" class="mono" data-testid="me">
-        /api/me → {{ me.user ? me.user.username : 'guest' }}
+      <p class="mono" data-testid="me">
+        /api/me → {{ auth.loaded ? (auth.user ? auth.user.username : 'guest') : 'loading…' }}
       </p>
-      <p v-else-if="error" class="mono" data-testid="me-error">{{ error }}</p>
-      <p v-else class="mono">loading…</p>
+      <button type="button" class="btn-primary" data-testid="toast-btn" @click="toasts.show(`Shell toast #${++toastCount}`)">
+        Test toast
+      </button>
     </section>
-  </main>
+  </AppShell>
 </template>
