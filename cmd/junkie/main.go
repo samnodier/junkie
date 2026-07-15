@@ -64,6 +64,10 @@ type room struct {
 	// off, the break waits paused at full length so members can adjust it
 	// and start it deliberately.
 	AutoRoll bool
+	// Ephemeral marks a temporary Forest-style focus room: joined by link,
+	// shown on the stripped /f/{code} screen, and deleted the moment its run
+	// completes or empties out. Kept out of the room list and the room cap.
+	Ephemeral bool
 }
 
 type todo struct {
@@ -352,6 +356,8 @@ func main() {
 	mux.HandleFunc("GET /r/{code}/members", a.requireAuth(a.roomMembersPage))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
+	mux.HandleFunc("GET /f/{code}", a.requireAuth(a.focusRoomPage))
+	mux.HandleFunc("POST /f/{code}/join", a.requireAuth(a.enterFocusRoom))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
 	mux.HandleFunc("GET /ws/me", a.requireAuth(a.userWS))
 	mux.HandleFunc("GET /todos-fragment", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +371,7 @@ func main() {
 
 	go a.sweepExpiredSessions(ctx)
 	go a.sweepInactiveTodos(ctx)
+	go a.sweepAbandonedEphemeralRooms(ctx)
 
 	// Reject state-changing requests from other origins (CSRF). Requests
 	// without browser origin metadata (curl, health checks) still pass.
@@ -1284,7 +1291,7 @@ const maxRoomsPerUser = 5
 // rooms. Checked on both creation surfaces (web form and /junkie register).
 func (a *app) userAtRoomCap(ctx context.Context, userID string) bool {
 	var count int
-	if err := a.db.QueryRow(ctx, `SELECT COUNT(*) FROM rooms WHERE creator_id = $1`, userID).Scan(&count); err != nil {
+	if err := a.db.QueryRow(ctx, `SELECT COUNT(*) FROM rooms WHERE creator_id = $1 AND ephemeral = false`, userID).Scan(&count); err != nil {
 		return false
 	}
 	return count >= maxRoomsPerUser
@@ -1294,6 +1301,13 @@ func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	if !a.limiter.allow("createroom:"+u.ID, 20, time.Hour) {
 		http.Redirect(w, r, "/?error="+url.QueryEscape("Too many rooms created; try again later."), http.StatusSeeOther)
+		return
+	}
+	// Temporary Forest-style focus rooms take the config right here (they have
+	// no settings page) and are exempt from the room cap since they delete
+	// themselves when their run ends. Redirect lands on the /f/{code} screen.
+	if r.FormValue("ephemeral") == "1" {
+		a.createEphemeralRoom(w, r, u)
 		return
 	}
 	if a.userAtRoomCap(r.Context(), u.ID) {
@@ -1320,6 +1334,40 @@ func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, u.ID)
 	http.Redirect(w, r, "/r/"+code, http.StatusSeeOther)
+}
+
+// createEphemeralRoom spins up a temporary focus room from the create-modal
+// config (focus/break/sessions + auto-roll), makes the creator a member, and
+// sends them to the /f/{code} screen. No name field — these rooms are
+// disposable, so we auto-name from the creator.
+func (a *app) createEphemeralRoom(w http.ResponseWriter, r *http.Request, u user) {
+	focus := clampInt(r.FormValue("focus_minutes"), 5, 180, 25)
+	breaks := clampInt(r.FormValue("break_minutes"), 1, 60, 5)
+	sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, 4)
+	autoRoll := r.FormValue("auto_roll") == "1"
+	name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)
+	if name == "" {
+		name = u.DisplayName + "'s focus room"
+	}
+	var code, roomID string
+	err := errors.New("no attempt")
+	for range 5 {
+		code = randomCode()
+		err = a.db.QueryRow(r.Context(), `
+			INSERT INTO rooms (code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, true) RETURNING id`,
+			code, name, u.ID, focus, breaks, sessions, autoRoll).Scan(&roomID)
+		if err == nil || !isUniqueViolation(err) {
+			break
+		}
+	}
+	if err != nil {
+		log.Printf("create ephemeral room: %v", err)
+		http.Error(w, "could not create room", http.StatusInternalServerError)
+		return
+	}
+	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, u.ID)
+	http.Redirect(w, r, "/f/"+code, http.StatusSeeOther)
 }
 
 func (a *app) joinRoom(w http.ResponseWriter, r *http.Request) {
@@ -1426,6 +1474,89 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 	_ = u
 	_ = rm
 	a.spaPage(w, r)
+}
+
+// focusRoomPage serves the SPA shell for a temporary focus room at /f/{code}.
+// It 404s anything that isn't a live ephemeral room (unknown code, a normal
+// room's code, or a room already deleted when its run ended), so the stripped
+// screen only ever loads for a room it fits.
+func (a *app) focusRoomPage(w http.ResponseWriter, r *http.Request) {
+	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
+	if !ok || !rm.Ephemeral {
+		http.NotFound(w, r)
+		return
+	}
+	a.spaPage(w, r)
+}
+
+// enterFocusRoom is the click-the-link join for a temporary room: it makes the
+// viewer a member and queues them into the run (joined now during a lobby or
+// break, parked in the waiting list otherwise), so opening the share link drops
+// them straight onto the waiting screen without an invite step. Idempotent, so
+// the /f/{code} view can call it on every mount, including for the creator.
+func (a *app) enterFocusRoom(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
+	if !ok || !rm.Ephemeral {
+		writeJSONError(w, http.StatusNotFound, "room not found")
+		return
+	}
+	a.addRoomMember(r.Context(), rm.ID, u.ID)
+	if timer, outcome, err := a.joinTimer(r.Context(), rm, u.ID); err != nil {
+		log.Printf("enter focus room %s: %v", rm.Code, err)
+	} else if outcome == joinedNow && timer != nil {
+		a.notifyDiscord(rm, timer, false)
+	}
+	// Tell the room's other tabs the participant/waiting set changed.
+	a.hub.broadcast(rm.Code, "timer-phase")
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// closeEphemeralRoom deletes a temporary room once its run is over — completed
+// or emptied — and signals its viewers (via the "deleted" broadcast the room
+// socket already understands) to head back home. The row delete cascades to
+// members, todos, and timer rows. No-op for normal rooms.
+func (a *app) closeEphemeralRoom(ctx context.Context, rm room) {
+	if !rm.Ephemeral {
+		return
+	}
+	if _, err := a.db.Exec(ctx, `DELETE FROM rooms WHERE id = $1`, rm.ID); err != nil {
+		log.Printf("close ephemeral room %s: %v", rm.Code, err)
+		return
+	}
+	a.hub.broadcast(rm.Code, "deleted")
+}
+
+// sweepAbandonedEphemeralRooms is the backstop for temporary rooms that end
+// without anyone's tab there to trigger closeEphemeralRoom — created and never
+// started, or left mid-block after every viewer closed their tab. It removes
+// ephemeral rooms with no *live* run (none whose deadline is still recent),
+// leaving actively-running blocks of any length untouched.
+func (a *app) sweepAbandonedEphemeralRooms(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		tag, err := a.db.Exec(ctx, `
+			DELETE FROM rooms r
+			WHERE r.ephemeral = true
+				AND r.created_at < now() - interval '1 hour'
+				AND NOT EXISTS (
+					SELECT 1 FROM timer_runs tr
+					WHERE tr.room_id = r.id
+						AND tr.ended_at IS NULL AND tr.phase <> 'ended'
+						AND tr.phase_ends_at > now() - interval '1 hour'
+				)`)
+		if err != nil {
+			log.Printf("sweep abandoned focus rooms: %v", err)
+		} else if n := tag.RowsAffected(); n > 0 {
+			log.Printf("swept %d abandoned focus rooms", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // roomTodosFragment serves the current todo-groups markup for a room so
@@ -1636,6 +1767,13 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		}
 	case "timer-leave":
 		if ended, _ := a.leaveTimer(r.Context(), rm, u.ID); ended {
+			// The last participant left: for a temporary room that empties the
+			// block, so delete it and send everyone home rather than ending to
+			// an idle state that can't be restarted.
+			if rm.Ephemeral {
+				a.closeEphemeralRoom(r.Context(), rm)
+				return
+			}
 			action = "timer-end"
 			a.notifyDiscord(rm, nil, false)
 		} else if timer, err := a.activeTimer(r.Context(), rm.ID, u.ID); err == nil && timer != nil {
@@ -1710,6 +1848,13 @@ func (a *app) userWS(w http.ResponseWriter, r *http.Request) {
 // aren't looking at the app) get a device notification that there's a
 // window to join before the next block starts.
 func (a *app) broadcastTimerPhase(rm room, timer *timerRun) {
+	// A temporary room whose run just ended (completed all sessions or emptied
+	// out) is done for good — delete it and send its viewers home instead of
+	// broadcasting an idle phase they'd never act on.
+	if timer == nil && rm.Ephemeral {
+		a.closeEphemeralRoom(context.Background(), rm)
+		return
+	}
 	a.hub.broadcast(rm.Code, "timer-phase")
 	if timer != nil && timer.Phase == "break" {
 		a.hub.broadcastJSON(rm.Code, map[string]interface{}{
@@ -2022,6 +2167,29 @@ func (a *app) roomWaiting(ctx context.Context, roomID, userID string) bool {
 	var waiting bool
 	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM room_waiting WHERE room_id = $1 AND user_id = $2)`, roomID, userID).Scan(&waiting)
 	return err == nil && waiting
+}
+
+// roomWaitingUsers lists everyone parked in a room's waiting list, with the
+// avatar bits the participant stack needs. Used by the /f/{code} screen to show
+// who's here before the block starts, when there's no run yet to draw heads from.
+func (a *app) roomWaitingUsers(ctx context.Context, roomID string) ([]user, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT u.id, u.display_name, u.avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+		FROM room_waiting rw JOIN users u ON u.id = rw.user_id
+		WHERE rw.room_id = $1 ORDER BY rw.created_at`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []user
+	for rows.Next() {
+		var m user
+		if rows.Scan(&m.ID, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion) == nil {
+			members = append(members, m)
+		}
+	}
+	return members, rows.Err()
 }
 
 func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusMinutes int) (bool, error) {
@@ -2450,7 +2618,7 @@ func (a *app) findRoom(ctx context.Context, code string) (room, bool) {
 		return room{}, false
 	}
 	var rm room
-	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll)
+	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral)
 	return rm, err == nil
 }
 
@@ -2465,7 +2633,9 @@ func (a *app) addRoomMember(ctx context.Context, roomID, userID string) {
 }
 
 func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
-	rows, err := a.db.Query(ctx, `SELECT r.id, r.code, r.name, r.creator_id, r.focus_minutes, r.break_minutes, r.auto_sessions, r.auto_roll FROM room_members rm JOIN rooms r ON r.id = rm.room_id WHERE rm.user_id = $1 ORDER BY r.updated_at DESC`, userID)
+	// Ephemeral focus rooms are deliberately excluded: they're disposable and
+	// live only on their own /f/{code} screen, never in the room list.
+	rows, err := a.db.Query(ctx, `SELECT r.id, r.code, r.name, r.creator_id, r.focus_minutes, r.break_minutes, r.auto_sessions, r.auto_roll FROM room_members rm JOIN rooms r ON r.id = rm.room_id WHERE rm.user_id = $1 AND r.ephemeral = false ORDER BY r.updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}

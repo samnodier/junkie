@@ -334,6 +334,15 @@ func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 	if transitioned {
 		a.broadcastTimerPhase(rm, timer)
 	}
+	// A temporary room whose run just ended has been deleted by the line above.
+	// Answer the poll that triggered it with a 404 so the /f/{code} view heads
+	// home immediately instead of flashing an idle state it can't act on.
+	// (timer==nil without a transition is the pre-start waiting room, which
+	// stays.)
+	if rm.Ephemeral && transitioned && timer == nil {
+		writeJSONError(w, http.StatusNotFound, "room not found")
+		return
+	}
 	todos, _ := a.roomTodos(r.Context(), rm.ID)
 	grouped := groupRoomTodos(todos, u.ID)
 	memberCount, _ := a.roomMemberCount(r.Context(), rm.ID)
@@ -341,7 +350,7 @@ func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 	if timer == nil || (timer.Phase == "focus" && !timer.Participant) {
 		waiting = a.roomWaiting(r.Context(), rm.ID, u.ID)
 	}
-	writeJSON(w, map[string]any{
+	payload := map[string]any{
 		"room": map[string]any{
 			"code":         rm.Code,
 			"name":         rm.Name,
@@ -349,6 +358,7 @@ func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 			"breakMinutes": rm.BreakMinutes,
 			"autoSessions": rm.AutoSessions,
 			"autoRoll":     rm.AutoRoll,
+			"ephemeral":    rm.Ephemeral,
 		},
 		"isCreator":   rm.CreatorID == u.ID,
 		"memberCount": memberCount,
@@ -356,7 +366,14 @@ func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 		"waiting":     waiting,
 		"mine":        apiTodos(grouped.Mine),
 		"others":      apiTodos(grouped.Others),
-	})
+	}
+	// Temporary rooms draw their "who's here" heads from the waiting list before
+	// a run exists, so the /f/{code} screen isn't empty while people gather.
+	if rm.Ephemeral && timer == nil {
+		waiters, _ := a.roomWaitingUsers(r.Context(), rm.ID)
+		payload["waiters"] = apiUsers(waiters)
+	}
+	writeJSON(w, payload)
 }
 
 // apiRoomMembers mirrors roomMembersPage: each member plus whether the

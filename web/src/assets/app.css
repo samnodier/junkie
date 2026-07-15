@@ -82,6 +82,11 @@ body {
 body.focus-active {
   background-image: none;
 }
+/* Temporary focus rooms are distraction-free in every phase, not just during
+   the focus block, so the grid stays off the whole time they're open. */
+body.focus-room-open {
+  background-image: none;
+}
 body.focus-active .topbar {
   opacity: 0.35;
   transition: opacity 200ms ease;
@@ -1277,6 +1282,37 @@ span.room-member-locked { color: var(--muted); cursor: default; }
 .drawer-chevron { width: 1rem; height: 1rem; flex-shrink: 0; transition: transform 120ms ease; color: var(--muted); }
 .drawer-details[open] .drawer-chevron, .room-details[open] .drawer-chevron { transform: rotate(180deg); }
 .drawer-details form, .room-details > :not(summary) { padding: 0 18px 18px; }
+/* "Create temporary room" trigger: reads like a drawer-details row but opens
+   the config popup instead of expanding. */
+.drawer-temp-room {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+.drawer-temp-room:hover { border-color: var(--border-strong); }
+.drawer-temp-room-hint { font-size: 0.75rem; color: var(--faint); }
+.temp-room-card { max-width: 30rem; text-align: left; }
+.temp-room-blurb { margin-top: calc(-1 * var(--sp-2)); }
+.temp-room-form { gap: var(--sp-4); }
+.temp-room-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
+.temp-room-fields label { display: grid; gap: var(--sp-2); font-size: var(--fs-small); font-weight: 600; }
+.temp-room-fields input { min-height: 40px; text-align: center; }
+@media (max-width: 480px) {
+  .temp-room-fields { grid-template-columns: 1fr; }
+  .temp-room-fields label {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+  .temp-room-fields input { width: 6rem; }
+}
 .room-list { display: grid; gap: var(--sp-2); }
 .room-row {
   display: flex;
@@ -1421,6 +1457,33 @@ body.menu-drawer-open { overflow: hidden; }
   gap: var(--sp-4);
   padding: var(--sp-8) var(--sp-5);
   text-align: center;
+}
+/* Temporary focus room: the room pill plus a copyable invite link that hides
+   during focus. */
+.focus-room-bar {
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.focus-room-share {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--fs-small);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.focus-room-share:hover { border-color: var(--border-strong); color: var(--ink); }
+.focus-room-share svg { width: 15px; height: 15px; flex-shrink: 0; }
+.focus-room-share-url { color: var(--ink); }
+.focus-room-share-feedback { color: var(--accent); }
+.focus-room-share.is-copied { border-color: var(--accent); }
+@media (max-width: 560px) {
+  .focus-room-share-url { display: none; }
 }
 .participant-avatars {
   display: flex;

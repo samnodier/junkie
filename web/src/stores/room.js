@@ -31,6 +31,7 @@ export const useRoomStore = defineStore('room', {
     memberCount: 0,
     timer: null,
     waiting: false,
+    waiters: [], // ephemeral rooms: who's parked before a run exists
     mine: [],
     others: [],
     joinPrompt: null,
@@ -62,6 +63,7 @@ export const useRoomStore = defineStore('room', {
         this.memberCount = data.memberCount;
         this.timer = data.timer;
         this.waiting = data.waiting;
+        this.waiters = data.waiters || [];
         this.mine = data.mine || [];
         this.others = data.others || [];
         this.loaded = true;
@@ -82,6 +84,11 @@ export const useRoomStore = defineStore('room', {
     async action(name, fields = {}) {
       await postForm(`/r/${encodeURIComponent(this.code)}/${name}`, fields);
       await this.refresh();
+    },
+    // enter is the click-the-link join for a temporary /f/{code} room: it makes
+    // the viewer a member and queues them into the run before the first fetch.
+    async enter(code) {
+      await postForm(`/f/${encodeURIComponent(code)}/join`);
     },
     async addTodo(text) {
       await this.action('todos', { text });

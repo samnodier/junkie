@@ -5,6 +5,7 @@
 // ported; that keeps behavior identical during the transition.
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
+import TempRoomModal from './TempRoomModal.vue';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -19,6 +20,14 @@ const emit = defineEmits(['close']);
 
 const auth = useAuthStore();
 const drawerEl = ref(null);
+const tempRoomOpen = ref(false);
+
+// Opening the config popup slides the drawer away first, so the modal sits over
+// the page (not stacked on top of the still-open, greyed-out panel).
+function openTempRoom() {
+  tempRoomOpen.value = true;
+  emit('close');
+}
 
 // Pages that don't already hold the room list (profile, connections, …) get
 // it fetched on first open, so the drawer shows your rooms everywhere — same
@@ -113,6 +122,10 @@ onUnmounted(() => {
           <button type="submit" class="btn-primary btn-compact">Create</button>
         </form>
       </details>
+      <button type="button" class="drawer-temp-room" @click="openTempRoom">
+        <span class="label">Create temporary room</span>
+        <span class="drawer-temp-room-hint">One-off block, joined by link</span>
+      </button>
       <details class="drawer-details" id="drawer-join-section">
         <summary><span class="label">Join room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
         <form class="room-join" method="post" action="/rooms/join">
@@ -124,6 +137,7 @@ onUnmounted(() => {
       <form class="menu-drawer-logout" method="post" action="/logout">
         <button type="submit" class="btn-ghost">Log out</button>
       </form>
+      <TempRoomModal v-if="tempRoomOpen" @close="tempRoomOpen = false" />
     </template>
 
     <template v-else>

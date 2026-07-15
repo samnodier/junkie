@@ -68,6 +68,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/f/:code',
+    name: 'focus-room',
+    component: () => import('./views/FocusRoomView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/r/:code/members',
     name: 'room-members',
     component: () => import('./views/RoomMembersView.vue'),
