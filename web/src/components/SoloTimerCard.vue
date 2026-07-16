@@ -5,17 +5,14 @@
 import { computed } from 'vue';
 import { useDeskStore } from '@/stores/desk';
 import { requestPermission, onTimerEnd } from '@/lib/notify';
+import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import RingIdle from './RingIdle.vue';
 import RingCountdown from './RingCountdown.vue';
 
 const desk = useDeskStore();
 const timer = computed(() => desk.soloTimer);
-
-// endsAt for the countdown component, derived from the server's secondsLeft
-// snapshot at fetch time.
-const endsAt = computed(() =>
-  new Date(Date.now() + (timer.value?.secondsLeft || 0) * 1000).toISOString()
-);
+const { endsAt } = useTimerDeadline(timer);
+const phaseKey = () => `${timer.value?.phase || 'idle'}:${timer.value?.breakPending ? 1 : 0}`;
 
 function start(minutes) {
   requestPermission();
@@ -27,7 +24,7 @@ function cancel() {
 }
 function expired(phase) {
   onTimerEnd(phase);
-  setTimeout(() => desk.refresh(), 400);
+  expireNudge(() => desk.refresh(), phaseKey);
 }
 </script>
 
@@ -36,7 +33,7 @@ function expired(phase) {
     <article v-if="timer" class="timer-card panel desk-timer-card solo-timer" :class="timer.phase">
       <template v-if="timer.phase === 'focus'">
         <p class="label label-accent">Private focus</p>
-        <RingCountdown :key="endsAt" :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running" aria-label="Private focus countdown" @expired="expired('focus')" />
+        <RingCountdown key="solo-focus" :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running" aria-label="Private focus countdown" @expired="expired('focus')" />
         <form @submit.prevent="cancel"><button type="submit" class="btn-ghost timer-cancel">End early</button></form>
       </template>
       <template v-else-if="timer.breakPending">
@@ -47,7 +44,7 @@ function expired(phase) {
       </template>
       <template v-else>
         <p class="label label-warn">Private break</p>
-        <RingCountdown :key="endsAt" :ends-at="endsAt" :total-seconds="timer.breakMinutes * 60" ring-class="break-running breather" aria-label="Private break countdown" @expired="expired('break')" />
+        <RingCountdown key="solo-break" :ends-at="endsAt" :total-seconds="timer.breakMinutes * 60" ring-class="break-running breather" aria-label="Private break countdown" @expired="expired('break')" />
         <form @submit.prevent="desk.soloBreakSkip()"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
       </template>
     </article>

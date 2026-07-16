@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useRoomStore } from '@/stores/room';
 import { requestPermission } from '@/lib/notify';
 import { useWakeLock } from '@/composables/wakeLock';
+import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import TopBar from '@/components/TopBar.vue';
 import ToastHolder from '@/components/ToastHolder.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
@@ -38,9 +39,9 @@ const heads = computed(() =>
   timer.value?.participants?.length ? timer.value.participants : room.waiters
 );
 
-const endsAt = computed(() =>
-  new Date(Date.now() + (timer.value?.secondsLeft || 0) * 1000).toISOString()
-);
+const { endsAt, seconds } = useTimerDeadline(timer);
+const phaseKey = () =>
+  `${phase.value}:${timer.value?.paused ? 1 : 0}:${timer.value?.breakPending ? 1 : 0}`;
 const totalSeconds = computed(() => {
   const t = timer.value;
   if (!t) return 1;
@@ -76,7 +77,7 @@ function goHome() {
   router.replace('/dashboard');
 }
 function expired() {
-  setTimeout(() => room.refresh(), 400);
+  expireNudge(() => room.refresh(), phaseKey);
 }
 
 watchEffect(() => {
@@ -158,7 +159,7 @@ onUnmounted(() => {
         <template v-else-if="phase === 'lobby'">
           <p class="label label-accent">Starting · join now</p>
           <p class="room-focus-name">{{ room.room?.name }}</p>
-          <RingCountdown :key="`${timer.runId}-lobby-${endsAt}`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-focus-ring" aria-label="Starting countdown" @expired="expired" />
+          <RingCountdown :key="`${timer.runId}-lobby`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-focus-ring" aria-label="Starting countdown" @expired="expired" />
           <ParticipantStack v-if="heads.length" :members="heads" />
           <p class="label">{{ heads.length }} in · here when it starts</p>
           <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
@@ -168,7 +169,7 @@ onUnmounted(() => {
         <template v-else-if="phase === 'focus'">
           <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
           <p class="room-focus-name">{{ room.room?.name }}</p>
-          <RingCountdown :key="`${timer.runId}-focus-${endsAt}`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
+          <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
           <ParticipantStack v-if="heads.length > 1" :members="heads" />
           <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
           <template v-if="!timer.participant">
@@ -184,14 +185,14 @@ onUnmounted(() => {
             {{ timer.breakPending ? 'Break ready · start when you\'re set' : timer.paused ? 'Break paused' : 'Break · next session in' }}
           </p>
           <p class="room-focus-name">{{ room.room?.name }}</p>
-          <RingCountdown v-if="!timer.breakPending && !timer.paused" :key="`${timer.runId}-break-${endsAt}`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Break countdown" @expired="expired" />
+          <RingCountdown v-if="!timer.breakPending && !timer.paused" :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Break countdown" @expired="expired" />
           <div v-else class="circle-timer room-focus-ring" role="img" aria-label="Break paused">
             <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
               <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
               <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
             </svg>
             <div class="circle-timer-core">
-              <div class="circle-timer-countdown">{{ String(Math.floor(timer.secondsLeft / 60)).padStart(2, '0') }}:{{ String(timer.secondsLeft % 60).padStart(2, '0') }}</div>
+              <div class="circle-timer-countdown">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</div>
             </div>
           </div>
           <ParticipantStack v-if="heads.length" :members="heads" />

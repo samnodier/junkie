@@ -6,6 +6,7 @@
 import { computed, ref } from 'vue';
 import { useDeskStore } from '@/stores/desk';
 import { requestPermission } from '@/lib/notify';
+import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import RingIdle from './RingIdle.vue';
 import RingCountdown from './RingCountdown.vue';
 import ParticipantStack from './ParticipantStack.vue';
@@ -37,9 +38,9 @@ const totalSeconds = computed(() => {
   if (t.phase === 'focus') return t.focusMinutes * 60;
   return t.breakMinutes * 60;
 });
-const endsAt = computed(() =>
-  new Date(Date.now() + (timer.value?.secondsLeft || 0) * 1000).toISOString()
-);
+const { endsAt } = useTimerDeadline(timer);
+const phaseKey = () =>
+  `${phase.value}:${timer.value?.paused ? 1 : 0}:${timer.value?.breakPending ? 1 : 0}`;
 
 function requestStart(minutes) {
   requestPermission();
@@ -56,7 +57,7 @@ function startPendingBreak() {
   });
 }
 function expired() {
-  setTimeout(() => desk.refresh(), 400);
+  expireNudge(() => desk.refresh(), phaseKey);
 }
 </script>
 
@@ -88,7 +89,7 @@ function expired() {
         </div>
         <RingCountdown
           v-else
-          :key="`${timer.runId}-${timer.phase}-${endsAt}`"
+          :key="`${timer.runId}-${timer.phase}`"
           :ends-at="endsAt"
           :total-seconds="totalSeconds"
           :ring-class="phase === 'focus' || phase === 'lobby' ? 'running' : 'break-running breather'"

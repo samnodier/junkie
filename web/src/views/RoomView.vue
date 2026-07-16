@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useRoomStore } from '@/stores/room';
 import { requestPermission } from '@/lib/notify';
 import { useWakeLock } from '@/composables/wakeLock';
+import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import AppShell from '@/components/AppShell.vue';
 import ConfirmCard from '@/components/ConfirmCard.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
@@ -36,9 +37,9 @@ const breakLength = ref(0);
 const timer = computed(() => room.timer);
 const phase = computed(() => timer.value?.phase || 'idle');
 const focusMode = computed(() => phase.value === 'focus' && timer.value?.participant);
-const endsAt = computed(() =>
-  new Date(Date.now() + (timer.value?.secondsLeft || 0) * 1000).toISOString()
-);
+const { endsAt, seconds } = useTimerDeadline(timer);
+const phaseKey = () =>
+  `${phase.value}:${timer.value?.paused ? 1 : 0}:${timer.value?.breakPending ? 1 : 0}`;
 const totalSeconds = computed(() => {
   const t = timer.value;
   if (!t) return 1;
@@ -109,7 +110,7 @@ function reallyStart() {
   room.action('timer-start');
 }
 function expired() {
-  setTimeout(() => room.refresh(), 400);
+  expireNudge(() => room.refresh(), phaseKey);
 }
 
 watchEffect(() => {
@@ -165,7 +166,7 @@ onUnmounted(() => {
         <section class="room-focus-shell">
           <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
           <p class="room-focus-name">{{ room.room.name }}</p>
-          <RingCountdown :key="`${timer.runId}-${endsAt}`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
+          <RingCountdown :key="`${timer.runId}-focus-mode`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
           <ParticipantStack v-if="timer.participants?.length > 1" :members="timer.participants" />
           <p class="label">{{ timer.participants?.length === 1 ? 'Focusing solo' : `${timer.participants.length} focusing` }}</p>
           <form @submit.prevent="room.action('timer-leave')">
@@ -209,7 +210,7 @@ onUnmounted(() => {
               <!-- lobby -->
               <template v-if="phase === 'lobby'">
                 <p class="label label-accent">Starting · join now</p>
-                <RingCountdown :key="`${timer.runId}-lobby-${endsAt}`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-active-ring" aria-label="Focus lobby countdown" @expired="expired" />
+                <RingCountdown :key="`${timer.runId}-lobby`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-active-ring" aria-label="Focus lobby countdown" @expired="expired" />
                 <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small />
                 <p class="label label-accent">{{ timer.participants?.length || 0 }} joined · in when it starts</p>
                 <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
@@ -219,7 +220,7 @@ onUnmounted(() => {
               <!-- focus (not participating, else focus mode above) -->
               <template v-else-if="phase === 'focus'">
                 <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
-                <RingCountdown :key="`${timer.runId}-focus-${endsAt}`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-active-ring" @expired="expired" />
+                <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-active-ring" @expired="expired" />
                 <template v-if="!timer.participant">
                   <template v-if="room.waiting">
                     <p class="label label-accent">In for the break · you'll join automatically</p>
@@ -233,8 +234,7 @@ onUnmounted(() => {
               <template v-else>
                 <p class="label label-warn">
                   {{ timer.breakPending ? 'Break ready · set the length' : timer.paused ? 'Break paused' : 'Break · next block in' }}
-                  <span v-if="!timer.breakPending && !timer.paused" class="countdown mono" aria-live="polite">{{ String(Math.floor(timer.secondsLeft / 60)).padStart(2, '0') }}:{{ String(timer.secondsLeft % 60).padStart(2, '0') }}</span>
-                  <span v-else-if="timer.paused && !timer.breakPending" class="countdown mono">{{ String(Math.floor(timer.secondsLeft / 60)).padStart(2, '0') }}:{{ String(timer.secondsLeft % 60).padStart(2, '0') }}</span>
+                  <span v-if="!timer.breakPending" class="countdown mono" aria-live="polite">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</span>
                 </p>
                 <div class="room-ready-time mono">{{ timer.focusMinutes }}:00</div>
                 <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
