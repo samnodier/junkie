@@ -50,6 +50,9 @@ type user struct {
 	// AvatarVersion is the avatar's upload time as a unix timestamp, used
 	// as a cache-busting query parameter on /avatar/{id} URLs.
 	AvatarVersion int64
+	// ConfirmedSession is only populated on timer-participant queries: the
+	// highest session number this participant has claimed a seat in.
+	ConfirmedSession int
 }
 
 type room struct {
@@ -68,6 +71,11 @@ type room struct {
 	// shown on the stripped /f/{code} screen, and deleted the moment its run
 	// completes or empties out. Kept out of the room list and the room cap.
 	Ephemeral bool
+	// RequireCheckin makes every participant confirm during each break that
+	// they're still there; the break->focus transition drops anyone who
+	// didn't. Nobody is exempt after session 1 — presence is proven by
+	// actions (starting, joining, checking in), never by role.
+	RequireCheckin bool
 }
 
 type todo struct {
@@ -133,6 +141,12 @@ type timerRun struct {
 	Participant            bool
 	Participants           []user
 	Transitioned           bool
+	// ViewerConfirmedSession is the viewer's confirmed_session row value
+	// (0 when they aren't a participant).
+	ViewerConfirmedSession int
+	// Kicked lists user IDs dropped at a break->focus transition for not
+	// checking in, so the caller can broadcast who was removed.
+	Kicked []string
 }
 
 // BreakPending reports a break that arrived with auto-roll off and hasn't
@@ -1345,6 +1359,7 @@ func (a *app) createEphemeralRoom(w http.ResponseWriter, r *http.Request, u user
 	breaks := clampInt(r.FormValue("break_minutes"), 1, 60, 5)
 	sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, 4)
 	autoRoll := r.FormValue("auto_roll") == "1"
+	requireCheckin := r.FormValue("require_checkin") == "1"
 	name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)
 	if name == "" {
 		name = u.DisplayName + "'s focus room"
@@ -1354,9 +1369,9 @@ func (a *app) createEphemeralRoom(w http.ResponseWriter, r *http.Request, u user
 	for range 5 {
 		code = randomCode()
 		err = a.db.QueryRow(r.Context(), `
-			INSERT INTO rooms (code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, true) RETURNING id`,
-			code, name, u.ID, focus, breaks, sessions, autoRoll).Scan(&roomID)
+			INSERT INTO rooms (code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8) RETURNING id`,
+			code, name, u.ID, focus, breaks, sessions, autoRoll, requireCheckin).Scan(&roomID)
 		if err == nil || !isUniqueViolation(err) {
 			break
 		}
@@ -1662,7 +1677,11 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		if v := r.FormValue("auto_roll"); v != "" {
 			autoRoll = v == "1"
 		}
-		_ = a.applyRoomSettings(r.Context(), rm.ID, focus, breaks, sessions, autoRoll)
+		requireCheckin := rm.RequireCheckin
+		if v := r.FormValue("require_checkin"); v != "" {
+			requireCheckin = v == "1"
+		}
+		_ = a.applyRoomSettings(r.Context(), rm.ID, focus, breaks, sessions, autoRoll, requireCheckin)
 	case "delete":
 		if rm.CreatorID != u.ID {
 			http.Error(w, "only the creator can delete this room", http.StatusForbidden)
@@ -1713,7 +1732,14 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			// Refresh the Discord live message's who's-in line.
 			a.notifyDiscord(rm, timer, false)
 		}
+	case "timer-checkin":
+		if a.confirmCheckin(r.Context(), rm.ID, u.ID) {
+			action = "timer-phase"
+		} else {
+			action = ""
+		}
 	case "timer-pause":
+		a.confirmCheckin(r.Context(), rm.ID, u.ID)
 		if timer, changed, err := a.pauseRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not pause break", http.StatusInternalServerError)
 			return
@@ -1723,6 +1749,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-resume":
+		a.confirmCheckin(r.Context(), rm.ID, u.ID)
 		if timer, changed, err := a.resumeRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not resume break", http.StatusInternalServerError)
 			return
@@ -1732,6 +1759,12 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-skip-break":
+		// Skipping would slam the check-in window shut on everyone else, so
+		// check-in rooms sit out the full (or resized) break.
+		if rm.RequireCheckin {
+			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Breaks can't be skipped while session check-in is on."), http.StatusSeeOther)
+			return
+		}
 		if timer, changed, err := a.skipRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not skip break", http.StatusInternalServerError)
 			return
@@ -1742,6 +1775,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-break-length":
+		a.confirmCheckin(r.Context(), rm.ID, u.ID)
 		minutes := clampInt(r.FormValue("minutes"), 1, 60, rm.BreakMinutes)
 		// Set the length and start in one motion; only meaningful while the
 		// break is paused (which includes the auto-roll-off pending state).
@@ -1856,6 +1890,13 @@ func (a *app) broadcastTimerPhase(rm room, timer *timerRun) {
 		return
 	}
 	a.hub.broadcast(rm.Code, "timer-phase")
+	if timer != nil && len(timer.Kicked) > 0 {
+		// Name who was dropped for missing check-in so their own tabs can
+		// explain the removal instead of silently losing the leave button.
+		a.hub.broadcastJSON(rm.Code, map[string]interface{}{
+			"type": "timer-checkin-kick", "roomCode": rm.Code, "userIds": timer.Kicked,
+		})
+	}
 	if timer != nil && timer.Phase == "break" {
 		a.hub.broadcastJSON(rm.Code, map[string]interface{}{
 			"type": "timer-break-invite", "roomCode": rm.Code, "roomName": rm.Name,
@@ -1876,7 +1917,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	err = tx.QueryRow(ctx, `
 		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session,
 			tr.phase_started_at, tr.phase_ends_at, tr.paused_at, tr.paused_remaining_seconds,
-			EXISTS (SELECT 1 FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2)
+			COALESCE((SELECT tp.confirmed_session FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2), 0)
 		FROM timer_runs tr
 		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
 		ORDER BY tr.created_at DESC
@@ -1884,7 +1925,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		FOR UPDATE`, roomID, userID).Scan(
 		&timer.ID, &timer.Phase, &timer.FocusMinutes, &timer.BreakMinutes, &timer.TotalSessions,
 		&timer.CurrentSession, &timer.PhaseStartedAt, &timer.PhaseEndsAt, &timer.PausedAt,
-		&timer.PausedRemainingSeconds, &timer.Participant,
+		&timer.PausedRemainingSeconds, &timer.ViewerConfirmedSession,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
@@ -1892,9 +1933,10 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	if err != nil {
 		return nil, false, err
 	}
+	timer.Participant = timer.ViewerConfirmedSession > 0
 
-	var autoRoll bool
-	if err = tx.QueryRow(ctx, `SELECT auto_roll FROM rooms WHERE id = $1`, roomID).Scan(&autoRoll); err != nil {
+	var autoRoll, requireCheckin bool
+	if err = tx.QueryRow(ctx, `SELECT auto_roll, require_checkin FROM rooms WHERE id = $1`, roomID).Scan(&autoRoll, &requireCheckin); err != nil {
 		return nil, false, err
 	}
 
@@ -1964,11 +2006,13 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 				timer.PausedRemainingSeconds = &remaining
 			}
 			// The break is the joinable window: pull in everyone who asked to
-			// join while focus was running (or before the run existed).
+			// join while focus was running (or before the run existed). They
+			// asked to be in the *next* session, which also counts as their
+			// check-in for it.
 			if _, err = tx.Exec(ctx, `
-				INSERT INTO timer_participants (timer_run_id, user_id)
-				SELECT $1, user_id FROM room_waiting WHERE room_id = $2
-				ON CONFLICT DO NOTHING`, timer.ID, roomID); err != nil {
+				INSERT INTO timer_participants (timer_run_id, user_id, confirmed_session)
+				SELECT $1, user_id, $3 FROM room_waiting WHERE room_id = $2
+				ON CONFLICT DO NOTHING`, timer.ID, roomID, timer.CurrentSession+1); err != nil {
 				return nil, false, err
 			}
 			if _, err = tx.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1`, roomID); err != nil {
@@ -1976,6 +2020,31 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			}
 			timer.Transitioned = true
 		} else if timer.Phase == "break" {
+			// Check-in rooms: the break was the window to claim a seat in the
+			// next session. Drop everyone who didn't; if that empties the run,
+			// the no-participants guard below ends it rather than letting
+			// ghost sessions tick on.
+			if requireCheckin {
+				kickRows, kickErr := tx.Query(ctx, `
+					DELETE FROM timer_participants
+					WHERE timer_run_id = $1 AND confirmed_session <= $2
+					RETURNING user_id`, timer.ID, timer.CurrentSession)
+				if kickErr != nil {
+					return nil, false, kickErr
+				}
+				for kickRows.Next() {
+					var id string
+					if kickErr = kickRows.Scan(&id); kickErr != nil {
+						kickRows.Close()
+						return nil, false, kickErr
+					}
+					timer.Kicked = append(timer.Kicked, id)
+				}
+				kickRows.Close()
+				if kickErr = kickRows.Err(); kickErr != nil {
+					return nil, false, kickErr
+				}
+			}
 			timer.Phase = "focus"
 			timer.CurrentSession++
 			timer.PhaseStartedAt = now
@@ -1992,16 +2061,17 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		}
 		return nil, true, nil
 	}
-	// A focus->break transition above may have absorbed userID from the
-	// waiting list, making the flag read at the top of the query stale.
-	if timer.Transitioned && !timer.Participant {
-		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2)`, timer.ID, userID).Scan(&timer.Participant); err != nil {
+	// A transition above may have absorbed userID from the waiting list or
+	// kicked them for not checking in, making the read at the top stale.
+	if timer.Transitioned {
+		if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT confirmed_session FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2), 0)`, timer.ID, userID).Scan(&timer.ViewerConfirmedSession); err != nil {
 			return nil, false, err
 		}
+		timer.Participant = timer.ViewerConfirmedSession > 0
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT u.id, u.display_name, u.avatar IS NOT NULL,
-			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint, tp.confirmed_session
 		FROM timer_participants tp JOIN users u ON u.id = tp.user_id
 		WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, timer.ID)
 	if err != nil {
@@ -2009,7 +2079,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	}
 	for rows.Next() {
 		var m user
-		if err = rows.Scan(&m.ID, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion); err != nil {
+		if err = rows.Scan(&m.ID, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion, &m.ConfirmedSession); err != nil {
 			rows.Close()
 			return nil, false, err
 		}
@@ -2062,9 +2132,9 @@ func (a *app) roomRunActive(ctx context.Context, roomID string) bool {
 // applyRoomSettings persists a room's timer configuration. Shared by the web
 // "settings" room action and the Discord /junkie config command so the two
 // surfaces can't drift.
-func (a *app) applyRoomSettings(ctx context.Context, roomID string, focusMinutes, breakMinutes, autoSessions int, autoRoll bool) error {
-	_, err := a.db.Exec(ctx, `UPDATE rooms SET focus_minutes = $1, break_minutes = $2, auto_sessions = $3, auto_roll = $4, updated_at = now() WHERE id = $5`,
-		focusMinutes, breakMinutes, autoSessions, autoRoll, roomID)
+func (a *app) applyRoomSettings(ctx context.Context, roomID string, focusMinutes, breakMinutes, autoSessions int, autoRoll, requireCheckin bool) error {
+	_, err := a.db.Exec(ctx, `UPDATE rooms SET focus_minutes = $1, break_minutes = $2, auto_sessions = $3, auto_roll = $4, require_checkin = $5, updated_at = now() WHERE id = $6`,
+		focusMinutes, breakMinutes, autoSessions, autoRoll, requireCheckin, roomID)
 	return err
 }
 
@@ -2139,7 +2209,13 @@ func (a *app) joinTimer(ctx context.Context, rm room, userID string) (*timerRun,
 	if timer.Phase == "focus" {
 		return wait(joinedQueuedBreak)
 	}
-	if _, err := a.db.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, timer.ID, userID); err != nil {
+	// Joining the lobby claims a seat in session 1; joining during a break
+	// claims the next session — either way the join is also the check-in.
+	confirmFor := timer.CurrentSession
+	if timer.Phase == "break" {
+		confirmFor++
+	}
+	if _, err := a.db.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id, confirmed_session) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, timer.ID, userID, confirmFor); err != nil {
 		return timer, joinedNow, err
 	}
 	_, _ = a.db.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1 AND user_id = $2`, rm.ID, userID)
@@ -2160,6 +2236,23 @@ func (a *app) leaveTimer(ctx context.Context, rm room, userID string) (ended boo
 		return false, err
 	}
 	return a.endTimerIfNoParticipants(ctx, timer.ID), nil
+}
+
+// confirmCheckin marks userID as staying for the room's next session while
+// its run is on break (paused or running — the whole break is the window).
+// Reports whether anything changed, i.e. the user was an unconfirmed
+// participant of a live break. Every deliberate break action (the check-in
+// button, pause/resume, starting the break) routes through here, so acting
+// on the break proves presence without a second tap.
+func (a *app) confirmCheckin(ctx context.Context, roomID, userID string) bool {
+	tag, err := a.db.Exec(ctx, `
+		UPDATE timer_participants tp
+		SET confirmed_session = tr.current_session + 1
+		FROM timer_runs tr
+		WHERE tr.id = tp.timer_run_id AND tr.room_id = $1
+			AND tr.ended_at IS NULL AND tr.phase = 'break'
+			AND tp.user_id = $2 AND tp.confirmed_session <= tr.current_session`, roomID, userID)
+	return err == nil && tag.RowsAffected() > 0
 }
 
 // roomWaiting reports whether userID is parked in rm's waiting list.
@@ -2428,17 +2521,18 @@ func (a *app) activeTimer(ctx context.Context, roomID, userID string) (*timerRun
 	err := a.db.QueryRow(ctx, `
 		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session, tr.phase_started_at, tr.phase_ends_at,
 			tr.paused_at, tr.paused_remaining_seconds,
-			EXISTS (SELECT 1 FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2)
+			COALESCE((SELECT tp.confirmed_session FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2), 0)
 		FROM timer_runs tr
 		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
 		ORDER BY tr.created_at DESC
-		LIMIT 1`, roomID, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.PausedAt, &t.PausedRemainingSeconds, &t.Participant)
+		LIMIT 1`, roomID, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.PausedAt, &t.PausedRemainingSeconds, &t.ViewerConfirmedSession)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	t.Participant = t.ViewerConfirmedSession > 0
 	t.Participants, _ = a.timerParticipants(ctx, t.ID)
 	return &t, nil
 }
@@ -2458,7 +2552,7 @@ func (a *app) endTimerIfNoParticipants(ctx context.Context, runID string) bool {
 func (a *app) timerParticipants(ctx context.Context, runID string) ([]user, error) {
 	rows, err := a.db.Query(ctx, `
 		SELECT u.id, u.display_name, u.avatar IS NOT NULL,
-			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint, tp.confirmed_session
 		FROM timer_participants tp JOIN users u ON u.id = tp.user_id
 		WHERE tp.timer_run_id = $1 ORDER BY tp.joined_at`, runID)
 	if err != nil {
@@ -2468,7 +2562,7 @@ func (a *app) timerParticipants(ctx context.Context, runID string) ([]user, erro
 	var members []user
 	for rows.Next() {
 		var m user
-		if rows.Scan(&m.ID, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion) == nil {
+		if rows.Scan(&m.ID, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion, &m.ConfirmedSession) == nil {
 			members = append(members, m)
 		}
 	}
@@ -2618,7 +2712,7 @@ func (a *app) findRoom(ctx context.Context, code string) (room, bool) {
 		return room{}, false
 	}
 	var rm room
-	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral)
+	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral, &rm.RequireCheckin)
 	return rm, err == nil
 }
 
@@ -2635,7 +2729,7 @@ func (a *app) addRoomMember(ctx context.Context, roomID, userID string) {
 func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
 	// Ephemeral focus rooms are deliberately excluded: they're disposable and
 	// live only on their own /f/{code} screen, never in the room list.
-	rows, err := a.db.Query(ctx, `SELECT r.id, r.code, r.name, r.creator_id, r.focus_minutes, r.break_minutes, r.auto_sessions, r.auto_roll FROM room_members rm JOIN rooms r ON r.id = rm.room_id WHERE rm.user_id = $1 AND r.ephemeral = false ORDER BY r.updated_at DESC`, userID)
+	rows, err := a.db.Query(ctx, `SELECT r.id, r.code, r.name, r.creator_id, r.focus_minutes, r.break_minutes, r.auto_sessions, r.auto_roll, r.require_checkin FROM room_members rm JOIN rooms r ON r.id = rm.room_id WHERE rm.user_id = $1 AND r.ephemeral = false ORDER BY r.updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -2643,7 +2737,7 @@ func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
 	var rooms []room
 	for rows.Next() {
 		var rm room
-		if rows.Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll) == nil {
+		if rows.Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.RequireCheckin) == nil {
 			rooms = append(rooms, rm)
 		}
 	}

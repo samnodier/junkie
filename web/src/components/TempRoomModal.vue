@@ -40,6 +40,16 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <span aria-hidden="true"></span>
             </label>
           </div>
+          <div class="settings-auto-roll">
+            <div>
+              <strong>Session check-in</strong>
+              <p class="muted">Everyone taps “I'm here” during each break to stay in the next session. No-shows are dropped from the block.</p>
+            </div>
+            <label class="toggle-control">
+              <input type="checkbox" name="require_checkin" value="1" aria-label="Session check-in">
+              <span aria-hidden="true"></span>
+            </label>
+          </div>
           <div class="join-prompt-actions">
             <button type="submit" class="btn-primary">Create &amp; get link</button>
             <button type="button" class="btn-ghost" @click="emit('close')">Cancel</button>

@@ -60,6 +60,9 @@ type apiUser struct {
 	Role          string `json:"role"`
 	HasAvatar     bool   `json:"hasAvatar"`
 	AvatarVersion int64  `json:"avatarVersion"`
+	// CheckedIn is only set on timer participants: confirmed for the session
+	// after the current one (meaningful during breaks in check-in rooms).
+	CheckedIn bool `json:"checkedIn,omitempty"`
 }
 
 // apiMe reports the current session's user, or user:null for guests. Every
@@ -189,6 +192,10 @@ func apiRoomTimer(timer *timerRun) map[string]any {
 	if paused && timer.PausedRemainingSeconds != nil {
 		seconds = *timer.PausedRemainingSeconds
 	}
+	participants := apiUsers(timer.Participants)
+	for i, p := range timer.Participants {
+		participants[i].CheckedIn = p.ConfirmedSession > timer.CurrentSession
+	}
 	return map[string]any{
 		"runId":          timer.ID,
 		"phase":          timer.Phase,
@@ -199,7 +206,8 @@ func apiRoomTimer(timer *timerRun) map[string]any {
 		"currentSession": timer.CurrentSession,
 		"totalSessions":  timer.TotalSessions,
 		"participant":    timer.Participant,
-		"participants":   apiUsers(timer.Participants),
+		"checkedIn":      timer.ViewerConfirmedSession > timer.CurrentSession,
+		"participants":   participants,
 		"paused":         paused,
 		"breakPending":   timer.BreakPending(),
 	}
@@ -255,14 +263,15 @@ func (a *app) apiDesk(w http.ResponseWriter, r *http.Request) {
 			a.broadcastTimerPhase(rm, roomTimer)
 		}
 		roomsOut = append(roomsOut, map[string]any{
-			"code":         rm.Code,
-			"name":         rm.Name,
-			"focusMinutes": rm.FocusMinutes,
-			"breakMinutes": rm.BreakMinutes,
-			"autoSessions": rm.AutoSessions,
-			"timer":        apiRoomTimer(roomTimer),
-			"mine":         apiTodos(grouped.Mine),
-			"others":       apiTodos(grouped.Others),
+			"code":           rm.Code,
+			"name":           rm.Name,
+			"focusMinutes":   rm.FocusMinutes,
+			"breakMinutes":   rm.BreakMinutes,
+			"autoSessions":   rm.AutoSessions,
+			"requireCheckin": rm.RequireCheckin,
+			"timer":          apiRoomTimer(roomTimer),
+			"mine":           apiTodos(grouped.Mine),
+			"others":         apiTodos(grouped.Others),
 		})
 	}
 
@@ -352,13 +361,14 @@ func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := map[string]any{
 		"room": map[string]any{
-			"code":         rm.Code,
-			"name":         rm.Name,
-			"focusMinutes": rm.FocusMinutes,
-			"breakMinutes": rm.BreakMinutes,
-			"autoSessions": rm.AutoSessions,
-			"autoRoll":     rm.AutoRoll,
-			"ephemeral":    rm.Ephemeral,
+			"code":           rm.Code,
+			"name":           rm.Name,
+			"focusMinutes":   rm.FocusMinutes,
+			"breakMinutes":   rm.BreakMinutes,
+			"autoSessions":   rm.AutoSessions,
+			"autoRoll":       rm.AutoRoll,
+			"ephemeral":      rm.Ephemeral,
+			"requireCheckin": rm.RequireCheckin,
 		},
 		"isCreator":   rm.CreatorID == u.ID,
 		"memberCount": memberCount,

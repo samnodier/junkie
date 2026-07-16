@@ -668,7 +668,7 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 	focus := clampInt(parts[0], 5, 180, rm.FocusMinutes)
 	breaks := clampInt(parts[1], 1, 60, rm.BreakMinutes)
 	sessions := clampInt(parts[2], 1, 12, rm.AutoSessions)
-	if err := a.applyRoomSettings(ctx, rm.ID, focus, breaks, sessions, rm.AutoRoll); err != nil {
+	if err := a.applyRoomSettings(ctx, rm.ID, focus, breaks, sessions, rm.AutoRoll, rm.RequireCheckin); err != nil {
 		log.Printf("discord: config room %s: %v", rm.Code, err)
 		b.ephemeral(s, i, "Couldn't save that configuration — try again.")
 		return

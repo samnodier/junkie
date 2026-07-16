@@ -136,6 +136,13 @@ export const useDeskStore = defineStore('desk', {
               this.refresh();
               return;
             }
+            if (type === 'timer-checkin-kick') {
+              if (event?.userIds?.includes(meId)) {
+                toasts.show(`Dropped from ${name} — you didn't check in during the break.`);
+              }
+              this.refresh();
+              return;
+            }
             // "todos", "timer-phase", "deleted", or anything new: re-fetch.
             this.refresh();
           })

@@ -91,6 +91,7 @@ async function saveSettings(event) {
     break_minutes: String(f.get('break_minutes')),
     auto_sessions: String(f.get('auto_sessions')),
     auto_roll: f.get('auto_roll') ? '1' : '0',
+    require_checkin: f.get('require_checkin') ? '1' : '0',
   });
 }
 async function deleteRoom() {
@@ -237,6 +238,12 @@ onUnmounted(() => {
                   <span v-if="!timer.breakPending" class="countdown mono" aria-live="polite">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</span>
                 </p>
                 <div class="room-ready-time mono">{{ timer.focusMinutes }}:00</div>
+                <template v-if="room.room.requireCheckin && timer.participant">
+                  <form v-if="!timer.checkedIn" @submit.prevent="room.action('timer-checkin')">
+                    <button type="submit" class="btn-primary">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
+                  </form>
+                  <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
+                </template>
                 <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
                 <form v-if="timer.paused" class="inline-form break-length-form" @submit.prevent="room.action('timer-break-length', { minutes: String(breakLength || timer.breakMinutes) })">
                   <label>Break minutes <input type="number" name="minutes" min="1" max="60" :value="timer.breakMinutes" @input="breakLength = Number($event.target.value)"></label>
@@ -245,12 +252,12 @@ onUnmounted(() => {
                 <form v-if="!timer.breakPending" @submit.prevent="room.action(timer.paused ? 'timer-resume' : 'timer-pause')">
                   <button type="submit" class="btn-ghost">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
                 </form>
-                <form @submit.prevent="room.action('timer-skip-break')"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
+                <form v-if="!room.room.requireCheckin" @submit.prevent="room.action('timer-skip-break')"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
                 <form v-if="timer.participant" @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
               </template>
 
               <template v-if="phase !== 'lobby'">
-                <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small />
+                <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small :checkin="room.room.requireCheckin && phase === 'break'" />
                 <p class="label">{{ timer.participants?.length === 1 ? 'Focusing solo' : `${timer.participants?.length || 0} focusing` }}</p>
               </template>
             </article>
@@ -284,6 +291,16 @@ onUnmounted(() => {
                     </div>
                     <label class="toggle-control">
                       <input type="checkbox" name="auto_roll" value="1" :checked="room.room.autoRoll" aria-label="Auto-start breaks">
+                      <span aria-hidden="true"></span>
+                    </label>
+                  </div>
+                  <div class="settings-auto-roll">
+                    <div>
+                      <strong>Session check-in</strong>
+                      <p class="muted">Everyone taps “I'm here” during each break to stay in the next session. No-shows are dropped from the block.</p>
+                    </div>
+                    <label class="toggle-control">
+                      <input type="checkbox" name="require_checkin" value="1" :checked="room.room.requireCheckin" aria-label="Session check-in">
                       <span aria-hidden="true"></span>
                     </label>
                   </div>

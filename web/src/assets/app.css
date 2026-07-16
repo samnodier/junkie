@@ -1519,6 +1519,25 @@ body.menu-drawer-open { overflow: hidden; }
   place-items: center;
 }
 .participant-avatars-sm .participant-avatar { width: 28px; height: 28px; font-size: 0.7rem; }
+/* Check-in rooms, during the break: confirmed heads get the badge, the rest
+   dim until they check in or get dropped when the next session starts. */
+.participant-awaiting-checkin { opacity: 0.4; }
+.participant-checkin-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 9px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--bg);
+  box-sizing: content-box;
+}
 .room-members-meta { text-align: right; display: grid; gap: var(--sp-2); justify-items: end; }
 /* Mobile-only twin of the members link, rendered inside the title row so the
    count sits beside the room name instead of stacking below it. */

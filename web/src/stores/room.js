@@ -142,6 +142,13 @@ export const useRoomStore = defineStore('room', {
           this.refresh();
           return;
         }
+        if (type === 'timer-checkin-kick') {
+          if (event?.userIds?.includes(meId)) {
+            toasts.show("You're out of this block — you didn't check in during the break. Join again to come back at the next one.");
+          }
+          this.refresh();
+          return;
+        }
         this.refresh();
       });
 

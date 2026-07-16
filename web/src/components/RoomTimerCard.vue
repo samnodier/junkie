@@ -104,15 +104,19 @@ function expired() {
         <form v-if="(phase === 'lobby' || phase === 'break') && !timer.participant" @submit.prevent="desk.roomTimer(room.code, 'timer-join')">
           <button type="submit" class="btn-primary">Join this block</button>
         </form>
+        <template v-if="phase === 'break' && room.requireCheckin && timer.participant">
+          <button v-if="!timer.checkedIn" type="button" class="btn-primary" @click="desk.roomTimer(room.code, 'timer-checkin')">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
+          <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
+        </template>
         <div v-if="phase === 'break'" class="desk-timer-actions-row">
           <button v-if="timer.breakPending" type="button" class="btn-primary" @click="startPendingBreak">Start break</button>
           <button v-else type="button" :class="timer.paused ? 'btn-primary' : 'btn-ghost'" @click="desk.roomTimer(room.code, timer.paused ? 'timer-resume' : 'timer-pause')">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
-          <button type="button" class="btn-ghost timer-cancel" @click="desk.roomTimer(room.code, 'timer-skip-break')">Skip break</button>
+          <button v-if="!room.requireCheckin" type="button" class="btn-ghost timer-cancel" @click="desk.roomTimer(room.code, 'timer-skip-break')">Skip break</button>
         </div>
         <form v-if="timer.participant" @submit.prevent="desk.roomTimer(room.code, 'timer-leave')">
           <button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button>
         </form>
-        <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small />
+        <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small :checkin="room.requireCheckin && phase === 'break'" />
         <p class="label">{{ timer.participant ? 'Participating' : 'Watching' }} · {{ timer.participants?.length || 0 }} joined</p>
       </footer>
     </article>

@@ -85,6 +85,7 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 - During focus, late joins are locked out until the next break.
 - **Pause / Resume** and **Skip break & continue** are available on breaks (any member, same as pause).
 - **Auto-start breaks** (room settings): when **on**, breaks start automatically after focus. When **off**, the break waits on an adjustable ring until someone starts it or skips.
+- **Session check-in** (room settings): when **on**, every participant must tap **"I'm here"** during each break to keep their seat in the next session — no-shows are dropped from the block when the next focus starts (they can rejoin at a later break). Joining, starting a run, or acting on the break (pause, resume, starting it) counts as your check-in; nobody is exempt, including whoever started the run. Skip break is disabled so the check-in window can't be cut short, and if nobody checks in the run ends.
 - **Leave focus block** ends your participation in the active timer. Hiding or closing a tab does **not** leave — participant rings show who intentionally joined the block, not who has a tab open.
 - **Focus mode** during an active session hides the full todo board so the timer stays central.
 
@@ -92,7 +93,7 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 
 ### Temporary focus rooms
 
-Sometimes you just want a quick block with a few people, not a room that sticks around. From the menu, **Create temporary room** opens a config popup — set focus/break/sessions and whether breaks auto-run — and drops you onto a stripped-down screen at `/f/{code}` with a share link at the top.
+Sometimes you just want a quick block with a few people, not a room that sticks around. From the menu, **Create temporary room** opens a config popup — set focus/break/sessions, whether breaks auto-run, and whether each session requires a check-in — and drops you onto a stripped-down screen at `/f/{code}` with a share link at the top.
 
 - **Joined by link** — anyone signed in who opens the link is added and queued for the block, no confirmation step. They land straight on the waiting screen, so you can see who's here before you start.
 - **Just the timer** — no todo board, no settings page, and the background grid is hidden for a distraction-free look. The invite link shows while you gather and during breaks, and disappears once focus starts.
