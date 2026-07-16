@@ -91,12 +91,12 @@ onUnmounted(() => {
   <div v-if="store.phase === 'idle'" class="desk-shell">
     <section class="grid two desk-grid">
       <div class="desk-ring-column">
-        <article class="circle-timer-wrap">
+        <article class="circle-timer-wrap timer-card panel idle desk-timer-card">
           <form class="circle-timer-form" @submit.prevent="startFocus(minutes)">
             <RingIdle v-model="minutes" @submit="startFocus" />
           </form>
+          <p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to focus</p>
         </article>
-        <p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to focus</p>
       </div>
       <article class="panel desk-todos-panel">
         <div class="panel-title desk-todos-head">
