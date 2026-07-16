@@ -14,6 +14,7 @@ import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import AppShell from '@/components/AppShell.vue';
 import ConfirmCard from '@/components/ConfirmCard.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
+import RingIdle from '@/components/RingIdle.vue';
 import ParticipantStack from '@/components/ParticipantStack.vue';
 import TodoGroups from '@/components/TodoGroups.vue';
 import JoinPromptModal from '@/components/JoinPromptModal.vue';
@@ -128,6 +129,9 @@ function reallyStart() {
   confirmStart.value = false;
   requestPermission();
   room.action('timer-start');
+}
+function startBreak() {
+  room.action('timer-break-length', { minutes: String(breakLength.value || timer.value.breakMinutes) });
 }
 function expired() {
   expireNudge(() => room.refresh(), phaseKey);
@@ -253,10 +257,26 @@ onUnmounted(() => {
               <!-- break -->
               <template v-else>
                 <p class="label label-warn">
-                  {{ timer.breakPending ? 'Break ready · set the length' : timer.paused ? 'Break paused' : 'Break · next block in' }}
-                  <span v-if="!timer.breakPending" class="countdown mono" aria-live="polite">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</span>
+                  {{ timer.breakPending ? 'Break ready · set the length · tap to start' : timer.paused ? 'Break paused' : 'Break · next session in' }}
                 </p>
-                <div class="room-ready-time mono">{{ timer.focusMinutes }}:00</div>
+                <!-- Waiting break: adjustable orange ring, tap starts it (desk twin) -->
+                <form v-if="timer.breakPending" class="circle-timer-form" @submit.prevent="startBreak">
+                  <RingIdle :model-value="timer.breakMinutes" :min="1" :max="60" ring-class="break-idle room-active-ring" :aria-label="`Set break length for ${room.room.name}`" input-label="Break minutes" @update:model-value="breakLength = $event" @submit="startBreak" />
+                </form>
+                <!-- Paused mid-break: the ring holds still at what's left -->
+                <div v-else-if="timer.paused" class="circle-timer break-running room-active-ring" role="timer" aria-label="Break paused">
+                  <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+                    <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+                    <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" :stroke-dashoffset="553 * (1 - Math.min(1, seconds / totalSeconds))"/>
+                  </svg>
+                  <div class="circle-timer-core">
+                    <div class="circle-timer-countdown">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</div>
+                  </div>
+                </div>
+                <!-- Running break: counts down like every other phase -->
+                <RingCountdown v-else :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather room-active-ring" aria-label="Break countdown" @expired="expired" />
+                <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
+                <p v-if="timer.breakPending" class="muted room-ready-hint">Scroll ±1 · buttons ±5 · tap ring to start the break</p>
                 <template v-if="room.room.requireCheckin && timer.participant">
                   <form v-if="!timer.checkedIn" @submit.prevent="room.action('timer-checkin')">
                     <button type="submit" class="btn-primary">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
@@ -264,12 +284,8 @@ onUnmounted(() => {
                   <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
                 </template>
                 <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
-                <form v-if="timer.paused" class="inline-form break-length-form" @submit.prevent="room.action('timer-break-length', { minutes: String(breakLength || timer.breakMinutes) })">
-                  <label>Break minutes <input type="number" name="minutes" min="1" max="60" :value="timer.breakMinutes" @input="breakLength = Number($event.target.value)"></label>
-                  <button type="submit" class="btn-primary btn-compact">Start break</button>
-                </form>
                 <form v-if="!timer.breakPending" @submit.prevent="room.action(timer.paused ? 'timer-resume' : 'timer-pause')">
-                  <button type="submit" class="btn-ghost">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
+                  <button type="submit" :class="timer.paused ? 'btn-primary' : 'btn-ghost'">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
                 </form>
                 <form v-if="!room.room.requireCheckin" @submit.prevent="room.action('timer-skip-break')"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
                 <form v-if="timer.participant" @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>

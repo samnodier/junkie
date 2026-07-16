@@ -528,6 +528,9 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-timer-footer .label { width: 100%; text-align: center; }
 .desk-timer-actions-row { display: flex; gap: var(--sp-3); width: 100%; }
 .desk-timer-actions-row > button { flex: 1; min-width: 0; }
+/* A lone action (e.g. Start break when Skip is hidden) keeps its natural
+   size, centered, instead of stretching across the card. */
+.desk-timer-actions-row > button:only-child { flex: 0 0 auto; margin: 0 auto; }
 .desk-ring-hint { text-align: center; }
 .desk-join-link {
   margin: var(--sp-4) 0 0;
@@ -1004,6 +1007,10 @@ span.room-member-locked { color: var(--muted); cursor: default; }
 .circle-timer.break-running .circle-timer-progress { stroke-width: 5; }
 .circle-timer.break-offer .circle-timer-progress,
 .circle-timer.break-running .circle-timer-progress { stroke: var(--warn); }
+/* Adjustable break ring (set the length, tap to start): same orange as the
+   running break so every break surface reads as one family. */
+.circle-timer.idle.break-idle .circle-timer-progress,
+.circle-timer.idle.break-idle:hover .circle-timer-progress { stroke: var(--warn); }
 .circle-timer.breather { animation: breather 4s ease-in-out infinite; }
 @keyframes breather {
   0%, 100% { transform: scale(1); opacity: 1; }

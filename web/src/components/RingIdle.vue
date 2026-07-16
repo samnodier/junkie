@@ -12,6 +12,8 @@ const props = defineProps({
   step: { type: Number, default: 5 },
   ariaLabel: { type: String, default: 'Set focus duration' },
   inputLabel: { type: String, default: 'Focus minutes' },
+  // Extra ring classes, e.g. "break-idle" for the orange adjustable break.
+  ringClass: { type: String, default: '' },
 });
 const minutes = defineModel({ type: Number, default: 50 });
 const emit = defineEmits(['submit']);
@@ -59,6 +61,7 @@ function submit() {
 <template>
   <div
     class="circle-timer idle"
+    :class="ringClass"
     role="group"
     :aria-label="ariaLabel"
     tabindex="0"

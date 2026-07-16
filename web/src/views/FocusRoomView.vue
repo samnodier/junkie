@@ -15,6 +15,7 @@ import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import TopBar from '@/components/TopBar.vue';
 import ToastHolder from '@/components/ToastHolder.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
+import RingIdle from '@/components/RingIdle.vue';
 import ParticipantStack from '@/components/ParticipantStack.vue';
 
 const route = useRoute();
@@ -65,6 +66,10 @@ async function copyLink() {
 function start() {
   requestPermission();
   room.action('timer-start');
+}
+const breakLength = ref(0);
+function startBreak() {
+  room.action('timer-break-length', { minutes: String(breakLength.value || timer.value.breakMinutes) });
 }
 async function leave() {
   // Leaving cancels a queued join or drops out of the run; either way this
@@ -182,19 +187,14 @@ onUnmounted(() => {
         <!-- Break: the joinable window between sessions -->
         <template v-else>
           <p class="label label-warn">
-            {{ timer.breakPending ? 'Break ready · start when you\'re set' : timer.paused ? 'Break paused' : 'Break · next session in' }}
+            {{ timer.breakPending || timer.paused ? 'Break ready · set the length · tap to start' : 'Break · next session in' }}
           </p>
           <p class="room-focus-name">{{ room.room?.name }}</p>
-          <RingCountdown v-if="!timer.breakPending && !timer.paused" :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Break countdown" @expired="expired" />
-          <div v-else class="circle-timer room-focus-ring" role="img" aria-label="Break paused">
-            <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
-              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
-            </svg>
-            <div class="circle-timer-core">
-              <div class="circle-timer-countdown">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</div>
-            </div>
-          </div>
+          <RingCountdown v-if="!timer.breakPending && !timer.paused" :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather room-focus-ring" aria-label="Break countdown" @expired="expired" />
+          <form v-else class="circle-timer-form" @submit.prevent="startBreak">
+            <RingIdle :model-value="timer.breakMinutes" :min="1" :max="60" ring-class="break-idle room-focus-ring" aria-label="Set break length" input-label="Break minutes" @update:model-value="breakLength = $event" @submit="startBreak" />
+          </form>
+          <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
           <ParticipantStack v-if="heads.length" :members="heads" :checkin="room.room?.requireCheckin" />
           <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
           <template v-if="room.room?.requireCheckin && timer.participant">
@@ -202,7 +202,6 @@ onUnmounted(() => {
             <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
           </template>
           <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join this block</button>
-          <button v-if="timer.breakPending || timer.paused" type="button" class="btn-primary" @click="room.action('timer-break-length', { minutes: String(timer.breakMinutes) })">Start break</button>
           <button v-if="!room.room?.requireCheckin" type="button" class="btn-ghost" @click="room.action('timer-skip-break')">Skip break</button>
           <button v-if="timer.participant" type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
         </template>

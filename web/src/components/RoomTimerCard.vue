@@ -71,6 +71,7 @@ function expired() {
           :model-value="timer.breakMinutes"
           :min="1"
           :max="60"
+          ring-class="break-idle"
           :aria-label="`Set break length for ${room.name}`"
           input-label="Break minutes"
           @update:model-value="breakMinutes = $event"

@@ -28,8 +28,14 @@ export function useTimerDeadline(timer) {
     // fresh 25-minute block reads 25:00, and expiry lands at or after the
     // server's own deadline.
     const fresh = Date.now() + ((t.secondsLeft || 0) + 1) * 1000;
-    if (key !== anchor.key || Math.abs(fresh - anchor.ms) > 2500) {
-      anchor = { key, ms: fresh };
+    // When the payload carries the server's absolute deadline and this
+    // machine's clock agrees with it, prefer it: every window on the same
+    // clock then shows the same second. A clock skewed further than the
+    // fetch jitter falls back to the fetch-time anchor.
+    const server = t.paused || t.breakPending ? NaN : Date.parse(t.endsAt || '');
+    const target = Number.isFinite(server) && Math.abs(server - fresh) <= 2500 ? server : fresh;
+    if (key !== anchor.key || Math.abs(target - anchor.ms) > 2500) {
+      anchor = { key, ms: target };
     }
     return anchor.ms;
   };
