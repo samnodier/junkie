@@ -510,8 +510,13 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   justify-content: center;
   gap: var(--sp-3);
   min-width: 0;
-  overflow: hidden;
   text-align: center;
+  /* Grow with tall states (pending break: ring + next block + start +
+     check-in) instead of clipping them: the fixed height above becomes the
+     floor. overflow stays visible so nothing is silently hidden. */
+  height: auto;
+  min-height: min(32rem, calc(100vh - 10rem));
+  overflow: visible;
 }
 .desk-timer-card > .label { margin: 0; text-align: center; }
 .desk-timer-card > form { margin: 0; }
@@ -1427,6 +1432,9 @@ body.menu-drawer-open { overflow: hidden; }
   padding: var(--sp-6) var(--sp-5);
 }
 .room-timer-column .timer-card > * { margin: 0; }
+/* Grid children stretch by default; keep the shared Start-break button at
+   its natural size like on the desk's flex card. */
+.room-timer-column .timer-card .break-ready-start { justify-self: center; width: auto; }
 .room-timer-column .timer-card .circle-timer,
 .room-timer-column .timer-card .big-action { margin: 0 auto; }
 .ready-card { text-align: center; padding: var(--sp-8) var(--sp-6); }
@@ -1805,7 +1813,9 @@ body.menu-drawer-open { overflow: hidden; }
      scoped to the room page only; desk and guest rings keep their original
      clamp geometry untouched. Budget: grid padding 40px + card padding
      40px + the room-shell's clamp(20px,4vw,32px)×2 ≈ 8vw, capped ≈ 88px. */
-  .room-timer-column .circle-timer,
+  /* Countdown rings only: the adjustable break ring (.idle) keeps the same
+     ~300px cap as the desk so the two cards stay consistent. */
+  .room-timer-column .circle-timer:not(.idle),
   .room-focus-shell .circle-timer { width: min(84vw, calc(92vw - 88px)); }
   .timer-cancel, .btn-ghost.timer-cancel { width: 100%; }
   .desk-timer-actions-row { flex-direction: column; }
