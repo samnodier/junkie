@@ -7,6 +7,7 @@ import { computed, onMounted, onUnmounted, provide, ref, watch, watchEffect } fr
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useRoomStore } from '@/stores/room';
+import { useToastStore } from '@/stores/toasts';
 import { requestPermission } from '@/lib/notify';
 import { useWakeLock } from '@/composables/wakeLock';
 import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
@@ -93,6 +94,24 @@ async function saveSettings(event) {
     auto_roll: f.get('auto_roll') ? '1' : '0',
     require_checkin: f.get('require_checkin') ? '1' : '0',
   });
+  // action() re-fetched the room, so compare what came back to what was
+  // submitted: a mismatch means the server refused (a run started while the
+  // form was open) rather than saved. Native min/max validation keeps the
+  // inputs inside the server's clamp range, so equality is a fair check.
+  const toasts = useToastStore();
+  const r = room.room;
+  const saved =
+    r &&
+    r.focusMinutes === Number(f.get('focus_minutes')) &&
+    r.breakMinutes === Number(f.get('break_minutes')) &&
+    r.autoSessions === Number(f.get('auto_sessions')) &&
+    r.autoRoll === !!f.get('auto_roll') &&
+    r.requireCheckin === !!f.get('require_checkin');
+  if (saved) {
+    toasts.show(`Timer settings saved · ${r.autoSessions}×${r.focusMinutes}/${r.breakMinutes}`);
+  } else {
+    toasts.show("Couldn't save — timer settings can't change while a run is active.");
+  }
 }
 async function deleteRoom() {
   if (!confirm(`Delete '${room.room.name}'? This removes it for all ${room.memberCount} members.`)) return;
