@@ -14,7 +14,7 @@ import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import AppShell from '@/components/AppShell.vue';
 import ConfirmCard from '@/components/ConfirmCard.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
-import RingIdle from '@/components/RingIdle.vue';
+import BreakReadyRing from '@/components/BreakReadyRing.vue';
 import ParticipantStack from '@/components/ParticipantStack.vue';
 import TodoGroups from '@/components/TodoGroups.vue';
 import JoinPromptModal from '@/components/JoinPromptModal.vue';
@@ -34,7 +34,6 @@ const renaming = ref(false);
 const renameDraft = ref('');
 const confirmStart = ref(false);
 const copied = ref('');
-const breakLength = ref(0);
 
 const timer = computed(() => room.timer);
 const phase = computed(() => timer.value?.phase || 'idle');
@@ -130,8 +129,8 @@ function reallyStart() {
   requestPermission();
   room.action('timer-start');
 }
-function startBreak() {
-  room.action('timer-break-length', { minutes: String(breakLength.value || timer.value.breakMinutes) });
+function startBreak(minutes) {
+  room.action('timer-break-length', { minutes: String(minutes) });
 }
 function expired() {
   expireNudge(() => room.refresh(), phaseKey);
@@ -259,12 +258,10 @@ onUnmounted(() => {
                 <p class="label label-warn">
                   {{ timer.breakPending ? 'Break ready · set the length · tap to start' : timer.paused ? 'Break paused' : 'Break · next session in' }}
                 </p>
-                <!-- Waiting break: adjustable orange ring, tap starts it (desk twin) -->
-                <form v-if="timer.breakPending" class="circle-timer-form" @submit.prevent="startBreak">
-                  <RingIdle :model-value="timer.breakMinutes" :min="1" :max="60" ring-class="break-idle room-active-ring" :aria-label="`Set break length for ${room.room.name}`" input-label="Break minutes" @update:model-value="breakLength = $event" @submit="startBreak" />
-                </form>
+                <!-- Waiting break: the shared set-and-start control (desk twin) -->
+                <BreakReadyRing v-if="timer.breakPending" :break-minutes="timer.breakMinutes" :focus-minutes="timer.focusMinutes" :room-name="room.room.name" @start="startBreak" />
                 <!-- Paused mid-break: the ring holds still at what's left -->
-                <div v-else-if="timer.paused" class="circle-timer break-running room-active-ring" role="timer" aria-label="Break paused">
+                <div v-else-if="timer.paused" class="circle-timer break-running" role="timer" aria-label="Break paused">
                   <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
                     <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
                     <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" :stroke-dashoffset="553 * (1 - Math.min(1, seconds / totalSeconds))"/>
@@ -274,9 +271,8 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <!-- Running break: counts down like every other phase -->
-                <RingCountdown v-else :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather room-active-ring" aria-label="Break countdown" @expired="expired" />
-                <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
-                <p v-if="timer.breakPending" class="muted room-ready-hint">Scroll ±1 · buttons ±5 · tap ring to start the break</p>
+                <RingCountdown v-else :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather" aria-label="Break countdown" @expired="expired" />
+                <p v-if="!timer.breakPending" class="label">Next block · {{ timer.focusMinutes }}:00</p>
                 <template v-if="room.room.requireCheckin && timer.participant">
                   <form v-if="!timer.checkedIn" @submit.prevent="room.action('timer-checkin')">
                     <button type="submit" class="btn-primary">I'm here — check in for session {{ timer.currentSession + 1 }}</button>

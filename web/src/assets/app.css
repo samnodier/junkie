@@ -1404,7 +1404,9 @@ body.menu-drawer-open { overflow: hidden; }
   gap: var(--sp-2);
 }
 .room-share-block { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.room-desk-grid { grid-template-columns: 1fr 400px; gap: 48px; align-items: start; }
+/* Note: column widths come from .grid.two (equal halves) — a 1fr/400px
+   split here would lose on specificity anyway. This only aligns the tops. */
+.room-desk-grid { align-items: start; }
 /* Bounded like the desk todos panel: the panel stops growing and the todo
    groups scroll inside it instead of stretching the page. */
 .room-todos-panel {
@@ -1436,9 +1438,11 @@ body.menu-drawer-open { overflow: hidden; }
 }
 .room-ready-hint { font-size: var(--fs-small); }
 @media (max-width: 960px) {
-  /* The fixed 400px todos column starves the timer between 720 and 960px;
-     stack earlier than the general breakpoint. */
-  .room-desk-grid { grid-template-columns: 1fr; gap: var(--sp-6); }
+  /* The two-column room grid starves the timer below 960px; stack earlier
+     than the general breakpoint. Selector carries .grid.two so it actually
+     outranks that base rule (a bare .room-desk-grid loses on specificity
+     and the page never stacked). */
+  .grid.two.room-desk-grid { grid-template-columns: 1fr; gap: var(--sp-6); }
 }
 .room-details { margin: 0; }
 .big-action { width: 100%; max-width: 280px; }

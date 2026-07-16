@@ -195,6 +195,7 @@ onUnmounted(() => {
             <RingIdle :model-value="timer.breakMinutes" :min="1" :max="60" ring-class="break-idle room-focus-ring" aria-label="Set break length" input-label="Break minutes" @update:model-value="breakLength = $event" @submit="startBreak" />
           </form>
           <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
+          <button v-if="timer.breakPending || timer.paused" type="button" class="btn-primary" @click="startBreak">Start break</button>
           <ParticipantStack v-if="heads.length" :members="heads" :checkin="room.room?.requireCheckin" />
           <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
           <template v-if="room.room?.requireCheckin && timer.participant">
