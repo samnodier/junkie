@@ -81,6 +81,17 @@ function onAvatarPicked() {
 
 const usernameDraft = ref('');
 
+// Header nudge for accounts without Discord linked: without it there's no
+// self-service password reset, so the blinking badge walks them to the
+// Discord section that explains how to connect.
+const discordSection = ref(null);
+const discordFlash = ref(false);
+function scrollToDiscord() {
+  discordSection.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  discordFlash.value = true;
+  setTimeout(() => (discordFlash.value = false), 2500);
+}
+
 onMounted(async () => {
   if (!auth.isAuthed) {
     guestHeatmap.value = buildGuestHeatmap();
@@ -114,7 +125,20 @@ onMounted(async () => {
     <section v-else class="profile-page profile-stack">
       <header class="profile-head">
         <h1>Profile</h1>
-        <span class="profile-title-actions"><a href="/connections" class="btn btn-ghost btn-compact">Connections</a><span>{{ auth.user.displayName }}</span></span>
+        <span class="profile-title-actions">
+          <button
+            v-if="profile && !profile.discord.linked"
+            type="button"
+            class="discord-nudge"
+            title="Discord isn't connected — without it you can't reset a forgotten password"
+            aria-label="Discord isn't connected — see how to set up password recovery"
+            @click="scrollToDiscord"
+          >
+            <svg viewBox="0 0 127 96" fill="currentColor" aria-hidden="true" width="20" height="15"><path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15ZM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69Zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69Z"/></svg>
+            <span class="nudge-badge" aria-hidden="true">!</span>
+          </button>
+          <a href="/connections" class="btn btn-ghost btn-compact">Connections</a><span>{{ auth.user.displayName }}</span>
+        </span>
       </header>
       <p v-if="error" class="notice-error" role="alert">{{ error }}</p>
       <p v-if="notice" class="notice-ok" role="status">{{ notice }}</p>
@@ -211,7 +235,7 @@ onMounted(async () => {
           </div>
           <button type="button" id="connect-link-copy" class="btn-ghost btn-compact" @click="copyConnectLink">{{ connectLabel }}</button>
         </div>
-        <div class="profile-preference">
+        <div class="profile-preference" ref="discordSection" :class="{ 'flash-highlight': discordFlash }">
           <div>
             <strong><svg class="discord-mark" viewBox="0 0 127 96" fill="currentColor" aria-hidden="true" width="18" height="14" style="vertical-align:-2px"><path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15ZM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69Zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69Z"/></svg> Discord</strong>
             <p v-if="profile?.discord.linked" class="muted">Connected as <span class="mono">@{{ profile.discord.username }}</span>. Use <span class="mono">/junkie</span> commands in servers running the junkie bot — including <span class="mono">/junkie reset-password</span> if you ever forget your password. <a href="https://discord.com/oauth2/authorize?client_id=1526585859044933684&scope=bot+applications.commands&permissions=2048" target="_blank" rel="noopener">Add the bot to a server</a>.</p>

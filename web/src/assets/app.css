@@ -853,6 +853,45 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   align-items: center;
   gap: var(--sp-4);
 }
+.discord-nudge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.discord-nudge:hover { color: var(--ink); border-color: var(--accent-soft-border); }
+.discord-nudge .nudge-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  animation: nudge-blink 1.3s ease-in-out infinite;
+}
+@keyframes nudge-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+.flash-highlight { animation: flash-highlight 0.8s ease-in-out 3; border-radius: 10px; }
+@keyframes flash-highlight {
+  50% { background: var(--accent-soft); }
+}
 .profile-stack {
   display: flex;
   flex-direction: column;

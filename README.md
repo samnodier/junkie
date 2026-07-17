@@ -39,6 +39,7 @@ Create an account when you want shared rooms or data that follows you across dev
 - **Sign up / sign in** — username and password. Usernames are lowercase letters, numbers, dots, dashes, and underscores (2–32 characters).
 - **Username** — change it from Profile → Account.
 - **Password change** — Profile → Security. Updating your password **signs out all other devices**.
+- **Forgot your password?** — junkie never collects your email, so resets go through Discord. If your Discord account is linked (Profile → Connections), run `/junkie reset-password` in any server with the junkie bot — or in a DM with the bot — and it DMs you a single-use reset link that expires after 30 minutes. If Discord isn't linked, ask the admin (on Discord, or with a [GitHub issue](https://github.com/samnodier/junkie/issues)) — the owner can issue you the same kind of reset link by hand. **Link your Discord before you need it**: linking requires being signed in, so it can't be done after the password is already forgotten.
 - **Account deletion** — Profile → Danger zone. Permanently deletes your account, rooms you created, todos, and activity history. Requires your current password.
 - **Profile picture** — upload or remove from Profile → Preferences.
 
@@ -149,6 +150,8 @@ junkie has a Discord bot that runs a server's focus room from chat: live countdo
 
 The bot only asks for Send Messages. Once added: each participant runs `/junkie link` once to connect their junkie account, then an admin runs `/junkie register` in the channel the timer should post to (pass an existing room code to connect it, or omit to create a fresh room). Move notifications later with `/junkie channel [#channel]`. `/junkie help` lists all commands.
 
+Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [Accounts](#accounts)).
+
 Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, and `PUBLIC_BASE_URL` are set (see `.env.example`), and you'd mint your own invite link with your application's client id.
 
 ## Where your data lives
@@ -214,5 +217,5 @@ Found a vulnerability? Open an issue or contact the maintainer rather than filin
 ## Later
 
 - Terminal client using the same account and room API.
-- Discord sign-in (the bot exists — see the Discord bot section above; OAuth sign-in does not yet).
+- Discord sign-in (the bot exists — see the Discord bot section above; OAuth sign-in does not yet). OAuth would also close the last password-reset gap: verifying your Discord in the browser instead of over DM works even without sharing a server with the bot.
 

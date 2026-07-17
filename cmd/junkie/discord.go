@@ -996,6 +996,12 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 func (b *discordBot) handleLink(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	a := b.app
 	discordUserID := interactionUserID(i)
+	// Already linked: don't mint another token — the existing link keeps
+	// working, and handing out a fresh URL would just be confusing.
+	if u, linked := a.discordLinkedUser(context.Background(), discordUserID); linked {
+		b.ephemeral(s, i, fmt.Sprintf("This Discord account is already connected to the junkie account **%s** — `/junkie` commands and password resets already work. To connect a different junkie account, disconnect Discord from that account's profile page first.", u.Username))
+		return
+	}
 	if !a.limiter.allow("discordlink:"+discordUserID, 10, time.Hour) {
 		b.ephemeral(s, i, "Too many link attempts — try again later.")
 		return
