@@ -28,6 +28,12 @@ const routes = [
     component: () => import('./views/AuthView.vue'),
   },
   {
+    // Public: the visitor forgot their password, so they have no session.
+    path: '/reset-password/:token',
+    name: 'reset-password',
+    component: () => import('./views/ResetPasswordView.vue'),
+  },
+  {
     path: '/privacy',
     name: 'privacy',
     component: () => import('./views/PrivacyView.vue'),

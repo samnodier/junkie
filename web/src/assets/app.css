@@ -1770,6 +1770,9 @@ body.menu-drawer-open { overflow: hidden; }
 .admin-table th { color: var(--faint); font-family: var(--font-mono); font-size: var(--fs-label); font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; }
 .admin-table tbody tr:last-child td { border-bottom: 0; }
 .admin-table form { margin: 0; }
+.admin-table td .btn-ghost + .btn-ghost, .admin-table td .muted + .btn-ghost { margin-left: var(--sp-2); }
+.admin-reset-link { margin-bottom: var(--sp-4); }
+.admin-reset-link .mono { display: block; margin: var(--sp-2) 0; word-break: break-all; user-select: all; }
 .role-badge, .status-active { display: inline-flex; align-items: center; padding: 3px var(--sp-2); border-radius: 999px; font-family: var(--font-mono); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.08em; }
 .role-badge { color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); }
 .role-admin, .status-active { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-soft-border); }

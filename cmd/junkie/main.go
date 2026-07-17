@@ -316,6 +316,9 @@ func main() {
 	mux.HandleFunc("POST /signup", a.signup)
 	mux.HandleFunc("GET /login", a.spaPage) // ported to Vue; legacy: a.loginForm
 	mux.HandleFunc("POST /login", a.login)
+	mux.HandleFunc("GET /reset-password/{token}", a.spaPage)
+	mux.HandleFunc("GET /api/password-reset-context/{token}", a.apiPasswordResetContext)
+	mux.HandleFunc("POST /api/password-reset/{token}", a.apiPasswordReset)
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("GET /dashboard", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.RawQuery
@@ -381,6 +384,7 @@ func main() {
 	mux.HandleFunc("GET /admin", a.requireAdmin(a.spaPage)) // ported to Vue; legacy: a.adminPage
 	mux.HandleFunc("GET /api/admin", a.requireAuth(a.apiAdmin))
 	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
+	mux.HandleFunc("POST /admin/users/{id}/reset-link", a.requireAdminMutation(a.adminCreateResetLink))
 	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
 
 	go a.sweepExpiredSessions(ctx)
@@ -440,6 +444,9 @@ func (a *app) sweepExpiredSessions(ctx context.Context) {
 	for {
 		if _, err := a.db.Exec(ctx, `DELETE FROM sessions WHERE expires_at < now()`); err != nil {
 			log.Printf("sweep expired sessions: %v", err)
+		}
+		if _, err := a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE expires_at < now()`); err != nil {
+			log.Printf("sweep expired reset tokens: %v", err)
 		}
 		select {
 		case <-ctx.Done():

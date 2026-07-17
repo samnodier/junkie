@@ -20,6 +20,7 @@ const password = ref('');
 const error = ref('');
 const banner = ref('');
 const submitting = ref(false);
+const showForgot = ref(false);
 
 watchEffect(async () => {
   banner.value = '';
@@ -94,10 +95,18 @@ async function submit() {
         Already have an account?
         <router-link :to="{ path: '/login', query: next !== '/' ? { next } : {} }">Sign in</router-link>
       </p>
-      <p v-else class="muted auth-switch">
-        New here?
-        <router-link :to="{ path: '/login', query: { mode: 'signup', ...(next !== '/' ? { next } : {}) } }">Create an account</router-link>
-      </p>
+      <template v-else>
+        <p class="muted auth-switch">
+          New here?
+          <router-link :to="{ path: '/login', query: { mode: 'signup', ...(next !== '/' ? { next } : {}) } }">Create an account</router-link>
+        </p>
+        <p class="muted auth-switch">
+          <a href="#" @click.prevent="showForgot = !showForgot">Forgot your password?</a>
+        </p>
+        <p v-if="showForgot" class="muted auth-switch">
+          junkie never collects your email, so resets go through Discord: if your Discord account is linked, run <span class="mono">/junkie reset-password</span> in a server with the junkie bot and it will DM you a reset link. If it isn't linked, ask the admin for a reset link — on Discord, or with a <a href="https://github.com/samnodier/junkie/issues" target="_blank" rel="noopener">GitHub issue</a>.
+        </p>
+      </template>
     </section>
   </AppShell>
 </template>

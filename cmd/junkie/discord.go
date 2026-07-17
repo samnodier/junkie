@@ -135,6 +135,11 @@ var discordCommands = []*discordgo.ApplicationCommand{
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "reset-password",
+				Description: "Forgot your junkie password? Get a reset link DM'd to you",
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "help",
 				Description: "List junkie commands",
 			},
@@ -235,6 +240,8 @@ func (b *discordBot) handleCommand(s *discordgo.Session, i *discordgo.Interactio
 		b.handleStats(s, i, period)
 	case "link":
 		b.handleLink(s, i)
+	case "reset-password":
+		b.handleResetPassword(s, i)
 	case "help":
 		b.handleHelp(s, i)
 	}
@@ -1012,6 +1019,48 @@ func (b *discordBot) handleLink(s *discordgo.Session, i *discordgo.InteractionCr
 	b.ephemeral(s, i, "Open this link (valid 24h) signed in to your junkie account to connect it: "+linkURL)
 }
 
+// handleResetPassword self-serves a forgotten password: Discord is junkie's
+// only verified out-of-band channel (no email is ever collected), so a linked
+// Discord account is what proves the requester owns the junkie account. The
+// single-use link goes out by DM, never into the channel.
+func (b *discordBot) handleResetPassword(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	a := b.app
+	ctx := context.Background()
+	discordUserID := interactionUserID(i)
+	u, linked := a.discordLinkedUser(ctx, discordUserID)
+	if !linked {
+		b.ephemeral(s, i, "This Discord account isn't linked to a junkie account, so I can't verify who you are. If you can still sign in, run `/junkie link` first — otherwise ask the junkie admin for a reset link (Discord, or a GitHub issue on samnodier/junkie).")
+		return
+	}
+	// A hard daily cap, not just a burst window: each request DMs a working
+	// account-takeover link, so there's no reason to allow more than a couple.
+	if !a.limiter.allow("pwreset:"+u.ID, 2, 24*time.Hour) {
+		b.ephemeral(s, i, "You've hit the limit of 2 password resets per day — try again tomorrow, or ask the junkie admin.")
+		return
+	}
+	link, tokenHash, err := a.createPasswordResetToken(ctx, u.ID, false)
+	if err != nil {
+		log.Printf("discord: create reset token: %v", err)
+		b.ephemeral(s, i, "Couldn't create a reset link right now — try again.")
+		return
+	}
+	dm, err := s.UserChannelCreate(discordUserID)
+	if err == nil {
+		_, err = s.ChannelMessageSend(dm.ID, fmt.Sprintf(
+			"Reset the password for your junkie account **%s** here (valid %d minutes, works once):\n%s\nIf you didn't ask for this, just ignore it — your password stays unchanged.",
+			u.Username, int(passwordResetTTL.Minutes()), link))
+	}
+	if err != nil {
+		// Burn the undelivered token: a live reset link must never exist
+		// anywhere but in its owner's DMs.
+		_, _ = a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE token_hash = $1`, tokenHash)
+		log.Printf("discord: DM reset link: %v", err)
+		b.ephemeral(s, i, "I couldn't DM you — enable direct messages from members of this server (Server → Privacy Settings), then run `/junkie reset-password` again.")
+		return
+	}
+	b.ephemeral(s, i, "Check your DMs — I've sent you a password reset link. It's valid for 30 minutes and works once.")
+}
+
 // discordLinkPage serves GET /discord/link/{token}: it only *shows* what the
 // token would do (peek, never consume), so a bare link — or a drive-by
 // <img> fetch planted by whoever minted the token — can't bind the visitor's
@@ -1065,6 +1114,7 @@ func (a *app) discordLinkConfirm(w http.ResponseWriter, r *http.Request) {
 func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	b.ephemeral(s, i, "**junkie commands**\n"+
 		"`/junkie link` — connect your Discord account to your junkie account\n"+
+		"`/junkie reset-password` — forgot your junkie password? get a reset link by DM\n"+
 		"`/junkie register [code]` — connect an existing room by code, or create a new one (posts to this channel)\n"+
 		"`/junkie deregister` — disconnect this server from its room\n"+
 		"`/junkie channel [#channel]` — move the bot's notifications to another channel\n"+
