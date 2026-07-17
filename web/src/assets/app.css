@@ -1826,6 +1826,7 @@ body.menu-drawer-open { overflow: hidden; }
 @media (max-width: 720px) {
   .topbar { min-height: 60px; }
   .desk-grid, .room-desk-grid, .grid.two { grid-template-columns: 1fr; gap: var(--sp-6); padding-left: 20px; padding-right: 20px; }
+  .profile-page { margin-left: 20px; margin-right: 20px; }
   .desk-grid { width: 100%; }
   .desk-shell:not(.desk-shell-focus) {
     max-height: none;
