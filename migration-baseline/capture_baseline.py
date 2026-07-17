@@ -157,7 +157,7 @@ def post_form(opener, base, path, fields):
 
 def signup(base, username, password):
     opener = make_opener()
-    post_form(opener, base, "/signup", {"username": username, "password": password, "next": "/dashboard"})
+    post_form(opener, base, "/api/signup", {"username": username, "password": password, "next": "/dashboard"})
     return opener
 
 
