@@ -1951,31 +1951,14 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			}
 			timer.Transitioned = true
 		} else if timer.Phase == "focus" {
-			// Users may sit in up to maxActiveRooms rooms' runs at once, but
-			// a finished block only credits participants for whom THIS run is
-			// the earliest-joined of their still-active room runs. That's
-			// Sam's priority-of-joining rule: join a, b, c and only a counts;
-			// leave a and counting shifts to b; rejoin a later and it queues
-			// behind c, because rejoining writes a fresh joined_at. The
-			// run-id tiebreak keeps simultaneous joins deterministic. Solo
-			// timers are separate and unaffected.
-			if _, err = tx.Exec(ctx, `
-				INSERT INTO activity (user_id, activity_date, focus_minutes)
-				SELECT tp.user_id, CURRENT_DATE, $1
-				FROM timer_participants tp
-				WHERE tp.timer_run_id = $2
-					AND NOT EXISTS (
-						SELECT 1 FROM timer_participants earlier
-						JOIN timer_runs tr2 ON tr2.id = earlier.timer_run_id
-						WHERE earlier.user_id = tp.user_id
-							AND earlier.timer_run_id <> tp.timer_run_id
-							AND tr2.room_id IS NOT NULL
-							AND tr2.ended_at IS NULL AND tr2.phase <> 'ended'
-							AND (earlier.joined_at < tp.joined_at
-								OR (earlier.joined_at = tp.joined_at AND earlier.timer_run_id < tp.timer_run_id))
-					)
-				ON CONFLICT (user_id, activity_date)
-				DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, timer.FocusMinutes, timer.ID); err != nil {
+			// Users may sit in up to maxActiveRooms rooms' runs at once. A
+			// finished session credits each participant its wall-clock window
+			// minus whatever other completed sessions already claimed of it
+			// (focus_credits), then claims the window itself. Overlapping
+			// rooms therefore never count the same minute twice and never
+			// drop a real one; whichever session completes first claims the
+			// time. Solo timers are separate and unaffected.
+			if err = creditFocusSession(ctx, tx, timer.ID, timer.PhaseStartedAt, timer.PhaseEndsAt); err != nil {
 				return nil, false, err
 			}
 			if timer.CurrentSession >= timer.TotalSessions {
@@ -2104,6 +2087,82 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	return &timer, timer.Transitioned, nil
 }
 
+// creditFocusSession adds a completed room focus session's window to each
+// participant's daily activity, prorated against focus_credits: minutes some
+// other completed session already claimed are subtracted, and the session then
+// claims its own full window so later completions subtract it in turn. Runs
+// inside normalizeTimer's transaction — the caller holds the run's row lock,
+// so one session can never be credited twice.
+func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end time.Time) error {
+	if !end.After(start) {
+		return nil
+	}
+	// One row per participant per overlapping claim (NULLs for participants
+	// with none), ordered so each user's claims arrive sorted by start.
+	rows, err := tx.Query(ctx, `
+		SELECT tp.user_id, fc.started_at, fc.ended_at
+		FROM timer_participants tp
+		LEFT JOIN focus_credits fc ON fc.user_id = tp.user_id
+			AND fc.ended_at > $2 AND fc.started_at < $3
+		WHERE tp.timer_run_id = $1
+		ORDER BY tp.user_id, fc.started_at`, runID, start, end)
+	if err != nil {
+		return err
+	}
+	credited := map[string]time.Duration{} // unclaimed focus time per user
+	cursor := map[string]time.Time{}       // sweep position per user
+	for rows.Next() {
+		var userID string
+		var claimStart, claimEnd *time.Time
+		if err = rows.Scan(&userID, &claimStart, &claimEnd); err != nil {
+			rows.Close()
+			return err
+		}
+		if _, seen := credited[userID]; !seen {
+			credited[userID] = 0
+			cursor[userID] = start
+		}
+		if claimStart == nil {
+			continue
+		}
+		// Claims are sorted by start, so the gap before this claim is
+		// unclaimed; advance the sweep past the claim's end.
+		if claimStart.After(cursor[userID]) {
+			credited[userID] += claimStart.Sub(cursor[userID])
+		}
+		if claimEnd.After(cursor[userID]) {
+			cursor[userID] = *claimEnd
+		}
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for userID, unclaimed := range credited {
+		if pos := cursor[userID]; end.After(pos) {
+			unclaimed += end.Sub(pos)
+		}
+		minutes := int((unclaimed + 30*time.Second) / time.Minute)
+		if minutes <= 0 {
+			continue
+		}
+		if _, err = tx.Exec(ctx, `
+			INSERT INTO activity (user_id, activity_date, focus_minutes)
+			VALUES ($1, CURRENT_DATE, $2)
+			ON CONFLICT (user_id, activity_date)
+			DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, userID, minutes); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO focus_credits (user_id, started_at, ended_at)
+		SELECT user_id, $2, $3 FROM timer_participants WHERE timer_run_id = $1`, runID, start, end); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM focus_credits WHERE ended_at < now() - interval '2 days'`)
+	return err
+}
+
 func requestedRoomFocusMinutes(r *http.Request, fallback int) (int, error) {
 	value := strings.TrimSpace(r.FormValue("focus_minutes"))
 	if value == "" {
@@ -2154,8 +2213,8 @@ const (
 // maxActiveRooms caps how many rooms' live sessions one user can be part of
 // at once (participating or waiting). Three is not a magic number — it's the
 // sanity ceiling Sam picked so "join everything" can't get silly, and it
-// pairs with the priority rule in normalizeTimer: however many you're in,
-// focus minutes only ever count toward the one you joined first.
+// pairs with the proration in creditFocusSession: however many you're in,
+// each wall-clock minute of focus counts exactly once.
 const maxActiveRooms = 3
 
 var errTooManyRooms = errors.New("already in the maximum number of rooms' live sessions")
@@ -2288,8 +2347,8 @@ func (a *app) roomWaitingUsers(ctx context.Context, roomID string) ([]user, erro
 func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusMinutes int) (bool, error) {
 	// Starting makes you a participant, so the maxActiveRooms cap applies
 	// here as much as to joins. Checked outside the transaction: a race can
-	// briefly overshoot the cap, which is harmless — the priority rule in
-	// normalizeTimer decides what counts regardless.
+	// briefly overshoot the cap, which is harmless — creditFocusSession
+	// prorates overlap so each minute counts once regardless.
 	if a.activeRoomTimerCount(ctx, userID, rm.ID) >= maxActiveRooms {
 		return false, errTooManyRooms
 	}
