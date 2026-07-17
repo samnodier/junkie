@@ -13,8 +13,9 @@ import (
 
 const (
 	// Applies to new passwords only (signup, change, reset) — existing
-	// shorter passwords keep working at login.
-	minPasswordLength = 8
+	// shorter passwords keep working at login. Deliberately light-touch
+	// (Sam's call): 6+ characters and not your username, nothing more.
+	minPasswordLength = 6
 	// bcrypt only reads the first 72 bytes of a password.
 	maxPasswordBytes = 72
 	maxTodoTextLen   = 500

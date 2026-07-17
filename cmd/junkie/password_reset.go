@@ -74,10 +74,11 @@ func (a *app) apiPasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokenHash := hashToken(r.PathValue("token"))
-	var userID string
+	var userID, username string
 	if err := a.db.QueryRow(ctx, `
-		SELECT user_id FROM password_reset_tokens
-		WHERE token_hash = $1 AND expires_at > now()`, tokenHash).Scan(&userID); err != nil {
+		SELECT user_id, users.username FROM password_reset_tokens
+		JOIN users ON users.id = password_reset_tokens.user_id
+		WHERE token_hash = $1 AND expires_at > now()`, tokenHash).Scan(&userID, &username); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "That reset link is invalid or has expired. Request a new one.")
 		return
 	}
@@ -88,6 +89,10 @@ func (a *app) apiPasswordReset(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(newPassword) > maxPasswordBytes {
 		writeJSONError(w, http.StatusBadRequest, "That password is too long.")
+		return
+	}
+	if strings.EqualFold(newPassword, username) {
+		writeJSONError(w, http.StatusBadRequest, "Your password can't be your username.")
 		return
 	}
 	if newPassword != r.FormValue("confirm_password") {

@@ -580,6 +580,10 @@ func (a *app) apiSignup(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "That password is too long.")
 		return
 	}
+	if strings.EqualFold(password, username) {
+		writeJSONError(w, http.StatusBadRequest, "Your password can't be your username.")
+		return
+	}
 	if !a.limiter.allow("signup:"+clientIP(r), 10, time.Hour) {
 		writeJSONError(w, http.StatusTooManyRequests, "Too many new accounts from this address. Try again later.")
 		return

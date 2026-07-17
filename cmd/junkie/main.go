@@ -533,6 +533,10 @@ func (a *app) signup(w http.ResponseWriter, r *http.Request) {
 		a.render(w, "login", a.authPageData(r, true, next, "That password is too long."))
 		return
 	}
+	if strings.EqualFold(password, username) {
+		a.render(w, "login", a.authPageData(r, true, next, "Your password can't be your username."))
+		return
+	}
 	if !a.limiter.allow("signup:"+clientIP(r), 10, time.Hour) {
 		a.renderStatus(w, http.StatusTooManyRequests, "login", a.authPageData(r, true, next, "Too many new accounts from this address. Try again later."))
 		return
@@ -640,6 +644,10 @@ func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(newPassword) > maxPasswordBytes {
 		fail("That new password is too long.")
+		return
+	}
+	if strings.EqualFold(newPassword, u.Username) {
+		fail("Your password can't be your username.")
 		return
 	}
 	if newPassword != confirm {

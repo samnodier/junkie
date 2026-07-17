@@ -2322,8 +2322,8 @@ const layoutTemplates = `
         </div>
         <form class="profile-password-form" method="post" action="/profile/password">
           <label>Current password <input type="password" name="current_password" autocomplete="current-password" required></label>
-          <label>New password <input type="password" name="new_password" autocomplete="new-password" required minlength="8"></label>
-          <label>Confirm new password <input type="password" name="confirm_password" autocomplete="new-password" required minlength="8"></label>
+          <label>New password <input type="password" name="new_password" autocomplete="new-password" required minlength="6"></label>
+          <label>Confirm new password <input type="password" name="confirm_password" autocomplete="new-password" required minlength="6"></label>
           <button type="submit" class="btn-primary btn-compact">Update password</button>
         </form>
       </article>
