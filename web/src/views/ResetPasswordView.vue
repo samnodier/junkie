@@ -65,7 +65,7 @@ async function submit() {
       </div>
       <template v-if="invalid">
         <h1 class="auth-title">Reset link expired</h1>
-        <p class="muted">This reset link is invalid, already used, or older than 30 minutes. Run <span class="mono">/junkie reset-password</span> in Discord to get a fresh one, or ask the junkie admin.</p>
+        <p class="muted">This reset link is invalid, already used, or older than 30 minutes. Run <span class="mono">/junkie reset-password</span> again in the <span class="mono">#junkie-bot</span> channel of the <a href="https://discord.gg/qEEzdXQHtK" target="_blank" rel="noopener">junkie Discord server</a> to get a fresh one, or ask the admin there.</p>
         <p class="muted auth-switch"><router-link to="/login">Back to sign in</router-link></p>
       </template>
       <template v-else-if="username">

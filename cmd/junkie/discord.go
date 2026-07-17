@@ -1035,7 +1035,7 @@ func (b *discordBot) handleResetPassword(s *discordgo.Session, i *discordgo.Inte
 	discordUserID := interactionUserID(i)
 	u, linked := a.discordLinkedUser(ctx, discordUserID)
 	if !linked {
-		b.ephemeral(s, i, "This Discord account isn't linked to a junkie account, so I can't verify who you are. If you can still sign in, run `/junkie link` first — otherwise ask the junkie admin for a reset link (Discord, or a GitHub issue on samnodier/junkie).")
+		b.ephemeral(s, i, "This Discord account isn't linked to a junkie account, so I can't verify who you are. If you can still sign in, run `/junkie link` first. Otherwise ask an admin in the #junkie-bot channel for a reset link, or open a GitHub issue on samnodier/junkie.")
 		return
 	}
 	// A hard daily cap, not just a burst window: each request DMs a working

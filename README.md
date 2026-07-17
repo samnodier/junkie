@@ -39,7 +39,7 @@ Create an account when you want shared rooms or data that follows you across dev
 - **Sign up / sign in** — username and password. Usernames are lowercase letters, numbers, dots, dashes, and underscores (2–32 characters).
 - **Username** — change it from Profile → Account.
 - **Password change** — Profile → Security. Updating your password **signs out all other devices**.
-- **Forgot your password?** — junkie never collects your email, so resets go through Discord. If your Discord account is linked (Profile → Connections), run `/junkie reset-password` in any server with the junkie bot — or in a DM with the bot — and it DMs you a single-use reset link that expires after 30 minutes. If Discord isn't linked, ask the admin (on Discord, or with a [GitHub issue](https://github.com/samnodier/junkie/issues)) — the owner can issue you the same kind of reset link by hand. **Link your Discord before you need it**: linking requires being signed in, so it can't be done after the password is already forgotten.
+- **Forgot your password?** — junkie never collects your email, so resets go through Discord. [Join the junkie Discord server](https://discord.gg/qEEzdXQHtK) and run `/junkie reset-password` in the `#junkie-bot` channel; the bot DMs you a single-use reset link that expires after 30 minutes. (If your Discord is already linked, the command works from any server you share with the bot, or a DM with it.) If you can't use Discord at all, ask the admin in `#junkie-bot` or open a [GitHub issue](https://github.com/samnodier/junkie/issues) — the owner can issue you the same kind of reset link by hand. **Link your Discord before you need it**: linking requires being signed in, so it can't be done after the password is already forgotten.
 - **Account deletion** — Profile → Danger zone. Permanently deletes your account, rooms you created, todos, and activity history. Requires your current password.
 - **Profile picture** — upload or remove from Profile → Preferences.
 
@@ -144,13 +144,15 @@ Both are the same app pointing at the hosted site; the APK just wraps it so ther
 
 junkie has a Discord bot that runs a server's focus room from chat: live countdown messages showing who's in, break notifications, join buttons, stats, and a heatmap picture — no browser needed once you're set up.
 
-**Add it to a server** (needs Manage Server permission there):
+**Just want to link your account or reset your password?** [Join the junkie Discord server](https://discord.gg/qEEzdXQHtK) and use `/junkie link` or `/junkie reset-password` in `#junkie-bot`. Your commands and the bot's replies there are private — nobody else in the channel can see them.
+
+**Add it to your own server** (needs Manage Server permission there):
 
 > [https://discord.com/oauth2/authorize?client_id=1526585859044933684&scope=bot+applications.commands&permissions=2048](https://discord.com/oauth2/authorize?client_id=1526585859044933684&scope=bot+applications.commands&permissions=2048)
 
 The bot only asks for Send Messages. Once added: each participant runs `/junkie link` once to connect their junkie account, then an admin runs `/junkie register` in the channel the timer should post to (pass an existing room code to connect it, or omit to create a fresh room). Move notifications later with `/junkie channel [#channel]`. `/junkie help` lists all commands.
 
-Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [Accounts](#accounts)).
+Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [Accounts](#accounts)). This is why the public [junkie Discord server](https://discord.gg/qEEzdXQHtK) exists — joining it gives anyone a place to run these commands without needing their own server.
 
 Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, and `PUBLIC_BASE_URL` are set (see `.env.example`), and you'd mint your own invite link with your application's client id.
 

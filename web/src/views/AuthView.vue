@@ -103,8 +103,8 @@ async function submit() {
         <p class="muted auth-switch">
           <a href="#" @click.prevent="showForgot = !showForgot">Forgot your password?</a>
         </p>
-        <p v-if="showForgot" class="muted auth-switch">
-          junkie never collects your email, so resets go through Discord: if your Discord account is linked, run <span class="mono">/junkie reset-password</span> in a server with the junkie bot and it will DM you a reset link. If it isn't linked, ask the admin for a reset link — on Discord, or with a <a href="https://github.com/samnodier/junkie/issues" target="_blank" rel="noopener">GitHub issue</a>.
+        <p v-if="showForgot" class="muted auth-switch forgot-help">
+          junkie never collects your email, so resets go through Discord. <a href="https://discord.gg/qEEzdXQHtK" target="_blank" rel="noopener">Join the junkie Discord server</a>, then run <span class="mono">/junkie reset-password</span> in the <span class="mono">#junkie-bot</span> channel — the bot DMs you a single-use reset link. Already connected your Discord? You can run it from anywhere you share with the bot. Stuck? Ask the admin there, or open a <a href="https://github.com/samnodier/junkie/issues" target="_blank" rel="noopener">GitHub issue</a>.
         </p>
       </template>
     </section>
