@@ -1823,6 +1823,39 @@ body.menu-drawer-open { overflow: hidden; }
 .forbidden-card { text-align: center; }
 .forbidden-card .muted { margin-bottom: 0; }
 .forbidden-card .btn { margin-top: var(--sp-5); }
+/* 404: the desk's focus ring, stopped at 4:04 — the arc holds the ~16% a
+   25-minute session has left with four minutes four seconds on the clock. */
+.notfound-card {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: max(60vh, 400px);
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-3);
+}
+.notfound-card h1 { margin: var(--sp-4) 0 0; }
+.notfound-card .muted { margin: 0; max-width: 36ch; }
+.notfound-card .btn { margin-top: var(--sp-5); }
+.notfound-ring { width: clamp(200px, 60vw, 260px); cursor: default; }
+.notfound-ring .circle-timer-track,
+.notfound-ring .circle-timer-progress { stroke-width: 5; }
+.notfound-core { flex-direction: column; gap: var(--sp-2); }
+.notfound-ring-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.notfound-arc { animation: notfound-draw 900ms ease-out; }
+@keyframes notfound-draw {
+  from { stroke-dashoffset: 553; }
+}
 @media (max-width: 720px) {
   .topbar { min-height: 60px; }
   .desk-grid, .room-desk-grid, .grid.two { grid-template-columns: 1fr; gap: var(--sp-6); padding-left: 20px; padding-right: 20px; }
@@ -1878,6 +1911,7 @@ body.menu-drawer-open { overflow: hidden; }
 @media (max-width: 480px) {
   .auth-card { margin: 20px 20px 0; padding: var(--sp-6); }
   .forbidden-card .btn { width: 100%; }
+  .notfound-card .btn { width: 100%; }
   .inline-form.todo-add-form { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {

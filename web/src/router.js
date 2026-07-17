@@ -99,6 +99,13 @@ const routes = [
     component: () => import('./views/PublicProfileView.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    // Anything the Go catch-all served the SPA for but no route above
+    // claims — previously these rendered an empty <router-view>.
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('./views/NotFoundView.vue'),
+  },
 ];
 
 const router = createRouter({
