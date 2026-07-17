@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -22,6 +23,26 @@ func TestSafeNext(t *testing.T) {
 		if got := safeNext(c.in); got != c.want {
 			t.Errorf("safeNext(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// clientIP must key rate limits on the rightmost X-Forwarded-For entry — the
+// one appended by our own proxy — never a leftmost value the client typed
+// itself, or every request could mint a fresh rate-limit bucket.
+func TestClientIPUsesRightmostForwardedFor(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.1:4321"
+	if got := clientIP(r); got != "10.0.0.1" {
+		t.Errorf("no XFF: got %q, want RemoteAddr host", got)
+	}
+	r.Header.Set("X-Forwarded-For", "203.0.113.7")
+	if got := clientIP(r); got != "203.0.113.7" {
+		t.Errorf("single XFF: got %q", got)
+	}
+	// The client sent a spoofed leading entry; the proxy appended the real IP.
+	r.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8, 203.0.113.7")
+	if got := clientIP(r); got != "203.0.113.7" {
+		t.Errorf("spoofed XFF chain: got %q, want the proxy-appended value", got)
 	}
 }
 

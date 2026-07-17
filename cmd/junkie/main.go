@@ -1404,6 +1404,12 @@ func (a *app) joinRoom(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, back+"?error="+url.QueryEscape("Enter a room code to join."), http.StatusSeeOther)
 		return
 	}
+	// Codes are the room credential, so lookups must not be free to brute
+	// force. Generous for humans mistyping, hostile to enumeration.
+	if !a.limiter.allow("joincode:"+u.ID, 20, 10*time.Minute) {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("Too many join attempts. Try again in a few minutes."), http.StatusSeeOther)
+		return
+	}
 	rm, ok := a.findRoom(r.Context(), code)
 	if !ok {
 		http.Redirect(w, r, back+"?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
@@ -1421,6 +1427,12 @@ func (a *app) joinRoomIntent(w http.ResponseWriter, r *http.Request) {
 	}
 	if code == "" {
 		http.Redirect(w, r, back+"?error="+url.QueryEscape("Enter a room code to join."), http.StatusSeeOther)
+		return
+	}
+	// Guests reach this without an account, so the enumeration guard keys on
+	// IP here; the authed join path keys on the user id.
+	if !a.limiter.allow("joincode:"+clientIP(r), 20, 10*time.Minute) {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape("Too many join attempts. Try again in a few minutes."), http.StatusSeeOther)
 		return
 	}
 	rm, ok := a.findRoom(r.Context(), code)
@@ -2559,18 +2571,25 @@ func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun,
 	now := time.Now()
 	if timer.Phase == "focus" && now.After(timer.PhaseEndsAt) {
 		breakMins := soloBreakMinutes(timer.FocusMinutes)
-		_, _ = a.db.Exec(ctx, `
-			INSERT INTO activity (user_id, activity_date, focus_minutes)
-			VALUES ($1, CURRENT_DATE, $2)
-			ON CONFLICT (user_id, activity_date)
-			DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, userID, timer.FocusMinutes)
+		// Claim the focus->break flip first: the WHERE phase='focus' guard
+		// means exactly one of several racing requests (two tabs polling the
+		// boundary) wins the row, and only the winner credits the minutes —
+		// the activity add is cumulative, so crediting per-caller would
+		// double-count.
+		tag, err := a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'break', break_minutes = $1, phase_started_at = $2, phase_ends_at = $2 WHERE id = $3 AND phase = 'focus'`, breakMins, now, timer.ID)
+		if err == nil && tag.RowsAffected() > 0 {
+			_, _ = a.db.Exec(ctx, `
+				INSERT INTO activity (user_id, activity_date, focus_minutes)
+				VALUES ($1, CURRENT_DATE, $2)
+				ON CONFLICT (user_id, activity_date)
+				DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, userID, timer.FocusMinutes)
+		}
 		timer.Phase = "break"
 		timer.BreakMinutes = breakMins
 		timer.PhaseStartedAt = now
 		timer.PhaseEndsAt = now
-		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'break', break_minutes = $1, phase_started_at = $2, phase_ends_at = $2 WHERE id = $3`, breakMins, now, timer.ID)
 	} else if timer.Phase == "break" && timer.PhaseEndsAt.After(timer.PhaseStartedAt) && now.After(timer.PhaseEndsAt) {
-		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID)
+		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND phase = 'break'`, timer.ID)
 		return nil, nil
 	}
 	timer.Participant = true
@@ -3035,8 +3054,11 @@ func normalizeRoomCode(raw string) string {
 	return strings.ToUpper(raw)
 }
 
+// randomCode formats a new room's join code. 6 random bytes (48 bits) keeps
+// codes short enough to read aloud while putting guessing far out of reach of
+// the join rate limits; codes minted at the old 4-byte length keep working.
 func randomCode() string {
-	return fmt.Sprintf("%s-%s", randomHex(2), randomHex(2))
+	return fmt.Sprintf("%s-%s", randomHex(3), randomHex(3))
 }
 
 func randomHex(n int) string {

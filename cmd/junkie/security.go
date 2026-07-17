@@ -12,7 +12,9 @@ import (
 )
 
 const (
-	minPasswordLength = 4
+	// Applies to new passwords only (signup, change, reset) — existing
+	// shorter passwords keep working at login.
+	minPasswordLength = 8
 	// bcrypt only reads the first 72 bytes of a password.
 	maxPasswordBytes = 72
 	maxTodoTextLen   = 500
@@ -56,10 +58,12 @@ func hashToken(token string) string {
 
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.Index(xff, ","); i >= 0 {
-			xff = xff[:i]
-		}
-		return strings.TrimSpace(xff)
+		// Rightmost value: the one appended by our own proxy (Render, or
+		// Caddy when self-hosted), which the client cannot choose. Leftmost
+		// entries are attacker-supplied, and keying rate limits on them
+		// would let a client mint a fresh bucket per request.
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[len(parts)-1])
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host

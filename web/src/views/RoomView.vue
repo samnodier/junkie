@@ -87,30 +87,19 @@ async function saveRename() {
 
 async function saveSettings(event) {
   const f = new FormData(event.target);
-  await room.action('settings', {
+  const ok = await room.action('settings', {
     focus_minutes: String(f.get('focus_minutes')),
     break_minutes: String(f.get('break_minutes')),
     auto_sessions: String(f.get('auto_sessions')),
     auto_roll: f.get('auto_roll') ? '1' : '0',
     require_checkin: f.get('require_checkin') ? '1' : '0',
   });
-  // action() re-fetched the room, so compare what came back to what was
-  // submitted: a mismatch means the server refused (a run started while the
-  // form was open) rather than saved. Native min/max validation keeps the
-  // inputs inside the server's clamp range, so equality is a fair check.
-  const toasts = useToastStore();
+  // A refusal (run started while the form was open) was already toasted by
+  // postForm with the server's own message; only confirm successes here.
+  if (!ok) return;
   const r = room.room;
-  const saved =
-    r &&
-    r.focusMinutes === Number(f.get('focus_minutes')) &&
-    r.breakMinutes === Number(f.get('break_minutes')) &&
-    r.autoSessions === Number(f.get('auto_sessions')) &&
-    r.autoRoll === !!f.get('auto_roll') &&
-    r.requireCheckin === !!f.get('require_checkin');
-  if (saved) {
-    toasts.show(`Timer settings saved · ${r.autoSessions}×${r.focusMinutes}/${r.breakMinutes}`);
-  } else {
-    toasts.show("Couldn't save — timer settings can't change while a run is active.");
+  if (r) {
+    useToastStore().show(`Timer settings saved · ${r.autoSessions}×${r.focusMinutes}/${r.breakMinutes}`);
   }
 }
 async function deleteRoom() {

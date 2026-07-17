@@ -1,24 +1,13 @@
 import { defineStore } from 'pinia';
 import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
+import { postForm } from '@/lib/postForm';
 import { onRoomInvite, onBreakInvite, onTimerEnd } from '@/lib/notify';
 
 // Room page state, fed by /api/room/{code}. Same mutation pattern as the
-// desk: post to the legacy endpoints, then re-fetch; the room socket's
-// signals re-fetch too, replacing the legacy reload/fragment sync.
-async function postForm(url, fields = {}) {
-  const body = new URLSearchParams(fields);
-  try {
-    await fetch(url, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-  } catch {
-    /* the follow-up refresh shows whatever state the server has */
-  }
-}
+// desk: post to the legacy endpoints via postForm (rejections surface as
+// toasts), then re-fetch; the room socket's signals re-fetch too, replacing
+// the legacy reload/fragment sync.
 
 export const useRoomStore = defineStore('room', {
   state: () => ({
@@ -82,8 +71,9 @@ export const useRoomStore = defineStore('room', {
     },
 
     async action(name, fields = {}) {
-      await postForm(`/r/${encodeURIComponent(this.code)}/${name}`, fields);
+      const ok = await postForm(`/r/${encodeURIComponent(this.code)}/${name}`, fields);
       await this.refresh();
+      return ok;
     },
     // enter is the click-the-link join for a temporary /f/{code} room: it makes
     // the viewer a member and queues them into the run before the first fetch.
@@ -102,10 +92,15 @@ export const useRoomStore = defineStore('room', {
       if (patch) await this.refresh();
     },
 
-    open(code, meId) {
+    async open(code, meId) {
       this.close();
       this.$patch({ code, loaded: false, deleted: false, invite: null, lastPhase: '' });
       const toasts = useToastStore();
+
+      // Fetch first: the room socket 403s non-members, so opening it before
+      // membership is known leaves the invite screen in a reconnect loop.
+      await this.refresh();
+      if (this.invite || this.deleted) return;
 
       this.socket = connectSignals(`/ws/r/${encodeURIComponent(code)}`, (type, event) => {
         if (type === 'deleted') {
@@ -161,8 +156,6 @@ export const useRoomStore = defineStore('room', {
       this.refreshTimer = setInterval(() => {
         if (document.visibilityState === 'visible') this.refresh();
       }, 45000);
-
-      return this.refresh();
     },
     close() {
       this.socket?.close();

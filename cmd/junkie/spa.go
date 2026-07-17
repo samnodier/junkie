@@ -502,6 +502,12 @@ func (a *app) apiJoinContext(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"redirect": "/dashboard?error=" + url.QueryEscape("Enter a room code to join.")})
 		return
 	}
+	// Same enumeration guard (and bucket) as joinRoom: this endpoint answers
+	// "does this code exist" just as directly.
+	if !a.limiter.allow("joincode:"+u.ID, 20, 10*time.Minute) {
+		writeJSON(w, map[string]string{"redirect": "/dashboard?error=" + url.QueryEscape("Too many join attempts. Try again in a few minutes.")})
+		return
+	}
 	rm, ok := a.findRoom(r.Context(), code)
 	if !ok {
 		writeJSON(w, map[string]string{"redirect": "/dashboard?error=" + url.QueryEscape("No room found with that code.")})

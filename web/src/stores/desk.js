@@ -1,25 +1,14 @@
 import { defineStore } from 'pinia';
 import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
+import { postForm } from '@/lib/postForm';
 import { onRoomInvite, onBreakInvite } from '@/lib/notify';
 
 // Signed-in desk state, fed by /api/desk. Mutations post to the legacy
-// endpoints (which own all the rules) and then refresh; WS signals from
-// /ws/me and each room socket also refresh, replacing the legacy
-// fragment-swap/location.reload() sync with reactive updates.
-async function postForm(url, fields = {}) {
-  const body = new URLSearchParams(fields);
-  try {
-    await fetch(url, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-  } catch {
-    /* the follow-up refresh shows whatever state the server has */
-  }
-}
+// endpoints (which own all the rules) via postForm — rejections surface as
+// toasts — and then refresh; WS signals from /ws/me and each room socket
+// also refresh, replacing the legacy fragment-swap/location.reload() sync
+// with reactive updates.
 
 export const useDeskStore = defineStore('desk', {
   state: () => ({
