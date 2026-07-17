@@ -655,6 +655,7 @@ func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
 		fail("Could not update your password.")
 		return
 	}
+	_, _ = a.db.Exec(r.Context(), `DELETE FROM password_reset_tokens WHERE user_id = $1`, u.ID)
 	// Sign out every other session so a compromised login cannot survive a
 	// password change; only the session that made the change stays valid.
 	if cookie, err := r.Cookie("junkie_session"); err == nil {
@@ -2319,6 +2320,18 @@ func (a *app) confirmCheckin(ctx context.Context, roomID, userID string) bool {
 			AND tr.ended_at IS NULL AND tr.phase = 'break'
 			AND tp.user_id = $2 AND tp.confirmed_session <= tr.current_session`, roomID, userID)
 	return err == nil && tag.RowsAffected() > 0
+}
+
+func (a *app) checkedInForNextSession(ctx context.Context, roomID, userID string) bool {
+	var ok bool
+	err := a.db.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM timer_participants tp
+			JOIN timer_runs tr ON tr.id = tp.timer_run_id
+			WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase = 'break'
+				AND tp.user_id = $2 AND tp.confirmed_session > tr.current_session
+		)`, roomID, userID).Scan(&ok)
+	return err == nil && ok
 }
 
 // roomWaiting reports whether userID is parked in rm's waiting list.

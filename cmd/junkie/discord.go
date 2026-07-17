@@ -389,8 +389,8 @@ func discordNameList(members []user) string {
 // discordMentions renders @mentions for the participants who have a linked
 // Discord account, so a check-in break can ping exactly the people who need
 // to tap Join. Participants who joined from the web without linking Discord
-// have no id to mention and are simply left out. Capped so a large room can't
-// build a runaway ping.
+// have no id to mention and are simply left out. More than twenty linked
+// participants get @here instead of a long mention list.
 func (a *app) discordMentions(ctx context.Context, participants []user) string {
 	if len(participants) == 0 {
 		return ""
@@ -399,21 +399,34 @@ func (a *app) discordMentions(ctx context.Context, participants []user) string {
 	for _, p := range participants {
 		ids = append(ids, p.ID)
 	}
-	rows, err := a.db.Query(ctx, `SELECT discord_user_id FROM discord_links WHERE user_id = ANY($1)`, ids)
+	rows, err := a.db.Query(ctx, `SELECT user_id, discord_user_id FROM discord_links WHERE user_id = ANY($1)`, ids)
 	if err != nil {
 		return ""
 	}
 	defer rows.Close()
-	const cap = 20
-	mentions := make([]string, 0, len(participants))
+	linked := map[string]string{}
 	for rows.Next() {
-		var discordUserID string
-		if rows.Scan(&discordUserID) == nil {
-			mentions = append(mentions, "<@"+discordUserID+">")
+		var userID, discordUserID string
+		if rows.Scan(&userID, &discordUserID) == nil {
+			linked[userID] = discordUserID
 		}
-		if len(mentions) >= cap {
-			break
+	}
+	discordIDs := make([]string, 0, len(participants))
+	for _, p := range participants {
+		if discordUserID, ok := linked[p.ID]; ok {
+			discordIDs = append(discordIDs, discordUserID)
 		}
+	}
+	if len(discordIDs) == 0 {
+		return ""
+	}
+	const cap = 20
+	if len(discordIDs) > cap {
+		return "@here"
+	}
+	mentions := make([]string, 0, len(discordIDs))
+	for _, discordUserID := range discordIDs {
+		mentions = append(mentions, "<@"+discordUserID+">")
 	}
 	return strings.Join(mentions, " ")
 }
@@ -602,7 +615,7 @@ func (b *discordBot) handleRegister(s *discordgo.Session, i *discordgo.Interacti
 		b.ephemeral(s, i, "Couldn't link this channel — try again.")
 		return
 	}
-	b.reply(s, i, fmt.Sprintf("Registered! This channel now runs room `%s`. Configure it with `/junkie config focus/break/sessions`, e.g. `/junkie config 30/5/3`.", code), nil)
+	b.reply(s, i, fmt.Sprintf("Registered! This channel now runs room `%s`. Configure it with `/junkie config` — e.g. `timer:30/5/3`, `checkin:On`, `auto-breaks:Off`.", code), nil)
 }
 
 // handleDeregister disconnects the guild from its room. The room itself and
@@ -731,15 +744,15 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 		b.replyNotRegistered(s, i)
 		return
 	}
+	if !a.isRoomMember(ctx, rm.ID, u.ID) {
+		b.ephemeral(s, i, "Join this room first (`/junkie join`) before changing its settings.")
+		return
+	}
 	// No options at all: show the current settings rather than erroring, so
 	// `/junkie config` is a safe way to check where things stand.
 	if len(opts) == 0 {
 		b.ephemeral(s, i, fmt.Sprintf("**%s** settings: %d min focus, %d min break, %d session(s) · check-in %s · auto-breaks %s.\nChange them with e.g. `/junkie config timer:30/5/3 checkin:On`.",
 			rm.Name, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, onOff(rm.RequireCheckin), onOff(rm.AutoRoll)))
-		return
-	}
-	if !a.isRoomMember(ctx, rm.ID, u.ID) {
-		b.ephemeral(s, i, "Join this room first (`/junkie join`) before changing its settings.")
 		return
 	}
 	if a.roomRunActive(ctx, rm.ID) {
@@ -878,7 +891,11 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 		b.ephemeral(s, i, "A focus session is in progress — you'll join automatically when the break starts. `/junkie leave` cancels.")
 	case joinedAlready:
 		if rm.RequireCheckin && timer != nil && timer.Phase == "break" {
-			b.ephemeral(s, i, "You're already checked in for the next session.")
+			if a.checkedInForNextSession(ctx, rm.ID, u.ID) {
+				b.ephemeral(s, i, "You're already checked in for the next session.")
+			} else {
+				b.ephemeral(s, i, "You're already in this run.")
+			}
 			return
 		}
 		b.ephemeral(s, i, "You're already in this run.")
@@ -1166,16 +1183,18 @@ func (b *discordBot) handleResetPassword(s *discordgo.Session, i *discordgo.Inte
 		b.ephemeral(s, i, "This Discord account isn't linked to a junkie account, so I can't verify who you are. If you can still sign in, run `/junkie link` first. Otherwise ask an admin in the #junkie-bot channel for a reset link, or open a GitHub issue on samnodier/junkie.")
 		return
 	}
-	// A hard daily cap, not just a burst window: each request DMs a working
-	// account-takeover link, so there's no reason to allow more than a couple.
-	if !a.limiter.allow("pwreset:"+u.ID, 2, 24*time.Hour) {
-		b.ephemeral(s, i, "You've hit the limit of 2 password resets per day — try again tomorrow, or ask the junkie admin.")
-		return
-	}
 	link, tokenHash, err := a.createPasswordResetToken(ctx, u.ID, false)
 	if err != nil {
 		log.Printf("discord: create reset token: %v", err)
 		b.ephemeral(s, i, "Couldn't create a reset link right now — try again.")
+		return
+	}
+	// A hard daily cap, not just a burst window: each request DMs a working
+	// account-takeover link, so there's no reason to allow more than a couple.
+	// Checked after minting so a failed insert doesn't consume the quota.
+	if !a.limiter.allow("pwreset:"+u.ID, 2, 24*time.Hour) {
+		_, _ = a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE token_hash = $1`, tokenHash)
+		b.ephemeral(s, i, "You've hit the limit of 2 password resets per day — try again tomorrow, or ask the junkie admin.")
 		return
 	}
 	dm, err := s.UserChannelCreate(discordUserID)

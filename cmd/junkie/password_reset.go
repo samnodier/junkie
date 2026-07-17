@@ -27,6 +27,9 @@ const passwordResetTTL = 30 * time.Minute
 func (a *app) createPasswordResetToken(ctx context.Context, userID string, adminIssued bool) (link, tokenHash string, err error) {
 	token := randomHex(32)
 	tokenHash = hashToken(token)
+	if _, err = a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, userID); err != nil {
+		return "", "", err
+	}
 	_, err = a.db.Exec(ctx, `
 		INSERT INTO password_reset_tokens (token_hash, user_id, admin_issued, expires_at)
 		VALUES ($1, $2, $3, $4)`,
@@ -54,8 +57,8 @@ func (a *app) apiPasswordResetContext(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiPasswordReset redeems a reset token: validates the new password first so
-// a typo doesn't burn the single-use token, then consumes it delete-first (a
-// racing second redeem loses) and signs out every session the account had.
+// a typo doesn't burn the single-use token, then consumes it in a transaction
+// (a racing second redeem loses) and signs out every session the account had.
 func (a *app) apiPasswordReset(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if !a.limiter.allow("pwreset-redeem:"+clientIP(r), 10, 15*time.Minute) {
@@ -83,25 +86,42 @@ func (a *app) apiPasswordReset(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "The passwords do not match.")
 		return
 	}
-	if err := a.db.QueryRow(ctx, `
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not update the password.")
+		return
+	}
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not update the password.")
+		return
+	}
+	defer tx.Rollback(ctx)
+	if err := tx.QueryRow(ctx, `
 		DELETE FROM password_reset_tokens
 		WHERE token_hash = $1 AND expires_at > now()
 		RETURNING user_id`, tokenHash).Scan(&userID); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "That reset link is invalid or has expired. Request a new one.")
 		return
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, string(hash), userID); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Could not update the password.")
 		return
 	}
-	if _, err := a.db.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2`, string(hash), userID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, userID); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Could not update the password.")
 		return
 	}
 	// Whoever forgot the password wasn't signed in — every existing session
 	// belongs to old devices (or whoever else knew the old password).
-	_, _ = a.db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)
+	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not update the password.")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not update the password.")
+		return
+	}
 	writeJSON(w, map[string]string{"next": "/login?notice=" + url.QueryEscape("Password updated. Sign in with your new password.")})
 }
 
