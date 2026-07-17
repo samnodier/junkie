@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
-	"time"
 )
 
 func testAppAs(u user) *app {
 	return &app{
-		templates: parseTemplates(),
 		currentUserOverride: func(*http.Request) (user, bool) {
 			if u.ID == "" {
 				return user{}, false
@@ -67,12 +64,12 @@ func TestRequireAdminForbidsUser(t *testing.T) {
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
 	}
-	if !strings.Contains(response.Body.String(), "403 · Forbidden") {
-		t.Error("styled forbidden page was not rendered")
+	if !strings.Contains(response.Body.String(), `<div id="app">`) {
+		t.Error("SPA shell was not served on the forbidden page")
 	}
 }
 
-func TestAdminCanAccessButCannotManageRoles(t *testing.T) {
+func TestAdminCanAccessAdminSpace(t *testing.T) {
 	a := testAppAs(user{ID: "admin-id", Username: "operator", Role: roleAdmin})
 	called := false
 	response := httptest.NewRecorder()
@@ -82,24 +79,6 @@ func TestAdminCanAccessButCannotManageRoles(t *testing.T) {
 	)
 	if !called {
 		t.Fatal("admin did not reach protected handler")
-	}
-
-	html := renderAdminForTest(t, pageData{
-		Title: "Admin",
-		User:  user{ID: "admin-id", Username: "operator", Role: roleAdmin},
-		Admin: adminPageData{
-			Overview: adminOverview{Users: 4, Rooms: 2, ActiveRoomTimers: 1, TotalFocusMinutes: 900},
-			Users: []adminUser{
-				{ID: "owner-id", Username: "founder", Role: roleOwner, JoinedAt: time.Now()},
-				{ID: "peer-id", Username: "peer-admin", Role: roleAdmin, JoinedAt: time.Now()},
-			},
-		},
-	})
-	if !strings.Contains(html, ">900</strong>") {
-		t.Error("aggregate overview was not rendered")
-	}
-	if strings.Contains(html, "/role") || strings.Contains(html, "Promote") || strings.Contains(html, "Demote") {
-		t.Error("admin was shown owner-only role controls")
 	}
 }
 
@@ -122,25 +101,6 @@ func TestOwnerRoleTransitionsAndSoleOwnerProtection(t *testing.T) {
 	}
 }
 
-func TestAdminHTMLDoesNotLeakCredentials(t *testing.T) {
-	html := renderAdminForTest(t, pageData{
-		Title: "Admin",
-		User:  user{ID: "owner-id", Username: "founder", Role: roleOwner},
-		Admin: adminPageData{
-			IsOwner: true,
-			Users:   []adminUser{{ID: "user-id", Username: "member", Role: roleUser, JoinedAt: time.Now()}},
-		},
-	})
-	for _, forbidden := range []string{"password_hash", "junkie_session", "session token", "$2a$"} {
-		if strings.Contains(strings.ToLower(html), strings.ToLower(forbidden)) {
-			t.Errorf("admin HTML contains sensitive marker %q", forbidden)
-		}
-	}
-	if !strings.Contains(html, `/admin/users/user-id/role`) {
-		t.Error("owner promotion control was not rendered")
-	}
-}
-
 func TestAdminMutationRequiresSameOrigin(t *testing.T) {
 	a := testAppAs(user{ID: "owner-id", Role: roleOwner})
 	request := httptest.NewRequest(http.MethodPost, "https://junkie.test/admin/users/id/role", nil)
@@ -152,13 +112,4 @@ func TestAdminMutationRequiresSameOrigin(t *testing.T) {
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
 	}
-}
-
-func renderAdminForTest(t *testing.T, data pageData) string {
-	t.Helper()
-	var output bytes.Buffer
-	if err := parseTemplates().ExecuteTemplate(&output, "admin", data); err != nil {
-		t.Fatalf("render admin: %v", err)
-	}
-	return output.String()
 }

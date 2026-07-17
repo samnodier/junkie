@@ -122,11 +122,18 @@ func (a *app) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if !canAccessAdmin(u.Role) {
-			a.renderStatus(w, http.StatusForbidden, "forbidden", pageData{
-				Title:            "Access denied",
-				User:             u,
-				ForbiddenMessage: "This space is limited to platform administrators.",
-			})
+			if r.Method == http.MethodGet {
+				// Serve the SPA shell with the real status: the admin view
+				// re-asks /api/admin, gets the same verdict as 403 JSON, and
+				// renders its forbidden card.
+				if data, err := staticAssets.ReadFile("static/app/index.html"); err == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write(data)
+					return
+				}
+			}
+			http.Error(w, "This space is limited to platform administrators.", http.StatusForbidden)
 			return
 		}
 		next(w, r)
@@ -151,22 +158,6 @@ func sameOrigin(r *http.Request) bool {
 	parsed, err := url.Parse(origin)
 	return err == nil && strings.EqualFold(parsed.Host, r.Host) &&
 		(parsed.Scheme == "http" || parsed.Scheme == "https")
-}
-
-func (a *app) adminPage(w http.ResponseWriter, r *http.Request) {
-	actor, _ := a.currentUser(r)
-	data, err := a.loadAdminPage(r.Context(), actor.Role == roleOwner)
-	if err != nil {
-		log.Printf("load admin page: %v", err)
-		http.Error(w, "could not load admin space", http.StatusInternalServerError)
-		return
-	}
-	a.render(w, "admin", pageData{
-		Title: "Admin",
-		User:  actor,
-		Admin: data,
-		Error: r.URL.Query().Get("error"),
-	})
 }
 
 func (a *app) loadAdminPage(ctx context.Context, includeFocusSummaries bool) (adminPageData, error) {

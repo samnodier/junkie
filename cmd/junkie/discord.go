@@ -1226,24 +1226,6 @@ func (b *discordBot) handleResetPassword(s *discordgo.Session, i *discordgo.Inte
 	b.ephemeral(s, i, "Check your DMs — I've sent you a password reset link. It's valid for 30 minutes and works once.")
 }
 
-// discordLinkPage serves GET /discord/link/{token}: it only *shows* what the
-// token would do (peek, never consume), so a bare link — or a drive-by
-// <img> fetch planted by whoever minted the token — can't bind the visitor's
-// junkie account to someone else's Discord. The POST below performs it.
-func (a *app) discordLinkPage(w http.ResponseWriter, r *http.Request) {
-	u, _ := a.currentUser(r)
-	token := r.PathValue("token")
-	var discordUsername string
-	err := a.db.QueryRow(r.Context(), `
-		SELECT discord_username FROM discord_link_tokens
-		WHERE token_hash = $1 AND expires_at > now()`, hashToken(token)).Scan(&discordUsername)
-	if err != nil {
-		http.Redirect(w, r, "/profile?error="+url.QueryEscape("That Discord link is invalid or has expired — run /junkie link again."), http.StatusSeeOther)
-		return
-	}
-	a.render(w, "discord-link", pageData{Title: "Link Discord", User: u, DiscordUsername: discordUsername, ConnectToken: token})
-}
-
 // discordLinkConfirm serves POST /discord/link/{token}: the signed-in visitor
 // redeems the single-use token minted by /junkie link, tying their junkie
 // account to the Discord user the token was issued for. Mirrors

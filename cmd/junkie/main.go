@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -34,7 +33,6 @@ import (
 
 type app struct {
 	db                  *pgxpool.Pool
-	templates           *template.Template
 	hub                 *hub
 	limiter             *rateLimiter
 	currentUserOverride func(*http.Request) (user, bool)
@@ -96,17 +94,6 @@ type roomTodosSplit struct {
 	Others []todo
 }
 
-type todoGroupsView struct {
-	RoomCode string
-	UserName string
-	Mine     []todo
-	Others   []todo
-}
-
-func (s roomTodosSplit) View(roomCode, userName string) todoGroupsView {
-	return todoGroupsView{RoomCode: roomCode, UserName: userName, Mine: s.Mine, Others: s.Others}
-}
-
 func groupRoomTodos(todos []todo, userID string) roomTodosSplit {
 	var split roomTodosSplit
 	for _, t := range todos {
@@ -119,12 +106,6 @@ func groupRoomTodos(todos []todo, userID string) roomTodosSplit {
 		}
 	}
 	return split
-}
-
-type roomTodosGroup struct {
-	Room    room
-	Grouped roomTodosSplit
-	Timer   *timerRun
 }
 
 type timerRun struct {
@@ -156,80 +137,14 @@ func (t *timerRun) BreakPending() bool {
 	return t != nil && t.Phase == "break" && t.PausedAt != nil && t.PausedAt.Equal(t.PhaseStartedAt)
 }
 
-type timerStatus struct {
-	RunID                  string `json:"runId"`
-	Phase                  string `json:"phase"`
-	EndsAt                 string `json:"endsAt"`
-	LobbyDeadline          string `json:"lobbyDeadline,omitempty"`
-	Paused                 bool   `json:"paused"`
-	PausedAt               string `json:"pausedAt,omitempty"`
-	PausedRemainingSeconds int    `json:"pausedRemainingSeconds,omitempty"`
-	CurrentSession         int    `json:"currentSession"`
-	TotalSessions          int    `json:"totalSessions"`
-	Participant            bool   `json:"participant"`
-	ParticipantCount       int    `json:"participantCount"`
-}
-
 // publicProfileView is what a connection is allowed to see of a user: the
-// identity basics and the focus heatmap. Field names mirror pageData's
-// activity fields so the shared "heatmap" template renders either.
+// identity basics and the focus heatmap.
 type publicProfileView struct {
 	ProfileUser          user
 	Activity             []activityDay
 	ActivityMonths       []activityMonth
 	ActivityWeeks        int
 	ActivityTotalMinutes int
-}
-
-// roomMemberView pairs a room member with whether the viewer may open their
-// public profile: only for themselves or an existing connection, matching
-// the privacy rule in publicProfilePage.
-type roomMemberView struct {
-	Member    user
-	Self      bool
-	Connected bool
-}
-
-type pageData struct {
-	Title                string
-	User                 user
-	Error                string
-	Notice               string
-	PublicProfile        *publicProfileView
-	Connections          []publicProfileView
-	Rooms                []room
-	Room                 room
-	PersonalTodos        []todo
-	RoomTodosGrouped     roomTodosSplit
-	DeskRoomTodos        []roomTodosGroup
-	Timer                *timerRun
-	SoloTimer            *timerRun
-	Activity             []activityDay
-	ActivityMonths       []activityMonth
-	ActivityWeeks        int
-	ActivityTotalMinutes int
-	FocusMode            bool
-	GuestMode            bool
-	Next                 string
-	AuthSignup           bool
-	AuthBanner           string
-	MemberCount          int
-	RoomMembers          []roomMemberView
-	Admin                adminPageData
-	ForbiddenMessage     string
-	// TimerWaiting: the viewer is parked in the room's waiting list, to be
-	// absorbed into the next joinable window (run start or break).
-	TimerWaiting bool
-	// DiscordUsername is the Discord account linked to the viewer, if any
-	// ("" when unlinked); shown on the profile page.
-	DiscordUsername string
-	DiscordLinked   bool
-	// ConnectUser and ConnectToken drive the connect / Discord-link confirm
-	// pages: linking is a state change, so the GET only shows what the token
-	// would do and a same-origin POST performs it — a bare link (or a
-	// drive-by <img> fetch) can never bind accounts on its own.
-	ConnectUser  user
-	ConnectToken string
 }
 
 type activityDay struct {
@@ -267,10 +182,9 @@ func main() {
 	defer db.Close()
 
 	a := &app{
-		db:        db,
-		templates: parseTemplates(),
-		hub:       &hub{rooms: map[string]map[*websocket.Conn]struct{}{}},
-		limiter:   newRateLimiter(),
+		db:      db,
+		hub:     &hub{rooms: map[string]map[*websocket.Conn]struct{}{}},
+		limiter: newRateLimiter(),
 	}
 	if err := a.migrate(ctx); err != nil {
 		log.Fatal(err)
@@ -291,10 +205,6 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /assets/app.css", a.css)
-	mux.HandleFunc("GET /assets/guest.js", a.serveStaticAsset("guest.js", "application/javascript; charset=utf-8"))
-	mux.HandleFunc("GET /assets/htmx.min.js", a.serveStaticAsset("htmx.min.js", "application/javascript; charset=utf-8"))
-	mux.HandleFunc("GET /assets/notifications.js", a.serveStaticAsset("notifications.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/icon.svg", a.serveStaticAsset("icon.svg", "image/svg+xml"))
 	mux.HandleFunc("GET /assets/icon-192.png", a.serveStaticAsset("icon-192.png", "image/png"))
 	mux.HandleFunc("GET /assets/icon-512.png", a.serveStaticAsset("icon-512.png", "image/png"))
@@ -311,11 +221,9 @@ func main() {
 	mux.HandleFunc("POST /api/signup", a.apiSignup)
 	mux.HandleFunc("GET /__vue", a.spaPage)
 	mux.HandleFunc("GET /healthz", a.healthz)
-	mux.HandleFunc("GET /", a.home)
+	mux.HandleFunc("GET /", a.spaPage)
 	mux.HandleFunc("GET /signup", a.signupForm)
-	mux.HandleFunc("POST /signup", a.signup)
-	mux.HandleFunc("GET /login", a.spaPage) // ported to Vue; legacy: a.loginForm
-	mux.HandleFunc("POST /login", a.login)
+	mux.HandleFunc("GET /login", a.spaPage)
 	mux.HandleFunc("GET /reset-password/{token}", a.spaPage)
 	mux.HandleFunc("GET /api/password-reset-context/{token}", a.apiPasswordResetContext)
 	mux.HandleFunc("POST /api/password-reset/{token}", a.apiPasswordReset)
@@ -328,7 +236,7 @@ func main() {
 		}
 		http.Redirect(w, r, dest, http.StatusMovedPermanently)
 	})
-	mux.HandleFunc("GET /profile", a.spaPage) // ported to Vue; legacy: a.profilePage
+	mux.HandleFunc("GET /profile", a.spaPage)
 	mux.HandleFunc("GET /api/profile", a.requireAuth(a.apiProfile))
 	mux.HandleFunc("POST /profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /profile/delete", a.requireAuth(a.deleteAccount))
@@ -337,16 +245,16 @@ func main() {
 	mux.HandleFunc("POST /profile/avatar/remove", a.requireAuth(a.removeAvatar))
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
-	mux.HandleFunc("GET /connections", a.spaPage) // ported to Vue; legacy: a.connectionsPage
+	mux.HandleFunc("GET /connections", a.spaPage)
 	mux.HandleFunc("GET /api/connections", a.requireAuth(a.apiConnections))
 	mux.HandleFunc("GET /api/desk", a.requireAuth(a.apiDesk))
 	mux.HandleFunc("GET /api/rooms", a.requireAuth(a.apiRooms))
 	mux.HandleFunc("GET /api/room/{code}", a.requireAuth(a.apiRoom))
 	mux.HandleFunc("GET /api/room/{code}/members", a.requireAuth(a.apiRoomMembers))
 	mux.HandleFunc("GET /api/public-profile/{username}", a.requireAuth(a.apiPublicProfile))
-	mux.HandleFunc("GET /privacy", a.spaPage) // ported to Vue
-	mux.HandleFunc("GET /terms", a.spaPage)   // ported to Vue
-	// Ported to Vue: the page is public shell (the Vue guard bounces guests to
+	mux.HandleFunc("GET /privacy", a.spaPage)
+	mux.HandleFunc("GET /terms", a.spaPage)
+	// The page is public shell (the Vue guard bounces guests to
 	// /login?next= exactly like requireAuth did); the data API keeps the auth.
 	mux.HandleFunc("GET /discord/link/{token}", a.spaPage)
 	mux.HandleFunc("GET /api/discord-link-context/{token}", a.requireAuth(a.apiDiscordLinkContext))
@@ -365,11 +273,9 @@ func main() {
 	mux.HandleFunc("POST /rooms", a.requireAuth(a.createRoom))
 	mux.HandleFunc("POST /rooms/join", a.requireAuth(a.joinRoom))
 	mux.HandleFunc("POST /rooms/join-intent", a.joinRoomIntent)
-	mux.HandleFunc("GET /join/confirm", a.spaPage) // ported to Vue; legacy: a.joinRoomConfirm
+	mux.HandleFunc("GET /join/confirm", a.spaPage)
 	mux.HandleFunc("GET /api/join-context", a.requireAuth(a.apiJoinContext))
 	mux.HandleFunc("POST /join/confirm", a.requireAuth(a.joinRoomConfirmPost))
-	mux.HandleFunc("GET /r/{code}/timer-status", a.requireAuth(a.roomTimerStatus))
-	mux.HandleFunc("GET /r/{code}/todos-fragment", a.requireAuth(a.roomTodosFragment))
 	mux.HandleFunc("GET /r/{code}/members", a.requireAuth(a.roomMembersPage))
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
@@ -377,11 +283,7 @@ func main() {
 	mux.HandleFunc("POST /f/{code}/join", a.requireAuth(a.enterFocusRoom))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
 	mux.HandleFunc("GET /ws/me", a.requireAuth(a.userWS))
-	mux.HandleFunc("GET /todos-fragment", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-		u, _ := a.currentUser(r)
-		a.renderPersonalTodosFragment(w, r, u.ID)
-	}))
-	mux.HandleFunc("GET /admin", a.requireAdmin(a.spaPage)) // ported to Vue; legacy: a.adminPage
+	mux.HandleFunc("GET /admin", a.requireAdmin(a.spaPage))
 	mux.HandleFunc("GET /api/admin", a.requireAuth(a.apiAdmin))
 	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
 	mux.HandleFunc("POST /admin/users/{id}/reset-link", a.requireAdminMutation(a.adminCreateResetLink))
@@ -500,10 +402,6 @@ func (a *app) migrate(ctx context.Context) error {
 	return nil
 }
 
-func (a *app) home(w http.ResponseWriter, r *http.Request) {
-	a.dashboard(w, r)
-}
-
 func (a *app) signupForm(w http.ResponseWriter, r *http.Request) {
 	dest := "/login?mode=signup"
 	if next := r.URL.Query().Get("next"); next != "" {
@@ -512,109 +410,12 @@ func (a *app) signupForm(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
-func (a *app) signup(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
-	password := r.FormValue("password")
-	next := safeNext(r.FormValue("next"))
-	if username == "" || password == "" {
-		a.render(w, "login", a.authPageData(r, true, next, "Username and password are required."))
-		return
-	}
-	if !validUsername(username) {
-		a.render(w, "login", a.authPageData(r, true, next, "Usernames are 2–32 characters: lowercase letters, numbers, dots, dashes, underscores."))
-		return
-	}
-	if len([]rune(password)) < minPasswordLength {
-		a.render(w, "login", a.authPageData(r, true, next, fmt.Sprintf("Passwords must be at least %d characters.", minPasswordLength)))
-		return
-	}
-	if len(password) > maxPasswordBytes {
-		a.render(w, "login", a.authPageData(r, true, next, "That password is too long."))
-		return
-	}
-	if strings.EqualFold(password, username) {
-		a.render(w, "login", a.authPageData(r, true, next, "Your password can't be your username."))
-		return
-	}
-	if !a.limiter.allow("signup:"+clientIP(r), 10, time.Hour) {
-		a.renderStatus(w, http.StatusTooManyRequests, "login", a.authPageData(r, true, next, "Too many new accounts from this address. Try again later."))
-		return
-	}
-	displayName := displayNameFromUsername(username)
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		http.Error(w, "could not hash password", http.StatusInternalServerError)
-		return
-	}
-	var id string
-	err = a.db.QueryRow(ctx, `INSERT INTO users (username, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id`, username, displayName, string(hash)).Scan(&id)
-	if err != nil {
-		a.render(w, "login", a.authPageData(r, true, next, "That username is already taken."))
-		return
-	}
-	a.createSession(w, r, id)
-	http.Redirect(w, r, next, http.StatusSeeOther)
-}
-
-func (a *app) loginForm(w http.ResponseWriter, r *http.Request) {
-	signup := r.URL.Query().Get("mode") == "signup"
-	data := a.authPageData(r, signup, safeNext(r.URL.Query().Get("next")), "")
-	data.Notice = r.URL.Query().Get("notice")
-	a.render(w, "login", data)
-}
-
-func (a *app) login(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
-	password := r.FormValue("password")
-	next := safeNext(r.FormValue("next"))
-	if !a.limiter.allow("login:"+clientIP(r), 20, 5*time.Minute) ||
-		(username != "" && !a.limiter.allow("login-user:"+username, 10, 15*time.Minute)) {
-		a.renderStatus(w, http.StatusTooManyRequests, "login", a.authPageData(r, false, next, "Too many sign-in attempts. Try again in a few minutes."))
-		return
-	}
-	var id, hash string
-	err := a.db.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
-		a.render(w, "login", a.authPageData(r, false, next, "Username or password is incorrect."))
-		return
-	}
-	a.createSession(w, r, id)
-	http.Redirect(w, r, next, http.StatusSeeOther)
-}
-
 func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("junkie_session"); err == nil {
 		_, _ = a.db.Exec(r.Context(), `DELETE FROM sessions WHERE token = $1`, hashToken(cookie.Value))
 	}
 	http.SetCookie(w, &http.Cookie{Name: "junkie_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func (a *app) profilePage(w http.ResponseWriter, r *http.Request) {
-	u, ok := a.currentUser(r)
-	if !ok {
-		a.render(w, "profile", pageData{Title: "Profile", GuestMode: true})
-		return
-	}
-	rooms, _ := a.roomsForUser(r.Context(), u.ID)
-	heatmap, _ := a.activity(r.Context(), u.ID)
-	discordUsername, discordLinked := a.discordLinkForUser(r.Context(), u.ID)
-	a.render(w, "profile", pageData{
-		Title:                "Profile",
-		User:                 u,
-		Rooms:                rooms,
-		Activity:             heatmap.Cells,
-		ActivityMonths:       heatmap.Months,
-		ActivityWeeks:        heatmap.Weeks,
-		ActivityTotalMinutes: heatmap.TotalMinutes,
-		Connections:          a.connectionViews(r.Context(), u.ID),
-		DiscordUsername:      discordUsername,
-		DiscordLinked:        discordLinked,
-		Error:                r.URL.Query().Get("error"),
-		Notice:               r.URL.Query().Get("notice"),
-	})
 }
 
 func (a *app) changePassword(w http.ResponseWriter, r *http.Request) {
@@ -951,10 +752,10 @@ func (a *app) publicProfilePage(w http.ResponseWriter, r *http.Request) {
 	if token != "" && !a.areConnected(r.Context(), u.ID, target.ID) {
 		if a.peekConnectToken(r.Context(), target.ID, token) {
 			// Confirm step: connecting is a state change, so the GET only
-			// offers it and the POST below (connectConfirmPost) performs it.
+			// offers it and the POST (connectConfirmPost) performs it.
 			// A drive-by fetch of this URL can no longer force a connection.
-			// Ported to Vue: the SPA fetches /api/public-profile, which
-			// re-runs this decision tree and answers with the confirm card.
+			// The SPA fetches /api/public-profile, which re-runs this
+			// decision tree and answers with the confirm card.
 			a.spaPage(w, r)
 			return
 		}
@@ -965,22 +766,10 @@ func (a *app) publicProfilePage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// Ported to Vue; the gates above keep their exact HTTP semantics (404 for
+	// The gates above keep their exact HTTP semantics (404 for
 	// non-connections, redirects for guests/self) so the privacy rule is
 	// still enforced at page level, not just in the data API.
 	a.spaPage(w, r)
-}
-
-// connectionsPage is the feed of the caller's connections, one heatmap
-// card per person, newest connection first.
-func (a *app) connectionsPage(w http.ResponseWriter, r *http.Request) {
-	u, _ := a.currentUser(r)
-	a.render(w, "connections", pageData{
-		Title:       "Connections",
-		User:        u,
-		Connections: a.connectionViews(r.Context(), u.ID),
-		Notice:      r.URL.Query().Get("notice"),
-	})
 }
 
 // connectionViews loads the caller's connections with each one's heatmap,
@@ -1032,45 +821,6 @@ func (a *app) serveAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serveStatic(w, r, http.DetectContentType(data), data)
-}
-
-func (a *app) dashboard(w http.ResponseWriter, r *http.Request) {
-	// Ported to Vue for guests and signed-in users; the SPA desk pulls its
-	// data from /api/desk. The legacy template path below stays as fallback
-	// until final cleanup.
-	a.spaPage(w, r)
-}
-
-func (a *app) dashboardLegacy(w http.ResponseWriter, r *http.Request) {
-	u, ok := a.currentUser(r)
-	if !ok {
-		a.render(w, "dashboard", pageData{Title: "Dashboard", GuestMode: true})
-		return
-	}
-	soloTimer, _ := a.normalizeSoloTimer(r.Context(), u.ID)
-	todos, _ := a.personalTodos(r.Context(), u.ID)
-	rooms, _ := a.roomsForUser(r.Context(), u.ID)
-	deskRoomTodos := make([]roomTodosGroup, 0, len(rooms))
-	for _, rm := range rooms {
-		roomTodoList, _ := a.roomTodos(r.Context(), rm.ID)
-		for i := range roomTodoList {
-			roomTodoList[i].RoomCode = rm.Code
-		}
-		roomTimer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
-		if transitioned {
-			a.broadcastTimerPhase(rm, roomTimer)
-		}
-		deskRoomTodos = append(deskRoomTodos, roomTodosGroup{Room: rm, Grouped: groupRoomTodos(roomTodoList, u.ID), Timer: roomTimer})
-	}
-	a.render(w, "dashboard", pageData{
-		Title:         "Dashboard",
-		User:          u,
-		PersonalTodos: todos,
-		Rooms:         rooms,
-		DeskRoomTodos: deskRoomTodos,
-		SoloTimer:     soloTimer,
-		Error:         r.URL.Query().Get("error"),
-	})
 }
 
 // userChannel names a per-user hub channel for cross-device sync of
@@ -1143,57 +893,7 @@ func (a *app) createPersonalTodo(w http.ResponseWriter, r *http.Request) {
 		_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, text) VALUES ($1, $2)`, u.ID, text)
 	}
 	a.hub.broadcast(userChannel(u.ID), "todos")
-	if isHTMXRequest(r) {
-		a.renderPersonalTodosFragment(w, r, u.ID)
-		return
-	}
 	http.Redirect(w, r, "/dashboard?todos=private", http.StatusSeeOther)
-}
-
-// isHTMXRequest reports whether the request was made by htmx (hx-post/hx-get
-// etc.), which expects an HTML fragment back instead of a full-page redirect.
-func isHTMXRequest(r *http.Request) bool {
-	return r.Header.Get("HX-Request") == "true"
-}
-
-// renderFragment writes a single named template directly, bypassing the
-// "shell" page wrapper -- used for htmx partial swaps.
-func (a *app) renderFragment(w http.ResponseWriter, name string, data any) {
-	var buf bytes.Buffer
-	if err := a.templates.ExecuteTemplate(&buf, name, data); err != nil {
-		log.Printf("render fragment %s: %v", name, err)
-		http.Error(w, "something went wrong", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = buf.WriteTo(w)
-}
-
-type personalTodosView struct {
-	Todos    []todo
-	HasRooms bool
-}
-
-func (a *app) renderPersonalTodosFragment(w http.ResponseWriter, r *http.Request, userID string) {
-	todos, _ := a.personalTodos(r.Context(), userID)
-	// The focus-desk peek panel renders personal todos with a different row
-	// template than the dashboard list; the form says which one it needs.
-	if r.FormValue("view") == "focus" {
-		a.renderFragment(w, "focus-todos-list", todos)
-		return
-	}
-	rooms, _ := a.roomsForUser(r.Context(), userID)
-	a.renderFragment(w, "personal-todos-list", personalTodosView{Todos: todos, HasRooms: len(rooms) > 0})
-}
-
-func (a *app) renderRoomTodosFragment(w http.ResponseWriter, r *http.Request, roomID, roomCode string, u user, desk bool) {
-	todos, _ := a.roomTodos(r.Context(), roomID)
-	view := groupRoomTodos(todos, u.ID).View(roomCode, u.DisplayName)
-	name := "todo-groups-room"
-	if desk {
-		name = "todo-groups-desk-room"
-	}
-	a.renderFragment(w, name, view)
 }
 
 func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
@@ -1214,14 +914,6 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		var todoText string
 		err := a.db.QueryRow(r.Context(), `UPDATE todos SET done = NOT done, updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING done, text`, id, u.ID).Scan(&nowDone, &todoText)
 		if err != nil {
-			if isHTMXRequest(r) {
-				if roomCode != "" {
-					a.renderRoomTodosFragment(w, r, roomID, roomCode, u, r.FormValue("desk") == "1")
-				} else {
-					a.renderPersonalTodosFragment(w, r, u.ID)
-				}
-				return
-			}
 			a.todoActionDenied(w, r, roomCode, "You can only complete your own todos.")
 			return
 		}
@@ -1239,14 +931,6 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		// the text they had when they changed state.
 		tag, err := a.db.Exec(r.Context(), `UPDATE todos SET text = $2, updated_at = now() WHERE id = $1 AND user_id = $3 AND NOT done AND NOT removed`, id, text, u.ID)
 		if err != nil || tag.RowsAffected() == 0 {
-			if isHTMXRequest(r) {
-				if roomCode != "" {
-					a.renderRoomTodosFragment(w, r, roomID, roomCode, u, r.FormValue("desk") == "1")
-				} else {
-					a.renderPersonalTodosFragment(w, r, u.ID)
-				}
-				return
-			}
 			a.todoActionDenied(w, r, roomCode, "You can only edit your own todos.")
 			return
 		}
@@ -1272,10 +956,6 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 				"type": "todo-done", "actorId": u.ID, "actor": u.DisplayName, "text": completedText,
 			})
 		}
-		if isHTMXRequest(r) {
-			a.renderRoomTodosFragment(w, r, roomID, roomCode, u, desk)
-			return
-		}
 		if desk {
 			code := strings.TrimSpace(r.FormValue("room"))
 			if code == "" {
@@ -1288,10 +968,6 @@ func (a *app) todoAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.hub.broadcast(userChannel(u.ID), "todos")
-	if isHTMXRequest(r) {
-		a.renderPersonalTodosFragment(w, r, u.ID)
-		return
-	}
 	http.Redirect(w, r, "/dashboard?todos=private", http.StatusSeeOther)
 }
 
@@ -1460,25 +1136,6 @@ func (a *app) joinRoomIntent(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login?next="+url.QueryEscape("/join/confirm?code="+rm.Code), http.StatusSeeOther)
 }
 
-func (a *app) joinRoomConfirm(w http.ResponseWriter, r *http.Request) {
-	u, _ := a.currentUser(r)
-	code := normalizeRoomCode(r.URL.Query().Get("code"))
-	if code == "" {
-		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape("Enter a room code to join."), http.StatusSeeOther)
-		return
-	}
-	rm, ok := a.findRoom(r.Context(), code)
-	if !ok {
-		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
-		return
-	}
-	if a.isRoomMember(r.Context(), rm.ID, u.ID) {
-		http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
-		return
-	}
-	a.render(w, "room-invite", pageData{Title: "Join room", User: u, Room: rm})
-}
-
 func (a *app) joinRoomConfirmPost(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	if r.FormValue("action") == "cancel" {
@@ -1511,9 +1168,9 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// Ported to Vue: the SPA fetches /api/room/{code}, which re-runs the
-	// member gate and answers with either the invite card or the room state.
-	// The 404 gates above keep their exact HTTP semantics.
+	// The SPA fetches /api/room/{code}, which re-runs the member gate and
+	// answers with either the invite card or the room state. The 404 gates
+	// above keep their exact HTTP semantics.
 	_ = u
 	_ = rm
 	a.spaPage(w, r)
@@ -1602,74 +1259,6 @@ func (a *app) sweepAbandonedEphemeralRooms(ctx context.Context) {
 	}
 }
 
-// roomTodosFragment serves the current todo-groups markup for a room so
-// clients can patch their DOM after a WebSocket "todos" broadcast instead
-// of reloading the page. hub.broadcast includes the sender's own
-// connection, so this also covers the acting user's own tab.
-func (a *app) roomTodosFragment(w http.ResponseWriter, r *http.Request) {
-	u, _ := a.currentUser(r)
-	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
-		http.Error(w, "room membership required", http.StatusForbidden)
-		return
-	}
-	a.renderRoomTodosFragment(w, r, rm.ID, rm.Code, u, r.URL.Query().Get("desk") == "1")
-}
-
-func (a *app) roomTimerStatus(w http.ResponseWriter, r *http.Request) {
-	u, _ := a.currentUser(r)
-	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
-		http.Error(w, "room membership required", http.StatusForbidden)
-		return
-	}
-
-	timer, transitioned, err := a.normalizeTimer(r.Context(), rm.ID, u.ID)
-	if err != nil {
-		http.Error(w, "could not read timer status", http.StatusInternalServerError)
-		return
-	}
-	if transitioned {
-		a.broadcastTimerPhase(rm, timer)
-	}
-
-	status := timerStatus{Phase: "idle"}
-	if timer != nil {
-		status = timerStatus{
-			RunID:            timer.ID,
-			Phase:            timer.Phase,
-			EndsAt:           timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
-			CurrentSession:   timer.CurrentSession,
-			TotalSessions:    timer.TotalSessions,
-			Participant:      timer.Participant,
-			ParticipantCount: len(timer.Participants),
-		}
-		if timer.Phase == "lobby" {
-			status.LobbyDeadline = status.EndsAt
-		}
-		if timer.PausedAt != nil {
-			status.Paused = true
-			status.PausedAt = timer.PausedAt.UTC().Format(time.RFC3339Nano)
-			if timer.PausedRemainingSeconds != nil {
-				status.PausedRemainingSeconds = *timer.PausedRemainingSeconds
-			}
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(status); err != nil {
-		log.Printf("encode room timer status %s: %v", rm.Code, err)
-	}
-}
-
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/r/"), "/")
@@ -1725,10 +1314,6 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			_, _ = a.db.Exec(r.Context(), `INSERT INTO todos (user_id, room_id, text) VALUES ($1, $2, $3)`, u.ID, rm.ID, text)
 		}
 		a.hub.broadcast(code, action)
-		if isHTMXRequest(r) {
-			a.renderRoomTodosFragment(w, r, rm.ID, rm.Code, u, r.FormValue("desk") == "1")
-			return
-		}
 		if next := strings.TrimSpace(r.FormValue("next")); next != "" {
 			http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
 			return
@@ -2675,18 +2260,6 @@ func (a *app) timerParticipants(ctx context.Context, runID string) ([]user, erro
 	return members, rows.Err()
 }
 
-func (a *app) authPageData(r *http.Request, signup bool, next, errMsg string) pageData {
-	title := "Sign in"
-	if signup {
-		title = "Sign up"
-	}
-	data := pageData{Title: title, Next: next, Error: errMsg, AuthSignup: signup, AuthBanner: a.authBanner(r, next, signup)}
-	if u, ok := a.currentUser(r); ok {
-		data.User = u
-	}
-	return data
-}
-
 func (a *app) authBanner(r *http.Request, next string, signup bool) string {
 	if next == "" || next == "/" {
 		return ""
@@ -2972,29 +2545,6 @@ func buildYearHeatmap(days []activityDay, dates []time.Time) heatmapData {
 		Weeks:        numWeeks,
 		TotalMinutes: totalMinutes,
 	}
-}
-
-func (a *app) render(w http.ResponseWriter, name string, data pageData) {
-	a.renderStatus(w, http.StatusOK, name, data)
-}
-
-// renderStatus buffers template execution so a failure can be logged and
-// reported as a clean 500 instead of leaking template internals to the
-// client mid-response.
-func (a *app) renderStatus(w http.ResponseWriter, status int, name string, data pageData) {
-	var buf bytes.Buffer
-	if err := a.templates.ExecuteTemplate(&buf, name, data); err != nil {
-		log.Printf("render %s: %v", name, err)
-		http.Error(w, "something went wrong", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = buf.WriteTo(w)
-}
-
-func (a *app) css(w http.ResponseWriter, r *http.Request) {
-	serveStatic(w, r, "text/css; charset=utf-8", []byte(appCSS))
 }
 
 // serveStatic writes an in-memory asset with a content-derived ETag and a
