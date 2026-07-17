@@ -108,6 +108,20 @@ func (l *rateLimiter) allow(key string, limit int, window time.Duration) bool {
 	return b.count <= limit
 }
 
+// refund gives back one attempt previously recorded by allow, for callers
+// whose gated action failed after the check (e.g. a reset link that could
+// not be DM'd) — the user shouldn't lose quota for a delivery they never got.
+func (l *rateLimiter) refund(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[key]
+	if !ok || b.count == 0 {
+		return
+	}
+	b.count--
+	l.buckets[key] = b
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()

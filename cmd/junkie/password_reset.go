@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -21,16 +22,23 @@ import (
 // generates it in the admin space and hands it over out of band.
 const passwordResetTTL = 30 * time.Minute
 
+// resetTokenExecer is the slice of pgx both *pgxpool.Pool and pgx.Tx satisfy,
+// so a reset token can be minted standalone (the Discord DM path) or inside a
+// transaction (the audited admin path).
+type resetTokenExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 // createPasswordResetToken mints a single-use reset link for the user. Only
 // the hash is stored, mirroring sessions and discord_link_tokens; it is also
 // returned so a caller whose delivery fails can burn the token again.
-func (a *app) createPasswordResetToken(ctx context.Context, userID string, adminIssued bool) (link, tokenHash string, err error) {
+func createPasswordResetToken(ctx context.Context, db resetTokenExecer, userID string, adminIssued bool) (link, tokenHash string, err error) {
 	token := randomHex(32)
 	tokenHash = hashToken(token)
-	if _, err = a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, userID); err != nil {
+	if _, err = db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, userID); err != nil {
 		return "", "", err
 	}
-	_, err = a.db.Exec(ctx, `
+	_, err = db.Exec(ctx, `
 		INSERT INTO password_reset_tokens (token_hash, user_id, admin_issued, expires_at)
 		VALUES ($1, $2, $3, $4)`,
 		tokenHash, userID, adminIssued, time.Now().Add(passwordResetTTL))
@@ -145,15 +153,31 @@ func (a *app) adminCreateResetLink(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "Could not load that user.")
 		return
 	}
-	link, _, err := a.createPasswordResetToken(r.Context(), targetID, true)
+	// Mint and audit in one transaction, matching adminChangeRole and
+	// adminDeleteRoom: a reset link is an account-takeover credential, so it
+	// must never exist without its audit row.
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not create a reset link.")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	link, _, err := createPasswordResetToken(r.Context(), tx, targetID, true)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Could not create a reset link.")
 		return
 	}
 	metadata, _ := json.Marshal(map[string]string{"username": targetUsername})
-	_, _ = a.db.Exec(r.Context(), `
+	if _, err := tx.Exec(r.Context(), `
 		INSERT INTO admin_audit_log (actor_user_id, action, target_type, target_id, metadata)
-		VALUES ($1, 'user.reset_link_issued', 'user', $2, $3::jsonb)`, actor.ID, targetID, metadata)
+		VALUES ($1, 'user.reset_link_issued', 'user', $2, $3::jsonb)`, actor.ID, targetID, metadata); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not audit the reset link.")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not create a reset link.")
+		return
+	}
 	writeJSON(w, map[string]any{
 		"url":            link,
 		"username":       targetUsername,

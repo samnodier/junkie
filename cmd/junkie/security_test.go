@@ -81,3 +81,33 @@ func TestRateLimiter(t *testing.T) {
 		t.Error("expired window should reset the counter")
 	}
 }
+
+func TestRateLimiterRefund(t *testing.T) {
+	l := newRateLimiter()
+	// Use the full quota, then refund one: exactly one more attempt fits.
+	for i := 0; i < 2; i++ {
+		if !l.allow("k", 2, time.Minute) {
+			t.Fatalf("attempt %d should be allowed", i+1)
+		}
+	}
+	if l.allow("k", 2, time.Minute) {
+		t.Fatal("attempt over limit should be denied")
+	}
+	// The denied attempt above also counted; refund it plus one delivery
+	// failure, mirroring the reset-DM path (allow, then the DM fails).
+	l.refund("k")
+	l.refund("k")
+	if !l.allow("k", 2, time.Minute) {
+		t.Error("refunded attempt should be allowed again")
+	}
+	if l.allow("k", 2, time.Minute) {
+		t.Error("refund must give back only what was refunded")
+	}
+	// Refunding unknown or empty buckets must not underflow or panic.
+	l.refund("missing")
+	l.buckets["z"] = rateBucket{count: 0, resetAt: time.Now().Add(time.Minute)}
+	l.refund("z")
+	if l.buckets["z"].count != 0 {
+		t.Error("refund on empty bucket must not underflow")
+	}
+}

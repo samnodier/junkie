@@ -344,11 +344,11 @@ func (a *app) discordRoom(ctx context.Context, guildID string) (room, string, bo
 	var rm room
 	var channelID string
 	err := a.db.QueryRow(ctx, `
-		SELECT rooms.id, rooms.code, rooms.name, rooms.creator_id, rooms.focus_minutes, rooms.break_minutes, rooms.auto_sessions, rooms.auto_roll, discord_guilds.channel_id
+		SELECT rooms.id, rooms.code, rooms.name, rooms.creator_id, rooms.focus_minutes, rooms.break_minutes, rooms.auto_sessions, rooms.auto_roll, rooms.ephemeral, rooms.require_checkin, discord_guilds.channel_id
 		FROM discord_guilds
 		JOIN rooms ON rooms.id = discord_guilds.room_id
 		WHERE discord_guilds.guild_id = $1`, guildID).Scan(
-		&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &channelID)
+		&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral, &rm.RequireCheckin, &channelID)
 	return rm, channelID, err == nil
 }
 
@@ -389,8 +389,10 @@ func discordNameList(members []user) string {
 // discordMentions renders @mentions for the participants who have a linked
 // Discord account, so a check-in break can ping exactly the people who need
 // to tap Join. Participants who joined from the web without linking Discord
-// have no id to mention and are simply left out. More than twenty linked
-// participants get @here instead of a long mention list.
+// have no id to mention and are simply left out. Capped at twenty mentions
+// plus a plain "+N more" — individual user mentions always ping, whereas
+// @here needs the Mention Everyone permission the bot deliberately doesn't
+// ask for (its invite grants Send Messages only), so it would render inert.
 func (a *app) discordMentions(ctx context.Context, participants []user) string {
 	if len(participants) == 0 {
 		return ""
@@ -421,14 +423,20 @@ func (a *app) discordMentions(ctx context.Context, participants []user) string {
 		return ""
 	}
 	const cap = 20
+	overflow := 0
 	if len(discordIDs) > cap {
-		return "@here"
+		overflow = len(discordIDs) - cap
+		discordIDs = discordIDs[:cap]
 	}
 	mentions := make([]string, 0, len(discordIDs))
 	for _, discordUserID := range discordIDs {
 		mentions = append(mentions, "<@"+discordUserID+">")
 	}
-	return strings.Join(mentions, " ")
+	out := strings.Join(mentions, " ")
+	if overflow > 0 {
+		out += fmt.Sprintf(" +%d more", overflow)
+	}
+	return out
 }
 
 // notifyDiscord keeps the room's live status message in the linked channel
@@ -1183,18 +1191,21 @@ func (b *discordBot) handleResetPassword(s *discordgo.Session, i *discordgo.Inte
 		b.ephemeral(s, i, "This Discord account isn't linked to a junkie account, so I can't verify who you are. If you can still sign in, run `/junkie link` first. Otherwise ask an admin in the #junkie-bot channel for a reset link, or open a GitHub issue on samnodier/junkie.")
 		return
 	}
-	link, tokenHash, err := a.createPasswordResetToken(ctx, u.ID, false)
-	if err != nil {
-		log.Printf("discord: create reset token: %v", err)
-		b.ephemeral(s, i, "Couldn't create a reset link right now — try again.")
-		return
-	}
 	// A hard daily cap, not just a burst window: each request DMs a working
 	// account-takeover link, so there's no reason to allow more than a couple.
-	// Checked after minting so a failed insert doesn't consume the quota.
+	// Only a *delivered* link consumes quota — any failure past this gate
+	// refunds the attempt, so a user whose DMs were off (or a DB hiccup)
+	// isn't locked out of self-service for the day by the retry the error
+	// message itself asks for.
 	if !a.limiter.allow("pwreset:"+u.ID, 2, 24*time.Hour) {
-		_, _ = a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE token_hash = $1`, tokenHash)
 		b.ephemeral(s, i, "You've hit the limit of 2 password resets per day — try again tomorrow, or ask the junkie admin.")
+		return
+	}
+	link, tokenHash, err := createPasswordResetToken(ctx, a.db, u.ID, false)
+	if err != nil {
+		a.limiter.refund("pwreset:" + u.ID)
+		log.Printf("discord: create reset token: %v", err)
+		b.ephemeral(s, i, "Couldn't create a reset link right now — try again.")
 		return
 	}
 	dm, err := s.UserChannelCreate(discordUserID)
@@ -1207,6 +1218,7 @@ func (b *discordBot) handleResetPassword(s *discordgo.Session, i *discordgo.Inte
 		// Burn the undelivered token: a live reset link must never exist
 		// anywhere but in its owner's DMs.
 		_, _ = a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE token_hash = $1`, tokenHash)
+		a.limiter.refund("pwreset:" + u.ID)
 		log.Printf("discord: DM reset link: %v", err)
 		b.ephemeral(s, i, "I couldn't DM you — enable direct messages from members of this server (Server → Privacy Settings), then run `/junkie reset-password` again.")
 		return
