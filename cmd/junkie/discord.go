@@ -77,13 +77,25 @@ var discordCommands = []*discordgo.ApplicationCommand{
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "config",
-				Description: "Set the timer: focus-minutes/break-minutes/sessions, e.g. 30/5/3",
+				Description: "Change room settings; omit everything to see the current ones",
 				Options: []*discordgo.ApplicationCommandOption{
 					{
 						Type:        discordgo.ApplicationCommandOptionString,
-						Name:        "shorthand",
+						Name:        "timer",
 						Description: "focus-minutes/break-minutes/sessions, e.g. 30/5/3",
-						Required:    true,
+						Required:    false,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionBoolean,
+						Name:        "checkin",
+						Description: "Require everyone to tap Join each break to stay in the next session",
+						Required:    false,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionBoolean,
+						Name:        "auto-breaks",
+						Description: "Start each break automatically instead of waiting for someone to start it",
+						Required:    false,
 					},
 				},
 			},
@@ -219,11 +231,7 @@ func (b *discordBot) handleCommand(s *discordgo.Session, i *discordgo.Interactio
 		}
 		b.handleChannel(s, i, target)
 	case "config":
-		shorthand := ""
-		if len(sub.Options) > 0 {
-			shorthand, _ = sub.Options[0].Value.(string)
-		}
-		b.handleConfig(s, i, shorthand)
+		b.handleConfig(s, i, subOptions(sub))
 	case "start":
 		b.handleStart(s, i)
 	case "join":
@@ -378,6 +386,38 @@ func discordNameList(members []user) string {
 	return strings.Join(names, ", ")
 }
 
+// discordMentions renders @mentions for the participants who have a linked
+// Discord account, so a check-in break can ping exactly the people who need
+// to tap Join. Participants who joined from the web without linking Discord
+// have no id to mention and are simply left out. Capped so a large room can't
+// build a runaway ping.
+func (a *app) discordMentions(ctx context.Context, participants []user) string {
+	if len(participants) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(participants))
+	for _, p := range participants {
+		ids = append(ids, p.ID)
+	}
+	rows, err := a.db.Query(ctx, `SELECT discord_user_id FROM discord_links WHERE user_id = ANY($1)`, ids)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	const cap = 20
+	mentions := make([]string, 0, len(participants))
+	for rows.Next() {
+		var discordUserID string
+		if rows.Scan(&discordUserID) == nil {
+			mentions = append(mentions, "<@"+discordUserID+">")
+		}
+		if len(mentions) >= cap {
+			break
+		}
+	}
+	return strings.Join(mentions, " ")
+}
+
 // notifyDiscord keeps the room's live status message in the linked channel
 // current: a new run posts a fresh message (freshRun), every later phase
 // change edits it in place, and timer == nil marks the run complete. It also
@@ -403,6 +443,18 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	content := discordStatusContent(rm, timer)
 	if timer != nil && len(timer.Participants) > 0 {
 		content += "\nIn: " + discordNameList(timer.Participants)
+	}
+	// Check-in room on a break: this is the window where everyone must re-tap
+	// Join or be dropped, so spell that out and @mention the participants who
+	// have a linked Discord — the ping is their nudge to come back. Left on
+	// every break render (not just the transition) so a later edit doesn't
+	// wipe the reminder; Discord doesn't re-notify mentions already present.
+	if rm.RequireCheckin && timer != nil && timer.Phase == "break" {
+		line := "Tap **Join** to check in and stay in the next session — anyone who doesn't is dropped."
+		if mentions := a.discordMentions(ctx, timer.Participants); mentions != "" {
+			line = mentions + " — " + line
+		}
+		content += "\n" + line
 	}
 	components := joinComponents()
 	if timer == nil {
@@ -643,7 +695,27 @@ func (b *discordBot) handleChannel(s *discordgo.Session, i *discordgo.Interactio
 	}
 }
 
-func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.InteractionCreate, shorthand string) {
+// subOptions collects a subcommand's supplied options by name. Only options
+// the user actually filled in are present, so a missing key means "leave this
+// setting as it is" — which is what lets `/junkie config checkin:On` change
+// one toggle without disturbing the timer numbers.
+func subOptions(sub *discordgo.ApplicationCommandInteractionDataOption) map[string]*discordgo.ApplicationCommandInteractionDataOption {
+	out := map[string]*discordgo.ApplicationCommandInteractionDataOption{}
+	for _, opt := range sub.Options {
+		out[opt.Name] = opt
+	}
+	return out
+}
+
+// onOff renders a boolean room setting the way the web toggles read.
+func onOff(v bool) string {
+	if v {
+		return "on"
+	}
+	return "off"
+}
+
+func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.InteractionCreate, opts map[string]*discordgo.ApplicationCommandInteractionDataOption) {
 	a := b.app
 	ctx := context.Background()
 	// Same bar as the web settings form: a linked account that's a member
@@ -659,6 +731,13 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 		b.replyNotRegistered(s, i)
 		return
 	}
+	// No options at all: show the current settings rather than erroring, so
+	// `/junkie config` is a safe way to check where things stand.
+	if len(opts) == 0 {
+		b.ephemeral(s, i, fmt.Sprintf("**%s** settings: %d min focus, %d min break, %d session(s) · check-in %s · auto-breaks %s.\nChange them with e.g. `/junkie config timer:30/5/3 checkin:On`.",
+			rm.Name, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, onOff(rm.RequireCheckin), onOff(rm.AutoRoll)))
+		return
+	}
 	if !a.isRoomMember(ctx, rm.ID, u.ID) {
 		b.ephemeral(s, i, "Join this room first (`/junkie join`) before changing its settings.")
 		return
@@ -667,15 +746,12 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 		b.ephemeral(s, i, "Timer settings can't change while a run is active — wait for it to finish.")
 		return
 	}
-	parts := strings.Split(strings.TrimSpace(shorthand), "/")
-	if len(parts) != 3 {
-		b.ephemeral(s, i, "Use the form `focus-minutes/break-minutes/sessions`, e.g. `30/5/3`.")
+	cfg, errMsg, ok := mergeRoomConfig(rm, opts)
+	if !ok {
+		b.ephemeral(s, i, errMsg)
 		return
 	}
-	focus := clampInt(parts[0], 5, 180, rm.FocusMinutes)
-	breaks := clampInt(parts[1], 1, 60, rm.BreakMinutes)
-	sessions := clampInt(parts[2], 1, 12, rm.AutoSessions)
-	if err := a.applyRoomSettings(ctx, rm.ID, focus, breaks, sessions, rm.AutoRoll, rm.RequireCheckin); err != nil {
+	if err := a.applyRoomSettings(ctx, rm.ID, cfg.Focus, cfg.Break, cfg.Sessions, cfg.AutoRoll, cfg.RequireCheckin); err != nil {
 		log.Printf("discord: config room %s: %v", rm.Code, err)
 		b.ephemeral(s, i, "Couldn't save that configuration — try again.")
 		return
@@ -683,7 +759,42 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 	// Same broadcast the web settings form sends, so open room pages pick
 	// up the new numbers live.
 	a.hub.broadcast(rm.Code, "settings")
-	b.reply(s, i, fmt.Sprintf("Configured **%s**: %d min focus, %d min break, %d session(s).", rm.Name, focus, breaks, sessions), nil)
+	b.reply(s, i, fmt.Sprintf("Configured **%s**: %d min focus, %d min break, %d session(s) · check-in %s · auto-breaks %s.",
+		rm.Name, cfg.Focus, cfg.Break, cfg.Sessions, onOff(cfg.RequireCheckin), onOff(cfg.AutoRoll)), nil)
+}
+
+// roomConfig is the set of room settings /junkie config can change.
+type roomConfig struct {
+	Focus, Break, Sessions   int
+	RequireCheckin, AutoRoll bool
+}
+
+// mergeRoomConfig layers only the options the user actually supplied on top of
+// the room's current settings, so an omitted option leaves that setting
+// exactly as it was — that's what keeps `/junkie config checkin:On` from
+// silently resetting the timer numbers. Returns ok=false with a user-facing
+// message when the timer shorthand is malformed.
+func mergeRoomConfig(rm room, opts map[string]*discordgo.ApplicationCommandInteractionDataOption) (roomConfig, string, bool) {
+	cfg := roomConfig{
+		Focus: rm.FocusMinutes, Break: rm.BreakMinutes, Sessions: rm.AutoSessions,
+		RequireCheckin: rm.RequireCheckin, AutoRoll: rm.AutoRoll,
+	}
+	if timer, ok := opts["timer"]; ok {
+		parts := strings.Split(strings.TrimSpace(timer.StringValue()), "/")
+		if len(parts) != 3 {
+			return cfg, "Use `timer:focus/break/sessions`, e.g. `timer:30/5/3`.", false
+		}
+		cfg.Focus = clampInt(parts[0], 5, 180, rm.FocusMinutes)
+		cfg.Break = clampInt(parts[1], 1, 60, rm.BreakMinutes)
+		cfg.Sessions = clampInt(parts[2], 1, 12, rm.AutoSessions)
+	}
+	if v, ok := opts["checkin"]; ok {
+		cfg.RequireCheckin = v.BoolValue()
+	}
+	if v, ok := opts["auto-breaks"]; ok {
+		cfg.AutoRoll = v.BoolValue()
+	}
+	return cfg, "", true
 }
 
 func (b *discordBot) handleStart(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -743,6 +854,19 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 		b.ephemeral(s, i, "Couldn't join the run — try again.")
 		return
 	}
+	// In a check-in room the break is when everyone must re-confirm or be
+	// dropped. joinTimer already checks in newcomers, but someone who was in
+	// the last session is "already in" and wouldn't otherwise re-confirm — so
+	// the one Join button doubles as their "I'm here". confirmCheckin only
+	// acts during a break, so a stray tap outside one is a harmless no-op.
+	if outcome == joinedAlready && rm.RequireCheckin && timer != nil && timer.Phase == "break" {
+		if a.confirmCheckin(ctx, rm.ID, u.ID) {
+			a.hub.broadcast(rm.Code, "timer-phase")
+			a.notifyDiscord(rm, timer, false)
+			b.ephemeral(s, i, "Checked in — you're in for the next session.")
+			return
+		}
+	}
 	a.hub.broadcast(rm.Code, "timer-phase")
 	if outcome == joinedNow && timer != nil {
 		a.notifyDiscord(rm, timer, false)
@@ -753,6 +877,10 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 	case joinedQueuedBreak:
 		b.ephemeral(s, i, "A focus session is in progress — you'll join automatically when the break starts. `/junkie leave` cancels.")
 	case joinedAlready:
+		if rm.RequireCheckin && timer != nil && timer.Phase == "break" {
+			b.ephemeral(s, i, "You're already checked in for the next session.")
+			return
+		}
 		b.ephemeral(s, i, "You're already in this run.")
 	case joinedLimit:
 		b.ephemeral(s, i, "You're already in 3 rooms' live sessions — leave one first. (Focus time only counts toward the room you joined earliest.)")
@@ -1124,9 +1252,9 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie register [code]` — connect an existing room by code, or create a new one (posts to this channel)\n"+
 		"`/junkie deregister` — disconnect this server from its room\n"+
 		"`/junkie channel [#channel]` — move the bot's notifications to another channel\n"+
-		"`/junkie config focus/break/sessions` — set the timer, e.g. `30/5/3`\n"+
+		"`/junkie config` — change room settings (or run it bare to see them): `timer:30/5/3`, `checkin:On/Off`, `auto-breaks:On/Off`\n"+
 		"`/junkie start` — start a focus run\n"+
-		"`/junkie join` — join now, or be queued in for the next break/run\n"+
+		"`/junkie join` — join now, or be queued in for the next break/run (in a check-in room, tapping Join each break is how you stay in)\n"+
 		"`/junkie leave` — leave the run (or cancel a queued join)\n"+
 		"`/junkie status` — where the timer is right now\n"+
 		"`/junkie stats [day|week|month|year|alltime|map]` — your focus stats, or your year as a heatmap picture")
