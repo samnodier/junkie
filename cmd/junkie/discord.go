@@ -41,6 +41,9 @@ const discordJoinButtonID = "junkie:join"
 // manually paused one, straight from the live status message.
 const discordBreakButtonID = "junkie:start-break"
 
+// discordPauseButtonID pauses a running break from the live status message.
+const discordPauseButtonID = "junkie:pause-break"
+
 var discordCommands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "junkie",
@@ -212,6 +215,8 @@ func (b *discordBot) onInteraction(s *discordgo.Session, i *discordgo.Interactio
 			b.handleJoin(s, i)
 		case discordBreakButtonID:
 			b.handleStartBreak(s, i)
+		case discordPauseButtonID:
+			b.handlePauseBreak(s, i)
 		}
 	}
 }
@@ -279,19 +284,24 @@ func discordTimestamp(t time.Time) string {
 }
 
 // timerComponents renders the live message's buttons: always Join, plus a
-// break control while the break is paused — "Start break" for a pending
-// break that never ran (auto-breaks off), "Resume break" for one paused
-// mid-run. Both go through the same resume path on tap.
+// break control during the break — "Start break" for a pending break that
+// never ran (auto-breaks off), "Resume break" for one paused mid-run (both
+// go through the same resume path on tap), and "Pause break" while the
+// break is running. Mirrors the web room's break controls.
 func timerComponents(timer *timerRun) []discordgo.MessageComponent {
 	buttons := []discordgo.MessageComponent{
 		discordgo.Button{Label: "Join", Style: discordgo.PrimaryButton, CustomID: discordJoinButtonID},
 	}
-	if timer != nil && timer.Phase == "break" && timer.PausedAt != nil {
-		label := "Resume break"
-		if timer.BreakPending() {
-			label = "Start break"
+	if timer != nil && timer.Phase == "break" {
+		if timer.PausedAt != nil {
+			label := "Resume break"
+			if timer.BreakPending() {
+				label = "Start break"
+			}
+			buttons = append(buttons, discordgo.Button{Label: label, Style: discordgo.SuccessButton, CustomID: discordBreakButtonID})
+		} else {
+			buttons = append(buttons, discordgo.Button{Label: "Pause break", Style: discordgo.SecondaryButton, CustomID: discordPauseButtonID})
 		}
-		buttons = append(buttons, discordgo.Button{Label: label, Style: discordgo.SuccessButton, CustomID: discordBreakButtonID})
 	}
 	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: buttons}}
 }
@@ -983,6 +993,46 @@ func (b *discordBot) handleStartBreak(s *discordgo.Session, i *discordgo.Interac
 	} else {
 		b.ephemeral(s, i, "Break's running.")
 	}
+}
+
+// handlePauseBreak is the live message's Pause break button, the flip side
+// of handleStartBreak with the same bar: a linked account that's a room
+// member. Pausing during a check-in room's break also counts as checking in,
+// matching the web control.
+func (b *discordBot) handlePauseBreak(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	a := b.app
+	ctx := context.Background()
+	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+	if !linked {
+		b.replyLinkRequired(s, i)
+		return
+	}
+	rm, _, ok := a.discordRoom(ctx, i.GuildID)
+	if !ok {
+		b.replyNotRegistered(s, i)
+		return
+	}
+	if !a.isRoomMember(ctx, rm.ID, u.ID) {
+		b.ephemeral(s, i, "Join this room first (`/junkie join`) before pausing its break.")
+		return
+	}
+	a.confirmCheckin(ctx, rm.ID, u.ID)
+	timer, changed, err := a.pauseRoomBreak(ctx, rm.ID, u.ID)
+	if err != nil {
+		log.Printf("discord: pause break %s: %v", rm.Code, err)
+		b.ephemeral(s, i, "Couldn't pause the break — try again.")
+		return
+	}
+	if !changed {
+		// The break already ended or was paused by someone else — refresh
+		// the live message so the buttons match reality.
+		a.notifyDiscord(rm, timer, false)
+		b.ephemeral(s, i, "There's no running break to pause right now.")
+		return
+	}
+	a.hub.broadcast(rm.Code, "timer-phase")
+	a.notifyDiscord(rm, timer, false)
+	b.ephemeral(s, i, "Break paused — tap **Resume break** when you're ready.")
 }
 
 func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionCreate) {

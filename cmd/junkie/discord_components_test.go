@@ -34,7 +34,7 @@ func TestTimerComponents(t *testing.T) {
 	}{
 		{name: "no run", timer: nil, want: []string{"Join"}},
 		{name: "focus", timer: &timerRun{Phase: "focus"}, want: []string{"Join"}},
-		{name: "running break", timer: &timerRun{Phase: "break"}, want: []string{"Join"}},
+		{name: "running break", timer: &timerRun{Phase: "break"}, want: []string{"Join", "Pause break"}},
 		{name: "pending break", timer: &timerRun{Phase: "break", PhaseStartedAt: now, PausedAt: &now}, want: []string{"Join", "Start break"}},
 		{name: "paused mid-break", timer: &timerRun{Phase: "break", PhaseStartedAt: earlier, PausedAt: &now}, want: []string{"Join", "Resume break"}},
 	}
