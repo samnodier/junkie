@@ -44,6 +44,10 @@ const discordBreakButtonID = "junkie:start-break"
 // discordPauseButtonID pauses a running break from the live status message.
 const discordPauseButtonID = "junkie:pause-break"
 
+// discordSkipButtonID skips the break, jumping straight to the next focus
+// session, from the live status message.
+const discordSkipButtonID = "junkie:skip-break"
+
 var discordCommands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "junkie",
@@ -217,6 +221,8 @@ func (b *discordBot) onInteraction(s *discordgo.Session, i *discordgo.Interactio
 			b.handleStartBreak(s, i)
 		case discordPauseButtonID:
 			b.handlePauseBreak(s, i)
+		case discordSkipButtonID:
+			b.handleSkipBreak(s, i)
 		}
 	}
 }
@@ -283,12 +289,14 @@ func discordTimestamp(t time.Time) string {
 	return fmt.Sprintf("<t:%d:R>", t.Unix())
 }
 
-// timerComponents renders the live message's buttons: always Join, plus a
-// break control during the break — "Start break" for a pending break that
+// timerComponents renders the live message's buttons: always Join, plus the
+// break controls during the break — "Start break" for a pending break that
 // never ran (auto-breaks off), "Resume break" for one paused mid-run (both
-// go through the same resume path on tap), and "Pause break" while the
-// break is running. Mirrors the web room's break controls.
-func timerComponents(timer *timerRun) []discordgo.MessageComponent {
+// go through the same resume path on tap), "Pause break" while the break is
+// running, and "Skip break" except in check-in rooms, where skipping would
+// slam the check-in window shut on everyone (the web blocks it there too).
+// Mirrors the web room's break controls.
+func timerComponents(rm room, timer *timerRun) []discordgo.MessageComponent {
 	buttons := []discordgo.MessageComponent{
 		discordgo.Button{Label: "Join", Style: discordgo.PrimaryButton, CustomID: discordJoinButtonID},
 	}
@@ -301,6 +309,9 @@ func timerComponents(timer *timerRun) []discordgo.MessageComponent {
 			buttons = append(buttons, discordgo.Button{Label: label, Style: discordgo.SuccessButton, CustomID: discordBreakButtonID})
 		} else {
 			buttons = append(buttons, discordgo.Button{Label: "Pause break", Style: discordgo.SecondaryButton, CustomID: discordPauseButtonID})
+		}
+		if !rm.RequireCheckin {
+			buttons = append(buttons, discordgo.Button{Label: "Skip break", Style: discordgo.SecondaryButton, CustomID: discordSkipButtonID})
 		}
 	}
 	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: buttons}}
@@ -504,7 +515,7 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 		}
 		content += "\n" + line
 	}
-	components := timerComponents(timer)
+	components := timerComponents(rm, timer)
 	if timer == nil {
 		components = nil
 	}
@@ -1035,6 +1046,54 @@ func (b *discordBot) handlePauseBreak(s *discordgo.Session, i *discordgo.Interac
 	b.ephemeral(s, i, "Break paused — tap **Resume break** when you're ready.")
 }
 
+// handleSkipBreak is the live message's Skip break button: ends the break
+// early and jumps to the next focus session (or completes the run if that
+// was the last one), exactly like the web control. Refused in check-in
+// rooms for the same reason the web refuses — skipping would slam the
+// check-in window shut on everyone else.
+func (b *discordBot) handleSkipBreak(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	a := b.app
+	ctx := context.Background()
+	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+	if !linked {
+		b.replyLinkRequired(s, i)
+		return
+	}
+	rm, _, ok := a.discordRoom(ctx, i.GuildID)
+	if !ok {
+		b.replyNotRegistered(s, i)
+		return
+	}
+	if !a.isRoomMember(ctx, rm.ID, u.ID) {
+		b.ephemeral(s, i, "Join this room first (`/junkie join`) before skipping its break.")
+		return
+	}
+	if rm.RequireCheckin {
+		b.ephemeral(s, i, "Breaks can't be skipped while session check-in is on.")
+		return
+	}
+	timer, changed, err := a.skipRoomBreak(ctx, rm.ID, u.ID)
+	if err != nil {
+		log.Printf("discord: skip break %s: %v", rm.Code, err)
+		b.ephemeral(s, i, "Couldn't skip the break — try again.")
+		return
+	}
+	if !changed {
+		// The break already ended on its own — refresh the live message so
+		// the buttons match reality.
+		a.notifyDiscord(rm, timer, false)
+		b.ephemeral(s, i, "There's no break to skip right now.")
+		return
+	}
+	a.hub.broadcast(rm.Code, "timer-phase")
+	a.notifyDiscord(rm, timer, false)
+	if timer != nil {
+		b.ephemeral(s, i, fmt.Sprintf("Break skipped — session %d of %d underway, break %s.", timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt)))
+	} else {
+		b.ephemeral(s, i, "Break skipped — that was the last session, so the run is complete.")
+	}
+}
+
 func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	a := b.app
 	ctx := context.Background()
@@ -1098,7 +1157,7 @@ func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.Interaction
 	}
 	// Public on purpose: the asker wants the room to see where things stand,
 	// and the Join button is useful to everyone else scrolling past.
-	b.reply(s, i, content, timerComponents(timer))
+	b.reply(s, i, content, timerComponents(rm, timer))
 }
 
 // formatFocusMinutes renders a minute count the way people say it: "45 min"
