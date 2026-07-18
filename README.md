@@ -84,9 +84,10 @@ Accounts are required to create or join shared rooms. Each room has a persistent
 - Anyone in the room can rename the room and edit timer defaults (focus length, break length, session count, auto-roll).
 - Only the **room creator** can delete the room.
 - During focus, late joins are locked out until the next break.
-- **Pause / Resume** and **Skip break & continue** are available on breaks (any member, same as pause).
+- **Pause / Resume** and **Skip break & continue** are available on breaks (any member, same as pause) — from the web room or as buttons on the Discord live message.
 - **Auto-start breaks** (room settings): when **on**, breaks start automatically after focus. When **off**, the break waits on an adjustable ring until someone starts it or skips.
-- **Session check-in** (room settings): when **on**, every participant must tap **"I'm here"** during each break to keep their seat in the next session — no-shows are dropped from the block when the next focus starts (they can rejoin at a later break). Joining, starting a run, or acting on the break (pause, resume, starting it) counts as your check-in; nobody is exempt, including whoever started the run. Skip break is disabled so the check-in window can't be cut short, and if nobody checks in the run ends. There's no check-in after the final session — the run ends when the last focus block does, with no trailing break. From Discord, tapping **Join** on the break message is your check-in, and the bot @mentions linked Discord participants to remind them (the first twenty by name, with a "+N more" note beyond that).
+- **Abandoned pauses expire**: a break left paused for an hour — including a waiting break that nobody ever started — ends its run automatically, so the room is free for a fresh session instead of staying stuck on a resume that never comes. Nothing is lost: completed focus sessions were already credited.
+- **Session check-in** (room settings): when **on**, every participant must tap **"I'm here"** during each break to keep their seat in the next session — no-shows are dropped from the block when the next focus starts (they can rejoin at a later break). Joining, starting a run, or acting on the break (pause, resume, starting it) counts as your check-in; nobody is exempt, including whoever started the run. Skip break is disabled so the check-in window can't be cut short, and if nobody checks in the run ends. There's no check-in after the final session — the run ends when the last focus block does, with no trailing break. From Discord, tapping **Join** on the break message is your check-in (the break-control buttons count too, same as acting on the break from the web), and the bot @mentions linked Discord participants to remind them (the first twenty by name, with a "+N more" note beyond that).
 - **Leave focus block** ends your participation in the active timer. Hiding or closing a tab does **not** leave — participant rings show who intentionally joined the block, not who has a tab open.
 - **Focus mode** during an active session hides the full todo board so the timer stays central.
 
@@ -142,7 +143,7 @@ Both are the same app pointing at the hosted site; the APK just wraps it so ther
 
 ## Discord bot
 
-junkie has a Discord bot that runs a server's focus room from chat: live countdown messages showing who's in, break notifications, join buttons, stats, and a heatmap picture — no browser needed once you're set up.
+junkie has a Discord bot that runs a server's focus room from chat: live countdown messages showing who's in, break notifications, Join and break-control buttons, stats, and a heatmap picture — no browser needed once you're set up.
 
 **Just want to link your account or reset your password?** [Join the junkie Discord server](https://discord.gg/qEEzdXQHtK) and use `/junkie link` or `/junkie reset-password` in `#junkie-bot`. Your commands and the bot's replies there are private — nobody else in the channel can see them.
 
@@ -153,6 +154,8 @@ junkie has a Discord bot that runs a server's focus room from chat: live countdo
 The bot only asks for Send Messages. Once added: each participant runs `/junkie link` once to connect their junkie account, then an admin runs `/junkie register` in the channel the timer should post to (pass an existing room code to connect it, or omit to create a fresh room). Move notifications later with `/junkie channel [#channel]`. `/junkie help` lists all commands.
 
 Room settings are fully manageable from Discord with `/junkie config` — the timer as `timer:30/5/3`, plus `checkin:On/Off` (session check-in) and `auto-breaks:On/Off` (auto-start breaks). Supply only what you want to change; run `/junkie config` bare to see the current settings. As on the web, settings can't change mid-run.
+
+Breaks are fully controllable from Discord too. During a break, the live message carries the same controls the web room has, next to Join: **Start break** when a break is waiting (auto-start breaks off), **Pause break** while it's running, **Resume break** while it's paused, and **Skip break** to jump straight to the next focus session (hidden in check-in rooms, same as the web). Tapping any of them requires a linked account that's a room member, and — like on the web — counts as your check-in when session check-in is on.
 
 Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [Accounts](#accounts)). This is why the public [junkie Discord server](https://discord.gg/qEEzdXQHtK) exists — joining it gives anyone a place to run these commands without needing their own server.
 
