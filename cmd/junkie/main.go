@@ -137,6 +137,17 @@ func (t *timerRun) BreakPending() bool {
 	return t != nil && t.Phase == "break" && t.PausedAt != nil && t.PausedAt.Equal(t.PhaseStartedAt)
 }
 
+// stalePauseTimeout is how long a paused break may sit untouched before the
+// run counts as abandoned — the pauser left, or an auto-breaks-off room's
+// pending break was never started — and is ended so the room is free for a
+// fresh run instead of blocking on a resume that's never coming.
+const stalePauseTimeout = time.Hour
+
+// PauseExpired reports a pause that has outlived stalePauseTimeout.
+func (t *timerRun) PauseExpired(now time.Time) bool {
+	return t != nil && t.PausedAt != nil && now.Sub(*t.PausedAt) >= stalePauseTimeout
+}
+
 // publicProfileView is what a connection is allowed to see of a user: the
 // identity basics and the focus heatmap.
 type publicProfileView struct {
@@ -1388,6 +1399,12 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-break-length":
+		// Normalize first so a stale tab can't restart a run whose pause
+		// already expired.
+		if _, _, err := a.normalizeTimer(r.Context(), rm.ID, u.ID); err != nil {
+			http.Error(w, "could not start break", http.StatusInternalServerError)
+			return
+		}
 		a.confirmCheckin(r.Context(), rm.ID, u.ID)
 		minutes := clampInt(r.FormValue("minutes"), 1, 60, rm.BreakMinutes)
 		// Set the length and start in one motion; only meaningful while the
@@ -1554,6 +1571,16 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	}
 
 	now := time.Now()
+	// An expired pause ends the run: the completed focus sessions were
+	// already credited at their break transitions, so nothing is lost, and
+	// the room opens up for a fresh start.
+	if timer.PauseExpired(now) {
+		if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now(), paused_at = NULL, paused_remaining_seconds = NULL WHERE id = $1`, timer.ID); err != nil {
+			return nil, false, err
+		}
+		timer.Phase = "ended"
+		timer.Transitioned = true
+	}
 	for timer.Phase != "ended" && timer.PausedAt == nil && !now.Before(timer.PhaseEndsAt) {
 		if timer.Phase == "lobby" {
 			timer.Phase = "focus"
@@ -2034,6 +2061,11 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 // /junkie start command, which additionally uses the returned timer to build
 // its own reply rather than relying on the hub broadcast.
 func (a *app) startRoomTimerAndSchedule(ctx context.Context, rm room, userID string, focusMinutes int, starterName string) (*timerRun, bool, error) {
+	// Clear any run whose pause has expired, so starting fresh doesn't
+	// require someone to have viewed the room since the expiry.
+	if _, _, err := a.normalizeTimer(ctx, rm.ID, userID); err != nil {
+		return nil, false, err
+	}
 	created, err := a.startRoomTimer(ctx, rm, userID, focusMinutes)
 	if err != nil || !created {
 		return nil, created, err
@@ -2091,6 +2123,12 @@ func (a *app) pauseRoomBreak(ctx context.Context, roomID, userID string) (*timer
 }
 
 func (a *app) resumeRoomBreak(ctx context.Context, roomID, userID string) (*timerRun, bool, error) {
+	// Normalize first so a stale tab's Resume can't resurrect a run whose
+	// pause already expired — the run ends there and the update below
+	// matches nothing.
+	if _, _, err := a.normalizeTimer(ctx, roomID, userID); err != nil {
+		return nil, false, err
+	}
 	var runID string
 	err := a.db.QueryRow(ctx, `
 		UPDATE timer_runs

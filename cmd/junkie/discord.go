@@ -37,6 +37,10 @@ type discordBot struct {
 
 const discordJoinButtonID = "junkie:join"
 
+// discordBreakButtonID starts a pending break (auto-breaks off) or resumes a
+// manually paused one, straight from the live status message.
+const discordBreakButtonID = "junkie:start-break"
+
 var discordCommands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "junkie",
@@ -203,8 +207,11 @@ func (b *discordBot) onInteraction(s *discordgo.Session, i *discordgo.Interactio
 	case discordgo.InteractionApplicationCommand:
 		b.handleCommand(s, i)
 	case discordgo.InteractionMessageComponent:
-		if i.MessageComponentData().CustomID == discordJoinButtonID {
+		switch i.MessageComponentData().CustomID {
+		case discordJoinButtonID:
 			b.handleJoin(s, i)
+		case discordBreakButtonID:
+			b.handleStartBreak(s, i)
 		}
 	}
 }
@@ -271,12 +278,22 @@ func discordTimestamp(t time.Time) string {
 	return fmt.Sprintf("<t:%d:R>", t.Unix())
 }
 
-func joinComponents() []discordgo.MessageComponent {
-	return []discordgo.MessageComponent{
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.Button{Label: "Join", Style: discordgo.PrimaryButton, CustomID: discordJoinButtonID},
-		}},
+// timerComponents renders the live message's buttons: always Join, plus a
+// break control while the break is paused — "Start break" for a pending
+// break that never ran (auto-breaks off), "Resume break" for one paused
+// mid-run. Both go through the same resume path on tap.
+func timerComponents(timer *timerRun) []discordgo.MessageComponent {
+	buttons := []discordgo.MessageComponent{
+		discordgo.Button{Label: "Join", Style: discordgo.PrimaryButton, CustomID: discordJoinButtonID},
 	}
+	if timer != nil && timer.Phase == "break" && timer.PausedAt != nil {
+		label := "Resume break"
+		if timer.BreakPending() {
+			label = "Start break"
+		}
+		buttons = append(buttons, discordgo.Button{Label: label, Style: discordgo.SuccessButton, CustomID: discordBreakButtonID})
+	}
+	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: buttons}}
 }
 
 func (b *discordBot) reply(s *discordgo.Session, i *discordgo.InteractionCreate, content string, components []discordgo.MessageComponent) {
@@ -364,9 +381,9 @@ func discordStatusContent(rm room, timer *timerRun) string {
 	case timer.Phase == "focus":
 		return fmt.Sprintf("**%s** — focus · session %d of %d. Break %s. Tap Join to hop in at the break.", rm.Name, timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt))
 	case timer.BreakPending():
-		return fmt.Sprintf("**%s** — session %d of %d done! Break's ready, waiting for someone to start it. Tap Join to be in the next session.", rm.Name, timer.CurrentSession, timer.TotalSessions)
+		return fmt.Sprintf("**%s** — session %d of %d done! Break's ready — tap **Start break** to run it. Tap Join to be in the next session.", rm.Name, timer.CurrentSession, timer.TotalSessions)
 	case timer.PausedAt != nil:
-		return fmt.Sprintf("**%s** — break paused. Tap Join to be in the next session.", rm.Name)
+		return fmt.Sprintf("**%s** — break paused. Tap **Resume break** to continue, or Join to be in the next session.", rm.Name)
 	default:
 		return fmt.Sprintf("**%s** — session %d of %d done! Break · focus resumes %s. Tap Join to be in the next session!", rm.Name, timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt))
 	}
@@ -477,7 +494,7 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 		}
 		content += "\n" + line
 	}
-	components := joinComponents()
+	components := timerComponents(timer)
 	if timer == nil {
 		components = nil
 	}
@@ -518,10 +535,18 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 // of truth; this only pokes it. Deduped per room+run+phase so overlapping
 // notify calls (web viewers polling plus this chain) don't stack timers.
 func (b *discordBot) scheduleNext(rm room, timer *timerRun) {
-	if timer == nil || timer.PausedAt != nil {
+	if timer == nil {
 		return
 	}
-	key := timer.ID + ":" + timer.Phase + ":" + timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano)
+	// A running phase wakes just past its deadline. A paused break has no
+	// deadline, so wake at the stale-pause cutoff instead — the moment
+	// normalizeTimer ends an abandoned run — so a Discord-only room frees
+	// up on time without anyone viewing it on the web.
+	deadline := timer.PhaseEndsAt
+	if timer.PausedAt != nil {
+		deadline = timer.PausedAt.Add(stalePauseTimeout)
+	}
+	key := timer.ID + ":" + timer.Phase + ":" + deadline.UTC().Format(time.RFC3339Nano)
 	b.mu.Lock()
 	if b.scheduled[rm.ID] == key {
 		b.mu.Unlock()
@@ -529,7 +554,7 @@ func (b *discordBot) scheduleNext(rm room, timer *timerRun) {
 	}
 	b.scheduled[rm.ID] = key
 	b.mu.Unlock()
-	delay := max(time.Until(timer.PhaseEndsAt), 0) + time.Second
+	delay := max(time.Until(deadline), 0) + time.Second
 	time.AfterFunc(delay, func() {
 		b.mu.Lock()
 		delete(b.scheduled, rm.ID)
@@ -914,6 +939,52 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 }
 
+// handleStartBreak is the live message's Start/Resume break button: the
+// Discord counterpart of the web break controls, needed because a room with
+// auto-breaks off otherwise strands its pending break until someone opens
+// the web app. Same bar as the web: a linked account that's a room member.
+func (b *discordBot) handleStartBreak(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	a := b.app
+	ctx := context.Background()
+	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+	if !linked {
+		b.replyLinkRequired(s, i)
+		return
+	}
+	rm, _, ok := a.discordRoom(ctx, i.GuildID)
+	if !ok {
+		b.replyNotRegistered(s, i)
+		return
+	}
+	if !a.isRoomMember(ctx, rm.ID, u.ID) {
+		b.ephemeral(s, i, "Join this room first (`/junkie join`) before starting its break.")
+		return
+	}
+	// Starting the break is a deliberate break action, so it doubles as the
+	// tapper's check-in — same as the web controls.
+	a.confirmCheckin(ctx, rm.ID, u.ID)
+	timer, changed, err := a.resumeRoomBreak(ctx, rm.ID, u.ID)
+	if err != nil {
+		log.Printf("discord: start break %s: %v", rm.Code, err)
+		b.ephemeral(s, i, "Couldn't start the break — try again.")
+		return
+	}
+	if !changed {
+		// The break already started, ended, or the run expired — refresh the
+		// live message so the button matches reality.
+		a.notifyDiscord(rm, timer, false)
+		b.ephemeral(s, i, "There's no paused break to start right now.")
+		return
+	}
+	a.hub.broadcast(rm.Code, "timer-phase")
+	a.notifyDiscord(rm, timer, false)
+	if timer != nil {
+		b.ephemeral(s, i, fmt.Sprintf("Break's running — focus resumes %s.", discordTimestamp(timer.PhaseEndsAt)))
+	} else {
+		b.ephemeral(s, i, "Break's running.")
+	}
+}
+
 func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	a := b.app
 	ctx := context.Background()
@@ -977,7 +1048,7 @@ func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.Interaction
 	}
 	// Public on purpose: the asker wants the room to see where things stand,
 	// and the Join button is useful to everyone else scrolling past.
-	b.reply(s, i, content, joinComponents())
+	b.reply(s, i, content, timerComponents(timer))
 }
 
 // formatFocusMinutes renders a minute count the way people say it: "45 min"

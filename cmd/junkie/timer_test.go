@@ -5,7 +5,31 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestPauseExpired(t *testing.T) {
+	now := time.Now()
+	pausedFor := func(d time.Duration) *timerRun {
+		at := now.Add(-d)
+		return &timerRun{Phase: "break", PausedAt: &at}
+	}
+	if (*timerRun)(nil).PauseExpired(now) {
+		t.Error("nil timer should not be expired")
+	}
+	if (&timerRun{Phase: "break"}).PauseExpired(now) {
+		t.Error("unpaused timer should not be expired")
+	}
+	if pausedFor(59 * time.Minute).PauseExpired(now) {
+		t.Error("59-minute pause should not be expired")
+	}
+	if !pausedFor(time.Hour).PauseExpired(now) {
+		t.Error("exactly one-hour pause should be expired")
+	}
+	if !pausedFor(90 * time.Minute).PauseExpired(now) {
+		t.Error("90-minute pause should be expired")
+	}
+}
 
 func TestRequestedRoomFocusMinutes(t *testing.T) {
 	tests := []struct {
