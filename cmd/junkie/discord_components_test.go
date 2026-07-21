@@ -56,3 +56,20 @@ func TestTimerComponents(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitCheckedIn(t *testing.T) {
+	// current_session 4: confirmed_session 5 means "claimed session 5"; 4 or
+	// less means the seat was only ever claimed for a session already run.
+	participants := []user{
+		{ID: "a", DisplayName: "Ada", ConfirmedSession: 5},
+		{ID: "b", DisplayName: "Bo", ConfirmedSession: 4},
+		{ID: "c", DisplayName: "Cy", ConfirmedSession: 1},
+	}
+	in, pending := splitCheckedIn(participants, 4)
+	if got := discordNameList(in); got != "Ada" {
+		t.Errorf("in = %q, want %q", got, "Ada")
+	}
+	if got := discordNameList(pending); got != "Bo, Cy" {
+		t.Errorf("pending = %q, want %q", got, "Bo, Cy")
+	}
+}

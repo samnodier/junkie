@@ -424,13 +424,29 @@ func discordNameList(members []user) string {
 	return strings.Join(names, ", ")
 }
 
-// discordMentions renders @mentions for the participants who have a linked
-// Discord account, so a check-in break can ping exactly the people who need
-// to tap Join. Participants who joined from the web without linking Discord
-// have no id to mention and are simply left out. Capped at twenty mentions
-// plus a plain "+N more" — individual user mentions always ping, whereas
-// @here needs the Mention Everyone permission the bot deliberately doesn't
-// ask for (its invite grants Send Messages only), so it would render inert.
+// splitCheckedIn divides a check-in break's participants into those who have
+// claimed the next session and those still riding on the current one. Only
+// the first group is actually in for what comes next; the second is dropped
+// at the break->focus flip unless they tap Join.
+func splitCheckedIn(participants []user, currentSession int) (in, pending []user) {
+	for _, p := range participants {
+		if p.ConfirmedSession > currentSession {
+			in = append(in, p)
+		} else {
+			pending = append(pending, p)
+		}
+	}
+	return in, pending
+}
+
+// discordMentions renders @mentions for the given participants, so a check-in
+// break can ping exactly the people who still need to tap Join. Anyone who
+// joined from the web without linking Discord has no id to mention and falls
+// back to their display name, so they still show up in the nudge. Capped at
+// twenty entries plus a plain "+N more" — individual user mentions always
+// ping, whereas @here needs the Mention Everyone permission the bot
+// deliberately doesn't ask for (its invite grants Send Messages only), so it
+// would render inert.
 func (a *app) discordMentions(ctx context.Context, participants []user) string {
 	if len(participants) == 0 {
 		return ""
@@ -439,36 +455,31 @@ func (a *app) discordMentions(ctx context.Context, participants []user) string {
 	for _, p := range participants {
 		ids = append(ids, p.ID)
 	}
-	rows, err := a.db.Query(ctx, `SELECT user_id, discord_user_id FROM discord_links WHERE user_id = ANY($1)`, ids)
-	if err != nil {
-		return ""
-	}
-	defer rows.Close()
+	// A lookup failure only costs the ping, not the nudge: everyone falls
+	// back to a plain display name below.
 	linked := map[string]string{}
-	for rows.Next() {
-		var userID, discordUserID string
-		if rows.Scan(&userID, &discordUserID) == nil {
-			linked[userID] = discordUserID
+	if rows, err := a.db.Query(ctx, `SELECT user_id, discord_user_id FROM discord_links WHERE user_id = ANY($1)`, ids); err == nil {
+		for rows.Next() {
+			var userID, discordUserID string
+			if rows.Scan(&userID, &discordUserID) == nil {
+				linked[userID] = discordUserID
+			}
 		}
+		rows.Close()
 	}
-	discordIDs := make([]string, 0, len(participants))
+	mentions := make([]string, 0, len(participants))
 	for _, p := range participants {
 		if discordUserID, ok := linked[p.ID]; ok {
-			discordIDs = append(discordIDs, discordUserID)
+			mentions = append(mentions, "<@"+discordUserID+">")
+		} else {
+			mentions = append(mentions, p.DisplayName)
 		}
-	}
-	if len(discordIDs) == 0 {
-		return ""
 	}
 	const cap = 20
 	overflow := 0
-	if len(discordIDs) > cap {
-		overflow = len(discordIDs) - cap
-		discordIDs = discordIDs[:cap]
-	}
-	mentions := make([]string, 0, len(discordIDs))
-	for _, discordUserID := range discordIDs {
-		mentions = append(mentions, "<@"+discordUserID+">")
+	if len(mentions) > cap {
+		overflow = len(mentions) - cap
+		mentions = mentions[:cap]
 	}
 	out := strings.Join(mentions, " ")
 	if overflow > 0 {
@@ -500,20 +511,29 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 		timer = &fresh
 	}
 	content := discordStatusContent(rm, timer)
-	if timer != nil && len(timer.Participants) > 0 {
-		content += "\nIn: " + discordNameList(timer.Participants)
+	// "In:" answers "who is in for what comes next". On a check-in break that
+	// is only the people who have claimed the next session — the rest are
+	// still listed, but as @mentions on the nudge line below, because they're
+	// one un-tapped Join away from being dropped. Everywhere else every
+	// participant is in by default.
+	var in, pending []user
+	checkinBreak := rm.RequireCheckin && timer != nil && timer.Phase == "break"
+	switch {
+	case timer == nil:
+	case checkinBreak:
+		in, pending = splitCheckedIn(timer.Participants, timer.CurrentSession)
+	default:
+		in = timer.Participants
 	}
-	// Check-in room on a break: this is the window where everyone must re-tap
-	// Join or be dropped, so spell that out and @mention the participants who
-	// have a linked Discord — the ping is their nudge to come back. Left on
-	// every break render (not just the transition) so a later edit doesn't
-	// wipe the reminder; Discord doesn't re-notify mentions already present.
-	if rm.RequireCheckin && timer != nil && timer.Phase == "break" {
-		line := "Tap **Join** to check in and stay in the next session — anyone who doesn't is dropped."
-		if mentions := a.discordMentions(ctx, timer.Participants); mentions != "" {
-			line = mentions + " — " + line
-		}
-		content += "\n" + line
+	if len(in) > 0 {
+		content += "\nIn: " + discordNameList(in)
+	}
+	// The break is the window where the un-checked-in must re-tap Join or be
+	// dropped, so spell that out and ping exactly them. Left on every break
+	// render (not just the transition) so a later edit doesn't wipe the
+	// reminder; Discord doesn't re-notify mentions already present.
+	if checkinBreak && len(pending) > 0 {
+		content += "\n" + a.discordMentions(ctx, pending) + " — tap **Join** to check in and stay in the next session, or you're dropped."
 	}
 	components := timerComponents(rm, timer)
 	if timer == nil {
