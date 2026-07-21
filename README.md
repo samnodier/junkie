@@ -155,6 +155,8 @@ The bot only asks for Send Messages. Once added: each participant runs `/junkie 
 
 Room settings are fully manageable from Discord with `/junkie config` — the timer as `timer:30/5/3`, plus `checkin:On/Off` (session check-in) and `auto-breaks:On/Off` (auto-start breaks). Supply only what you want to change; run `/junkie config` bare to see the current settings. As on the web, settings can't change mid-run.
 
+The live message states each phase's length and its deadline both as a wall-clock time and as a countdown ("session 1 of 2 · 80 min. Break at 21:19 · in an hour"), each rendered in your own timezone and kept current by Discord itself. Both are needed: the countdown alone rounds to one coarse unit, so a long block reads as "in an hour" for most of its length.
+
 Breaks are fully controllable from Discord too. During a break, the live message carries the same controls the web room has, next to Join: **Start break** when a break is waiting (auto-start breaks off), **Pause break** while it's running, **Resume break** while it's paused, and **Skip break** to jump straight to the next focus session (hidden in check-in rooms, same as the web). Tapping any of them requires a linked account that's a room member, and — like on the web — counts as your check-in when session check-in is on.
 
 Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [Accounts](#accounts)). This is why the public [junkie Discord server](https://discord.gg/qEEzdXQHtK) exists — joining it gives anyone a place to run these commands without needing their own server.

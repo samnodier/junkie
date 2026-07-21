@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,5 +73,18 @@ func TestSplitCheckedIn(t *testing.T) {
 	}
 	if got := discordNameList(pending); got != "Bo, Cy" {
 		t.Errorf("pending = %q, want %q", got, "Bo, Cy")
+	}
+}
+
+func TestDiscordStatusContentFocus(t *testing.T) {
+	ends := time.Date(2026, 7, 21, 21, 19, 0, 0, time.UTC)
+	timer := &timerRun{Phase: "focus", FocusMinutes: 80, BreakMinutes: 20, TotalSessions: 2, CurrentSession: 1, PhaseEndsAt: ends}
+	got := discordStatusContent(room{Name: "getting there"}, timer)
+	// Both timestamp styles: :R alone rounds an 80 minute block to "in an
+	// hour", so the exact wall-clock time rides along with it.
+	for _, want := range []string{"80 min", fmt.Sprintf("at <t:%d:t>", ends.Unix()), fmt.Sprintf("<t:%d:R>", ends.Unix())} {
+		if !strings.Contains(got, want) {
+			t.Errorf("content %q missing %q", got, want)
+		}
 	}
 }

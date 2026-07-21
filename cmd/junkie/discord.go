@@ -285,8 +285,14 @@ func interactionUserID(i *discordgo.InteractionCreate) string {
 	return ""
 }
 
+// discordTimestamp renders a phase deadline as both a wall-clock time and a
+// countdown, each in the viewer's own locale and timezone. The relative form
+// alone reads imprecisely on long blocks — Discord rounds it to one coarse
+// unit, so an 80 minute focus session renders as "in an hour" — while the
+// absolute form is exact and never rounds. Both tick along client-side, so
+// the message stays right without us editing it.
 func discordTimestamp(t time.Time) string {
-	return fmt.Sprintf("<t:%d:R>", t.Unix())
+	return fmt.Sprintf("at <t:%d:t> · <t:%d:R>", t.Unix(), t.Unix())
 }
 
 // timerComponents renders the live message's buttons: always Join, plus the
@@ -391,8 +397,10 @@ func (a *app) discordRoom(ctx context.Context, guildID string) (room, string, bo
 }
 
 // discordStatusContent renders the one live status message for a room's
-// current timer state. Discord's <t:...:R> timestamps tick down client-side,
-// so the message only needs an edit per phase change, not per second.
+// current timer state. Discord's <t:...> timestamps tick along client-side,
+// so the message only needs an edit per phase change, not per second. Each
+// running phase also states its configured length, so someone reading the
+// message mid-block can see the shape of the run and not just its deadline.
 func discordStatusContent(rm room, timer *timerRun) string {
 	switch {
 	case timer == nil:
@@ -400,13 +408,13 @@ func discordStatusContent(rm room, timer *timerRun) string {
 	case timer.Phase == "lobby":
 		return fmt.Sprintf("**%s** — focus run starting %s. Tap Join to be in from the first session!", rm.Name, discordTimestamp(timer.PhaseEndsAt))
 	case timer.Phase == "focus":
-		return fmt.Sprintf("**%s** — focus · session %d of %d. Break %s. Tap Join to hop in at the break.", rm.Name, timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt))
+		return fmt.Sprintf("**%s** — focus · session %d of %d · %d min. Break %s. Tap Join to hop in at the break.", rm.Name, timer.CurrentSession, timer.TotalSessions, timer.FocusMinutes, discordTimestamp(timer.PhaseEndsAt))
 	case timer.BreakPending():
-		return fmt.Sprintf("**%s** — session %d of %d done! Break's ready — tap **Start break** to run it. Tap Join to be in the next session.", rm.Name, timer.CurrentSession, timer.TotalSessions)
+		return fmt.Sprintf("**%s** — session %d of %d done! Break's ready — tap **Start break** to run the %d min break. Tap Join to be in the next session.", rm.Name, timer.CurrentSession, timer.TotalSessions, timer.BreakMinutes)
 	case timer.PausedAt != nil:
 		return fmt.Sprintf("**%s** — break paused. Tap **Resume break** to continue, or Join to be in the next session.", rm.Name)
 	default:
-		return fmt.Sprintf("**%s** — session %d of %d done! Break · focus resumes %s. Tap Join to be in the next session!", rm.Name, timer.CurrentSession, timer.TotalSessions, discordTimestamp(timer.PhaseEndsAt))
+		return fmt.Sprintf("**%s** — session %d of %d done! Break · %d min · focus resumes %s. Tap Join to be in the next session!", rm.Name, timer.CurrentSession, timer.TotalSessions, timer.BreakMinutes, discordTimestamp(timer.PhaseEndsAt))
 	}
 }
 
