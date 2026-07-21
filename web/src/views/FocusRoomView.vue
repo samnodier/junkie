@@ -67,7 +67,16 @@ function start() {
   requestPermission();
   room.action('timer-start');
 }
+// The startable break ring owns its value via v-model (see BreakReadyRing
+// for why :model-value plus a listener freezes it); seed it each time a
+// startable break appears so it opens at the room's configured length.
 const breakLength = ref(0);
+watch(
+  () => (timer.value?.phase === 'break' && (timer.value.breakPending || timer.value.paused) ? timer.value.runId : ''),
+  (startable) => {
+    if (startable) breakLength.value = timer.value.breakMinutes;
+  }
+);
 function startBreak() {
   room.action('timer-break-length', { minutes: String(breakLength.value || timer.value.breakMinutes) });
 }
@@ -192,7 +201,7 @@ onUnmounted(() => {
           <p class="room-focus-name">{{ room.room?.name }}</p>
           <RingCountdown v-if="!timer.breakPending && !timer.paused" :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather room-focus-ring" aria-label="Break countdown" @expired="expired" />
           <form v-else class="circle-timer-form" @submit.prevent="startBreak">
-            <RingIdle :model-value="timer.breakMinutes" :min="1" :max="60" ring-class="break-idle room-focus-ring" aria-label="Set break length" input-label="Break minutes" @update:model-value="breakLength = $event" @submit="startBreak" />
+            <RingIdle v-model="breakLength" :min="1" :max="60" ring-class="break-idle room-focus-ring" aria-label="Set break length" input-label="Break minutes" @submit="startBreak" />
           </form>
           <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
           <button v-if="timer.breakPending || timer.paused" type="button" class="btn-primary" @click="startBreak">Start break</button>

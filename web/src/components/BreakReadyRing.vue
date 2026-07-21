@@ -3,7 +3,7 @@
 // two stay pixel-identical: adjustable orange ring (tap to start), the next
 // block's length, and an explicit Start button for anyone who doesn't
 // discover the ring tap. Emits 'start' with the chosen minutes.
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import RingIdle from './RingIdle.vue';
 
 const props = defineProps({
@@ -13,7 +13,17 @@ const props = defineProps({
 });
 const emit = defineEmits(['start']);
 
-const minutes = ref(0);
+// This component owns the adjustable value and hands it to RingIdle via
+// v-model. Passing :model-value together with an update listener instead
+// makes RingIdle's defineModel defer to a parent write-back that never
+// happened, freezing the ring against every adjustment path.
+const minutes = ref(props.breakMinutes);
+watch(
+  () => props.breakMinutes,
+  (m) => {
+    minutes.value = m;
+  }
+);
 function start() {
   emit('start', minutes.value || props.breakMinutes);
 }
@@ -22,13 +32,12 @@ function start() {
 <template>
   <form class="circle-timer-form" @submit.prevent="start">
     <RingIdle
-      :model-value="breakMinutes"
+      v-model="minutes"
       :min="1"
       :max="60"
       ring-class="break-idle"
       :aria-label="roomName ? `Set break length for ${roomName}` : 'Set break length'"
       input-label="Break minutes"
-      @update:model-value="minutes = $event"
       @submit="start"
     />
   </form>
