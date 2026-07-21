@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -28,11 +27,6 @@ type discordBot struct {
 	app     *app
 	session *discordgo.Session
 	appID   string
-
-	// scheduled dedupes the phase-end wakeups (scheduleNext) so overlapping
-	// notify calls don't stack timers for the same room+phase.
-	mu        sync.Mutex
-	scheduled map[string]string
 }
 
 const discordJoinButtonID = "junkie:join"
@@ -187,7 +181,7 @@ func newDiscordBot(a *app) (*discordBot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create discord session: %w", err)
 	}
-	bot := &discordBot{app: a, session: session, appID: appID, scheduled: map[string]string{}}
+	bot := &discordBot{app: a, session: session, appID: appID}
 	session.AddHandler(bot.onInteraction)
 
 	if err := session.Open(); err != nil {
@@ -502,6 +496,11 @@ func (a *app) discordMentions(ctx context.Context, participants []user) string {
 // arms the phase-end wakeup so Discord-only rooms advance without a web
 // viewer polling. No-op when the bot isn't running or the room isn't linked.
 func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
+	// Every timer mutation funnels through here, so this is also where the
+	// phase-end wakeup is armed — for every room, Discord-linked or not. The
+	// wakeup advances the state machine at the deadline and fires the web
+	// broadcast and notifications even when no tab is foregrounded.
+	a.schedulePhaseWakeup(rm, timer)
 	if a.discord == nil {
 		return
 	}
@@ -543,21 +542,29 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	if checkinBreak && len(pending) > 0 {
 		content += "\n" + a.discordMentions(ctx, pending) + " — tap **Join** to check in and stay in the next session, or you're dropped."
 	}
+	// A session starting after a break (session 1 is lobby->focus, already
+	// announced by the lobby post) reposts as a fresh message below and pings
+	// everyone in it: Discord only marks *new* messages unread, and "break's
+	// over" is exactly the moment people need pulling back.
+	sessionStart := timer != nil && timer.Phase == "focus" && timer.Transitioned && timer.CurrentSession > 1
+	if sessionStart && len(in) > 0 {
+		content += "\n" + a.discordMentions(ctx, in) + " — break's over, focus is starting!"
+	}
 	components := timerComponents(rm, timer)
 	if timer == nil {
 		components = nil
 	}
 	// Post a fresh message at the moments people want to be told about — a
 	// new run's lobby, a finished focus block (the joinable break window),
-	// and run completion — because Discord only marks *new* messages unread;
-	// silent in-place edits cover everything else (join/leave updates,
-	// break->focus, pause/resume). Transitioned distinguishes a real
-	// focus->break flip from a pause tweak that merely re-renders the break.
-	repost := freshRun || timer == nil || (timer.Phase == "break" && timer.Transitioned)
+	// a break's end (the next session starting), and run completion — because
+	// Discord only marks *new* messages unread; silent in-place edits cover
+	// everything else (join/leave updates, pause/resume). Transitioned
+	// distinguishes a real phase flip from a pause tweak that merely
+	// re-renders the break.
+	repost := freshRun || timer == nil || (timer.Phase == "break" && timer.Transitioned) || sessionStart
 	if !repost && messageID != "" {
 		edit := &discordgo.MessageEdit{Channel: channelID, ID: messageID, Content: &content, Components: &components}
 		if _, err := a.discord.session.ChannelMessageEditComplex(edit); err == nil {
-			a.discord.scheduleNext(rm, timer)
 			return
 		}
 		// The tracked message was deleted or is unreachable; fall through and
@@ -575,55 +582,6 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 		_ = a.discord.session.ChannelMessageDelete(channelID, messageID)
 	}
 	_, _ = a.db.Exec(ctx, `UPDATE discord_guilds SET live_message_id = $1 WHERE room_id = $2`, msg.ID, rm.ID)
-	a.discord.scheduleNext(rm, timer)
-}
-
-// scheduleNext arms a wakeup just past the timer's phase end that advances
-// the state machine and re-notifies, so a room whose members are all on
-// Discord still transitions on time. normalizeTimer stays the single source
-// of truth; this only pokes it. Deduped per room+run+phase so overlapping
-// notify calls (web viewers polling plus this chain) don't stack timers.
-func (b *discordBot) scheduleNext(rm room, timer *timerRun) {
-	if timer == nil {
-		return
-	}
-	// A running phase wakes just past its deadline. A paused break has no
-	// deadline, so wake at the stale-pause cutoff instead — the moment
-	// normalizeTimer ends an abandoned run — so a Discord-only room frees
-	// up on time without anyone viewing it on the web.
-	deadline := timer.PhaseEndsAt
-	if timer.PausedAt != nil {
-		deadline = timer.PausedAt.Add(stalePauseTimeout)
-	}
-	key := timer.ID + ":" + timer.Phase + ":" + deadline.UTC().Format(time.RFC3339Nano)
-	b.mu.Lock()
-	if b.scheduled[rm.ID] == key {
-		b.mu.Unlock()
-		return
-	}
-	b.scheduled[rm.ID] = key
-	b.mu.Unlock()
-	delay := max(time.Until(deadline), 0) + time.Second
-	time.AfterFunc(delay, func() {
-		b.mu.Lock()
-		delete(b.scheduled, rm.ID)
-		b.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// The user id only shapes the Participant flag, which nothing in the
-		// broadcast path reads; the creator is a stable stand-in.
-		next, transitioned, err := b.app.normalizeTimer(ctx, rm.ID, rm.CreatorID)
-		if err != nil {
-			log.Printf("discord: phase wakeup %s: %v", rm.Code, err)
-			return
-		}
-		if transitioned {
-			b.app.broadcastTimerPhase(rm, next)
-		} else if next != nil {
-			// Deadline moved (pause, break-length change) — track the new one.
-			b.app.notifyDiscord(rm, next, false)
-		}
-	})
 }
 
 // handleRegister connects the guild to a room: an existing one when a room

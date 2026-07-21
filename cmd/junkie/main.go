@@ -37,6 +37,11 @@ type app struct {
 	limiter             *rateLimiter
 	currentUserOverride func(*http.Request) (user, bool)
 	discord             *discordBot
+
+	// wakeups dedupes the phase-end wakeups (schedulePhaseWakeup) so
+	// overlapping notify calls don't stack timers for the same room+phase.
+	wakeupMu sync.Mutex
+	wakeups  map[string]string
 }
 
 type user struct {
@@ -2055,11 +2060,11 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 	return true, nil
 }
 
-// startRoomTimerAndSchedule starts rm's timer (if none is active), broadcasts
-// the lobby countdown over the web hub, and schedules the lobby->focus
-// transition. Shared by the web "timer-start" room action and the Discord
-// /junkie start command, which additionally uses the returned timer to build
-// its own reply rather than relying on the hub broadcast.
+// startRoomTimerAndSchedule starts rm's timer (if none is active) and
+// broadcasts the lobby countdown over the web hub; notifyDiscord arms the
+// lobby->focus wakeup. Shared by the web "timer-start" room action and the
+// Discord /junkie start command, which additionally uses the returned timer
+// to build its own reply rather than relying on the hub broadcast.
 func (a *app) startRoomTimerAndSchedule(ctx context.Context, rm room, userID string, focusMinutes int, starterName string) (*timerRun, bool, error) {
 	// Clear any run whose pause has expired, so starting fresh doesn't
 	// require someone to have viewed the room since the expiry.
@@ -2080,22 +2085,58 @@ func (a *app) startRoomTimerAndSchedule(ctx context.Context, rm room, userID str
 		"starterName": starterName, "starterUserId": userID,
 	})
 	a.notifyDiscord(rm, timer, true)
-	a.scheduleLobbyDeadline(rm, userID, timer.PhaseEndsAt)
 	return timer, created, nil
 }
 
-func (a *app) scheduleLobbyDeadline(rm room, userID string, deadline time.Time) {
-	delay := time.Until(deadline)
-	if delay < 0 {
-		delay = 0
+// schedulePhaseWakeup arms a wakeup just past the timer's phase end that
+// advances the state machine and broadcasts the change, so a room nobody has
+// foregrounded — every tab backgrounded during the break, or members only on
+// Discord — still transitions on time and still fires its end-of-phase
+// notifications. normalizeTimer stays the single source of truth; this only
+// pokes it. Deduped per room+run+phase so overlapping notify calls (web
+// viewers polling plus this chain) don't stack timers.
+func (a *app) schedulePhaseWakeup(rm room, timer *timerRun) {
+	if timer == nil {
+		return
 	}
+	// A running phase wakes just past its deadline. A paused break has no
+	// deadline, so wake at the stale-pause cutoff instead — the moment
+	// normalizeTimer ends an abandoned run — so the room frees up on time
+	// without anyone viewing it.
+	deadline := timer.PhaseEndsAt
+	if timer.PausedAt != nil {
+		deadline = timer.PausedAt.Add(stalePauseTimeout)
+	}
+	key := timer.ID + ":" + timer.Phase + ":" + deadline.UTC().Format(time.RFC3339Nano)
+	a.wakeupMu.Lock()
+	if a.wakeups == nil {
+		a.wakeups = map[string]string{}
+	}
+	if a.wakeups[rm.ID] == key {
+		a.wakeupMu.Unlock()
+		return
+	}
+	a.wakeups[rm.ID] = key
+	a.wakeupMu.Unlock()
+	delay := max(time.Until(deadline), 0) + time.Second
 	time.AfterFunc(delay, func() {
+		a.wakeupMu.Lock()
+		delete(a.wakeups, rm.ID)
+		a.wakeupMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if timer, transitioned, err := a.normalizeTimer(ctx, rm.ID, userID); err != nil {
-			log.Printf("normalize room lobby %s: %v", rm.Code, err)
-		} else if transitioned {
-			a.broadcastTimerPhase(rm, timer)
+		// The user id only shapes the Participant flag, which nothing in the
+		// broadcast path reads; the creator is a stable stand-in.
+		next, transitioned, err := a.normalizeTimer(ctx, rm.ID, rm.CreatorID)
+		if err != nil {
+			log.Printf("phase wakeup %s: %v", rm.Code, err)
+			return
+		}
+		if transitioned {
+			a.broadcastTimerPhase(rm, next)
+		} else if next != nil {
+			// Deadline moved (pause, break-length change) — track the new one.
+			a.notifyDiscord(rm, next, false)
 		}
 	})
 }
