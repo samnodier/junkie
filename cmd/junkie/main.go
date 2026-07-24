@@ -308,6 +308,7 @@ func main() {
 	go a.sweepExpiredSessions(ctx)
 	go a.sweepInactiveTodos(ctx)
 	go a.sweepAbandonedEphemeralRooms(ctx)
+	go a.sweepStaleRoomWaiting(ctx)
 
 	// Reject state-changing requests from other origins (CSRF). Requests
 	// without browser origin metadata (curl, health checks) still pass.
@@ -1275,6 +1276,26 @@ func (a *app) sweepAbandonedEphemeralRooms(ctx context.Context) {
 	}
 }
 
+// sweepStaleRoomWaiting drops queued joins that never got their run. The
+// absorption queries already ignore entries past the one-hour cutoff
+// (stalePauseTimeout); this sweep removes them outright so a forgotten Join
+// stops showing a "waiting" badge and stops holding one of the user's
+// maxActiveRooms slots.
+func (a *app) sweepStaleRoomWaiting(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		if _, err := a.db.Exec(ctx, `DELETE FROM room_waiting WHERE created_at < now() - interval '1 hour'`); err != nil {
+			log.Printf("sweep stale room waiting: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/r/"), "/")
@@ -1636,10 +1657,12 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			// The break is the joinable window: pull in everyone who asked to
 			// join while focus was running (or before the run existed). They
 			// asked to be in the *next* session, which also counts as their
-			// check-in for it.
+			// check-in for it. Requests older than an hour (stalePauseTimeout)
+			// don't board — whoever tapped Join has long since moved on.
 			if _, err = tx.Exec(ctx, `
 				INSERT INTO timer_participants (timer_run_id, user_id, confirmed_session)
-				SELECT $1, user_id, $3 FROM room_waiting WHERE room_id = $2
+				SELECT $1, user_id, $3 FROM room_waiting
+				WHERE room_id = $2 AND created_at > now() - interval '1 hour'
 				ON CONFLICT DO NOTHING`, timer.ID, roomID, timer.CurrentSession+1); err != nil {
 				return nil, false, err
 			}
@@ -1684,6 +1707,12 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		}
 	}
 	if timer.Phase == "ended" {
+		// The run's end voids every queued join: "you'll be in when the break
+		// starts" pointed at this run, and carrying the queue into whatever
+		// run starts later would seat people who long since walked away.
+		if _, err = tx.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1`, roomID); err != nil {
+			return nil, false, err
+		}
 		if err = tx.Commit(ctx); err != nil {
 			return nil, false, err
 		}
@@ -1719,6 +1748,9 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	}
 	if len(timer.Participants) == 0 {
 		if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID); err != nil {
+			return nil, false, err
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = $1`, roomID); err != nil {
 			return nil, false, err
 		}
 		if err = tx.Commit(ctx); err != nil {
@@ -2044,10 +2076,13 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 		return false, err
 	}
 	// Anyone parked in the waiting list is in from the first session, no
-	// need to catch the lobby countdown live.
+	// need to catch the lobby countdown live. Entries older than an hour
+	// (stalePauseTimeout) are skipped: a Join tapped that long ago is a
+	// leftover intention, not someone actually here for this block.
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO timer_participants (timer_run_id, user_id)
-		SELECT $1, user_id FROM room_waiting WHERE room_id = $2
+		SELECT $1, user_id FROM room_waiting
+		WHERE room_id = $2 AND created_at > now() - interval '1 hour'
 		ON CONFLICT DO NOTHING`, runID, rm.ID); err != nil {
 		return false, err
 	}
@@ -2313,6 +2348,9 @@ func (a *app) endTimerIfNoParticipants(ctx context.Context, runID string) bool {
 		return false
 	}
 	_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND ended_at IS NULL`, runID)
+	// Same rule as normalizeTimer's ended paths: a dead run takes its queued
+	// joins with it, so the next start doesn't seat people from a past run.
+	_, _ = a.db.Exec(ctx, `DELETE FROM room_waiting WHERE room_id = (SELECT room_id FROM timer_runs WHERE id = $1)`, runID)
 	return true
 }
 
