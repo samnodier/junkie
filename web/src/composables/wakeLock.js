@@ -1,20 +1,40 @@
 import { onUnmounted } from 'vue';
 
-// Keep the screen awake on mobile while a timer is on screen, re-acquiring
-// when the tab becomes visible again (the browser drops the lock on hide).
-// Ported from the legacy wireWakeLock; call from views that show a countdown.
+// Keep the screen awake while a timer is on screen. The platform can take the
+// lock back at any time (screen off, app switcher, Low Power Mode), so treat
+// `want()` as a standing intent and keep re-arming until the view releases it.
+// Call from views that show a countdown.
+
+// Slow safety net for drops that fire no event we listen for.
+const RECHECK_MS = 15000;
+
 export function useWakeLock() {
   let lock = null;
   let requesting = false;
   let wanted = false;
+  let watchdog = null;
 
   async function acquire() {
-    if (!('wakeLock' in navigator) || lock || requesting) return;
+    if (!('wakeLock' in navigator) || !wanted || lock || requesting) return;
+    // A hidden document can't hold a lock, and asking rejects; the visibility
+    // handler below retries once we're back on screen.
+    if (document.visibilityState !== 'visible') return;
     requesting = true;
     try {
-      lock = await navigator.wakeLock.request('screen');
-      lock.addEventListener('release', () => {
+      const sentinel = await navigator.wakeLock.request('screen');
+      if (!wanted) {
+        sentinel.release().catch(() => {});
+        return;
+      }
+      lock = sentinel;
+      sentinel.addEventListener('release', () => {
+        // Only forget the sentinel we actually hold: a late release from a
+        // previous one must not drop a live lock on the floor.
+        if (lock !== sentinel) return;
         lock = null;
+        // The platform took it back. If the timer is still running and we're
+        // still on screen, take it straight back.
+        acquire();
       });
     } catch {
       lock = null;
@@ -25,23 +45,33 @@ export function useWakeLock() {
 
   function release() {
     wanted = false;
-    lock?.release().catch(() => {});
+    clearInterval(watchdog);
+    watchdog = null;
+    const held = lock;
     lock = null;
+    held?.release().catch(() => {});
   }
 
   function onVisibility() {
-    if (wanted && document.visibilityState === 'visible') acquire();
+    if (document.visibilityState === 'visible') acquire();
   }
   document.addEventListener('visibilitychange', onVisibility);
+  // A home-screen web app returning from the app switcher can restore from the
+  // page cache without a visibilitychange.
+  window.addEventListener('pageshow', onVisibility);
+  window.addEventListener('focus', onVisibility);
 
   onUnmounted(() => {
     document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('pageshow', onVisibility);
+    window.removeEventListener('focus', onVisibility);
     release();
   });
 
   return {
     want() {
       wanted = true;
+      if (!watchdog) watchdog = setInterval(acquire, RECHECK_MS);
       acquire();
     },
     release,
