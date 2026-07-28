@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { recordFocus } from '@/lib/guestActivity';
-import { onTimerEnd } from '@/lib/notify';
+import { onTimerEnd, syncTimerNotification } from '@/lib/notify';
 
 // Guest desk state, ported from guest.js. Same localStorage keys and timer
 // state machine (focus -> break_offer -> break -> idle), so existing guest
@@ -143,12 +143,19 @@ export const useGuestDeskStore = defineStore('guestDesk', {
       this.startFocus(focusMinutes);
     },
 
+    // The tick calls this every second; syncTimerNotification is keyed on the
+    // rendered text, so it only reposts when the phase actually turns over.
+    normalize(live = false) {
+      this.advance(live);
+      syncTimerNotification('guest', this.timer);
+    },
+
     // Advance expired phases, exactly like guest.js normalizeTimer: an
     // elapsed focus records its minutes once and becomes a break offer; an
     // elapsed break clears the timer. `live` notifies only for transitions
     // observed by the running tick, matching legacy (no stale notification
     // when the page is opened long after a phase already ended).
-    normalize(live = false) {
+    advance(live) {
       // Re-read storage first, like guest.js did on every tick: another tab
       // (or anything else) may have changed the timer or todos.
       this.timer = load(TIMER_KEY, null);

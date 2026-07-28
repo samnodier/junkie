@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
-import { onRoomInvite, onBreakInvite, onTimerEnd } from '@/lib/notify';
+import { onRoomInvite, onBreakInvite, onTimerEnd, syncTimerNotification } from '@/lib/notify';
 
 // Room page state, fed by /api/room/{code}. Same mutation pattern as the
 // desk: post to the legacy endpoints via postForm (rejections surface as
@@ -65,6 +65,14 @@ export const useRoomStore = defineStore('room', {
           else if (this.lastPhase === 'break' && phase === 'focus') onTimerEnd('break');
         }
         this.lastPhase = phase;
+
+        // Keep the ongoing notification in step with the phase, but only for
+        // a run this viewer actually joined — watching a room you're not in
+        // shouldn't put a timer in your notification shade.
+        syncTimerNotification('room', this.timer?.participant ? this.timer : null, {
+          label: this.room?.name || '',
+          url: `/r/${encodeURIComponent(this.code)}`,
+        });
       } catch {
         /* next signal or periodic tick retries */
       }

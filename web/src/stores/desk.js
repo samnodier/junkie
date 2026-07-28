@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
-import { onRoomInvite, onBreakInvite } from '@/lib/notify';
+import { onRoomInvite, onBreakInvite, syncTimerNotification } from '@/lib/notify';
 
 // Signed-in desk state, fed by /api/desk. Mutations post to the legacy
 // endpoints (which own all the rules) via postForm — rejections surface as
@@ -31,9 +31,21 @@ export const useDeskStore = defineStore('desk', {
         this.todos = data.todos || [];
         this.rooms = data.rooms || [];
         this.loaded = true;
+        this.syncNotification();
       } catch {
         /* next signal or periodic tick retries */
       }
+    },
+
+    // The desk renders a solo card and a card per room, but only one block can
+    // be the one you're sitting in: a private run, else the room run you
+    // joined. Anything else on screen is someone else's timer.
+    syncNotification() {
+      const room = this.soloTimer ? null : this.rooms.find((r) => r.timer?.participant);
+      syncTimerNotification('desk', this.soloTimer || room?.timer || null, {
+        label: room?.name || '',
+        url: room ? `/r/${encodeURIComponent(room.code)}` : '/',
+      });
     },
 
     // --- personal todos (legacy endpoints, then refresh) ---

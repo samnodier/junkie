@@ -249,6 +249,7 @@ func (a *app) apiDesk(w http.ResponseWriter, r *http.Request) {
 			"phase":        soloTimer.Phase,
 			"focusMinutes": soloTimer.FocusMinutes,
 			"breakMinutes": soloTimer.BreakMinutes,
+			"endsAt":       soloTimer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
 			"secondsLeft":  seconds,
 			"breakPending": soloBreakPending(soloTimer),
 		}

@@ -42,6 +42,25 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Notifications posted through showNotification() (the only form Android
+// supports) are owned by the worker, not the page, so their clicks land here.
+// Focus an existing junkie window when there is one — reopening would drop the
+// live socket and reset the view — and only open a new one as a last resort.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || '/', self.location.origin);
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if (new URL(client.url).origin !== target.origin) continue;
+        if (client.url.startsWith(target.href)) return client.focus();
+        return 'navigate' in client ? client.navigate(target.href).then((c) => c && c.focus()) : client.focus();
+      }
+      return self.clients.openWindow(target.href);
+    })
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;                 // never intercept POST etc.
