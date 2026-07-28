@@ -1241,12 +1241,17 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
+	// Every window below is anchored on the user's own today, not the server's
+	// — on a UTC box "today" flips mid-evening for the Americas and mid-morning
+	// for Asia, which is not the day the person is having.
+	today := a.userToday(ctx, u.ID)
+
 	if days, ok := statsWindowDays[period]; ok {
-		cutoff := `activity_date > CURRENT_DATE - $2::int`
-		args := []any{u.ID, days}
+		cutoff := `activity_date > $3::date - $2::int`
+		args := []any{u.ID, days, today}
 		switch days {
 		case 0:
-			cutoff, args = `activity_date = CURRENT_DATE`, []any{u.ID}
+			cutoff, args = `activity_date = $2::date`, []any{u.ID, today}
 		case -1:
 			cutoff, args = `TRUE`, []any{u.ID}
 		}
@@ -1262,14 +1267,14 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
-	var today, week, total, activeDays int
+	var todayMinutes, week, total, activeDays int
 	_ = a.db.QueryRow(ctx, `
 		SELECT
-			COALESCE(SUM(focus_minutes) FILTER (WHERE activity_date = CURRENT_DATE), 0),
-			COALESCE(SUM(focus_minutes) FILTER (WHERE activity_date > CURRENT_DATE - 7), 0),
+			COALESCE(SUM(focus_minutes) FILTER (WHERE activity_date = $2::date), 0),
+			COALESCE(SUM(focus_minutes) FILTER (WHERE activity_date > $2::date - 7), 0),
 			COALESCE(SUM(focus_minutes), 0),
 			COUNT(*) FILTER (WHERE focus_minutes > 0)
-		FROM activity WHERE user_id = $1`, u.ID).Scan(&today, &week, &total, &activeDays)
+		FROM activity WHERE user_id = $1`, u.ID, today).Scan(&todayMinutes, &week, &total, &activeDays)
 	var rooms int
 	_ = a.db.QueryRow(ctx, `SELECT COUNT(*) FROM room_members WHERE user_id = $1`, u.ID).Scan(&rooms)
 
@@ -1278,9 +1283,9 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 	streak := 0
 	if rows, err := a.db.Query(ctx, `
 		SELECT activity_date FROM activity
-		WHERE user_id = $1 AND focus_minutes > 0 AND activity_date > CURRENT_DATE - 366
-		ORDER BY activity_date DESC`, u.ID); err == nil {
-		expect := time.Now()
+		WHERE user_id = $1 AND focus_minutes > 0 AND activity_date > $2::date - 366
+		ORDER BY activity_date DESC`, u.ID, today); err == nil {
+		expect := today
 		first := true
 		for rows.Next() {
 			var day time.Time
@@ -1301,7 +1306,7 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 	}
 
 	reply := fmt.Sprintf("**%s** — focus stats\nToday: %s · Last 7 days: %s\nAll time: %s across %d day(s)",
-		u.DisplayName, formatFocusMinutes(today), formatFocusMinutes(week), formatFocusMinutes(total), activeDays)
+		u.DisplayName, formatFocusMinutes(todayMinutes), formatFocusMinutes(week), formatFocusMinutes(total), activeDays)
 	if streak > 0 {
 		reply += fmt.Sprintf("\nStreak: %d day(s)", streak)
 	}

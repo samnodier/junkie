@@ -56,6 +56,11 @@ type user struct {
 	// ConfirmedSession is only populated on timer-participant queries: the
 	// highest session number this participant has claimed a seat in.
 	ConfirmedSession int
+	// Timezone is the IANA zone the user's browser reported, empty until one
+	// has been. Deliberately not part of apiUser: it is the viewer's own
+	// setting, and apiUser is what participant lists serialize to everyone
+	// else in the room.
+	Timezone string
 }
 
 type room struct {
@@ -259,6 +264,7 @@ func main() {
 		http.Redirect(w, r, dest, http.StatusMovedPermanently)
 	})
 	mux.HandleFunc("GET /profile", a.spaPage)
+	mux.HandleFunc("POST /api/timezone", a.requireAuth(a.apiSetTimezone))
 	mux.HandleFunc("GET /api/profile", a.requireAuth(a.apiProfile))
 	mux.HandleFunc("POST /profile/password", a.requireAuth(a.changePassword))
 	mux.HandleFunc("POST /profile/delete", a.requireAuth(a.deleteAccount))
@@ -1842,9 +1848,12 @@ func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end
 		if minutes <= 0 {
 			continue
 		}
+		// Each participant lands on their own calendar day: one room can hold
+		// people in different zones, so the date is looked up per user rather
+		// than taken from the server's CURRENT_DATE.
 		if _, err = tx.Exec(ctx, `
 			INSERT INTO activity (user_id, activity_date, focus_minutes)
-			VALUES ($1, CURRENT_DATE, $2)
+			SELECT id, (now() AT TIME ZONE COALESCE(timezone, 'UTC'))::date, $2 FROM users WHERE id = $1
 			ON CONFLICT (user_id, activity_date)
 			DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, userID, minutes); err != nil {
 			return err
@@ -2306,7 +2315,7 @@ func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun,
 		if err == nil && tag.RowsAffected() > 0 {
 			_, _ = a.db.Exec(ctx, `
 				INSERT INTO activity (user_id, activity_date, focus_minutes)
-				VALUES ($1, CURRENT_DATE, $2)
+				SELECT id, (now() AT TIME ZONE COALESCE(timezone, 'UTC'))::date, $2 FROM users WHERE id = $1
 				ON CONFLICT (user_id, activity_date)
 				DO UPDATE SET focus_minutes = activity.focus_minutes + EXCLUDED.focus_minutes`, userID, timer.FocusMinutes)
 		}
@@ -2476,9 +2485,10 @@ func (a *app) currentUser(r *http.Request) (user, bool) {
 	var u user
 	err = a.db.QueryRow(r.Context(), `
 		SELECT u.id, u.username, u.display_name, u.role, u.avatar IS NOT NULL,
-			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint,
+			COALESCE(u.timezone, '')
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token = $1 AND s.expires_at > now()`, hashToken(cookie.Value)).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.HasAvatar, &u.AvatarVersion)
+		WHERE s.token = $1 AND s.expires_at > now()`, hashToken(cookie.Value)).Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.HasAvatar, &u.AvatarVersion, &u.Timezone)
 	return u, err == nil
 }
 
@@ -2591,12 +2601,36 @@ func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
 	return todos, nil
 }
 
+// userToday is the calendar date it currently is where the user is, derived
+// from the IANA zone their browser reported. Users who have never loaded the
+// SPA (Discord-only accounts, or anyone since before timezones were recorded)
+// have no zone stored and read as UTC — the behaviour the whole app had
+// before. Callers that can express the date in SQL should do so inline; this
+// exists for the ones that need it back in Go, like streak arithmetic.
+func (a *app) userToday(ctx context.Context, userID string) time.Time {
+	var d time.Time
+	if err := a.db.QueryRow(ctx, `
+		SELECT (now() AT TIME ZONE COALESCE(timezone, 'UTC'))::date
+		FROM users WHERE id = $1`, userID).Scan(&d); err != nil {
+		now := time.Now().UTC()
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	}
+	return d
+}
+
 func (a *app) activity(ctx context.Context, userID string) (heatmapData, error) {
+	// The grid has to end on the viewer's today, not the server's: on a UTC
+	// box an evening in New York is already tomorrow, so the last square would
+	// be a day the user hasn't reached yet and today's minutes would land one
+	// cell early.
 	rows, err := a.db.Query(ctx, `
-		SELECT d::date, COALESCE(a.focus_minutes, 0)
-		FROM generate_series(CURRENT_DATE - INTERVAL '364 days', CURRENT_DATE, INTERVAL '1 day') d
-		LEFT JOIN activity a ON a.user_id = $1 AND a.activity_date = d::date
-		ORDER BY d`, userID)
+		WITH today AS (
+			SELECT (now() AT TIME ZONE COALESCE(timezone, 'UTC'))::date AS d FROM users WHERE id = $1
+		)
+		SELECT g::date, COALESCE(a.focus_minutes, 0)
+		FROM today, generate_series(today.d - INTERVAL '364 days', today.d, INTERVAL '1 day') g
+		LEFT JOIN activity a ON a.user_id = $1 AND a.activity_date = g::date
+		ORDER BY g`, userID)
 	if err != nil {
 		return heatmapData{}, err
 	}

@@ -71,6 +71,11 @@ type apiUser struct {
 func (a *app) apiMe(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		User *apiUser `json:"user"`
+		// Timezone is the zone currently on record for the viewer, so the
+		// client can tell whether the browser's differs and only post when it
+		// does. Sits beside User rather than inside apiUser, which is also
+		// what every other member of a room is serialized to.
+		Timezone string `json:"timezone,omitempty"`
 	}
 	if u, ok := a.currentUser(r); ok {
 		payload.User = &apiUser{
@@ -81,8 +86,40 @@ func (a *app) apiMe(w http.ResponseWriter, r *http.Request) {
 			HasAvatar:     u.HasAvatar,
 			AvatarVersion: u.AvatarVersion,
 		}
+		payload.Timezone = u.Timezone
 	}
 	writeJSON(w, payload)
+}
+
+// apiSetTimezone records the IANA zone the browser reported, so focus minutes
+// land on the day the user actually had. Nothing is asked of anyone: the value
+// comes from Intl.DateTimeFormat().resolvedOptions().timeZone. An unrecognised
+// zone is rejected rather than stored — every activity query feeds it to AT
+// TIME ZONE, so a bad value saved here would break them all later.
+func (a *app) apiSetTimezone(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	if !a.limiter.allow("tz:"+u.ID, 20, time.Hour) {
+		writeJSONError(w, http.StatusTooManyRequests, "Too many timezone updates.")
+		return
+	}
+	tz := strings.TrimSpace(r.FormValue("timezone"))
+	if tz == "" || len(tz) > 64 {
+		writeJSONError(w, http.StatusBadRequest, "Unknown timezone.")
+		return
+	}
+	// Validate against the very table Postgres resolves AT TIME ZONE from,
+	// rather than a Go-side list that could drift from it.
+	var known bool
+	if err := a.db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM pg_timezone_names WHERE name = $1)`, tz).Scan(&known); err != nil || !known {
+		writeJSONError(w, http.StatusBadRequest, "Unknown timezone.")
+		return
+	}
+	if _, err := a.db.Exec(r.Context(), `UPDATE users SET timezone = $1 WHERE id = $2`, tz, u.ID); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Could not save your timezone.")
+		return
+	}
+	writeJSON(w, map[string]string{"timezone": tz})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
