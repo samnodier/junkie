@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"net"
 	"net/http"
@@ -137,6 +139,47 @@ func (l *rateLimiter) refund(key string) {
 	l.buckets[key] = b
 }
 
+// inlineScriptTag matches a <script> element and captures its attributes and
+// body. Scripts with a src load from our own origin and are covered by 'self';
+// only the inline ones need a hash.
+var inlineScriptTag = regexp.MustCompile(`(?is)<script([^>]*)>(.*?)</script>`)
+
+// inlineScriptHashes returns a CSP source expression for every inline script
+// in html, hashing the element's exact body the way a browser does.
+func inlineScriptHashes(html []byte) []string {
+	var out []string
+	for _, m := range inlineScriptTag.FindAllSubmatch(html, -1) {
+		if bytes.Contains(bytes.ToLower(m[1]), []byte("src=")) {
+			continue
+		}
+		if len(bytes.TrimSpace(m[2])) == 0 {
+			continue
+		}
+		sum := sha256.Sum256(m[2])
+		out = append(out, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+	}
+	return out
+}
+
+// scriptSrc is the script-src directive, built once at startup.
+//
+// The page carries two inline scripts — the theme applied before first paint,
+// and the service worker registration — and allowing them used to mean
+// 'unsafe-inline', which tells the browser to run *any* inline script. Hashing
+// them instead pins the policy to those exact two bodies, so an injected
+// <script> would be refused. The hashes are derived from the shipped HTML
+// rather than written down, so editing either script keeps working without
+// anyone remembering to update a constant.
+var scriptSrc = buildScriptSrc()
+
+func buildScriptSrc() string {
+	data, err := staticAssets.ReadFile("static/app/index.html")
+	if err != nil {
+		return "'self'" // no build output; there is no page to run scripts on
+	}
+	return strings.Join(append([]string{"'self'"}, inlineScriptHashes(data)...), " ")
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -145,7 +188,10 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline'; "+
+				"script-src "+scriptSrc+"; "+
+				// style-src keeps 'unsafe-inline': Vue writes :style bindings as
+				// style attributes, which this directive governs, so removing it
+				// would break the timer rings.
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"font-src https://fonts.gstatic.com; "+
 				"img-src 'self' data:; "+

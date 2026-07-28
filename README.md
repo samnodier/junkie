@@ -208,6 +208,15 @@ postgres://junkie:junkie@localhost:5432/junkie?sslmode=disable
 
 Override it with `DATABASE_URL` if needed. Migrations in `migrations/` run automatically at startup.
 
+### Tests
+
+```sh
+go test ./... -race     # server
+npm --prefix web test   # front end (vitest)
+```
+
+Neither suite needs a database or a running server.
+
 ## Deployment
 
 The server needs PostgreSQL; SQLite is not supported. People *using* a deployed instance need only a browser.

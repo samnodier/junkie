@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,6 +133,63 @@ func TestRateLimiterSweepsExpiredBuckets(t *testing.T) {
 		if _, ok := l.buckets[fmt.Sprintf("stale-%d", i)]; ok {
 			t.Fatalf("expired bucket stale-%d survived the sweep", i)
 		}
+	}
+}
+
+// The CSP hashes every inline script the page ships so script-src no longer
+// needs 'unsafe-inline'. A miss here is silent in the worst way — the browser
+// refuses the script and the theme flash or the service worker quietly stops
+// working — so pin the extraction rules.
+func TestInlineScriptHashes(t *testing.T) {
+	html := []byte(`<!doctype html>
+<head>
+  <script>
+    var theme = 'dark';
+  </script>
+  <script type="module" crossorigin src="/app/assets/index-ABC.js"></script>
+  <script SRC="/other.js"></script>
+  <script></script>
+  <script>register()</script>
+</head>`)
+
+	got := inlineScriptHashes(html)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 inline scripts hashed (src and empty ones skipped), got %d: %v", len(got), got)
+	}
+	for _, h := range got {
+		if !strings.HasPrefix(h, "'sha256-") || !strings.HasSuffix(h, "'") {
+			t.Errorf("malformed CSP source expression: %s", h)
+		}
+	}
+
+	// The hash must cover the element body exactly as written: a browser
+	// hashes the raw text, so any trimming or re-indentation here would
+	// produce a policy that rejects the very script it was built from.
+	sum := sha256.Sum256([]byte("register()"))
+	want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	if got[1] != want {
+		t.Errorf("body hash = %s, want %s (hash must be over the exact body)", got[1], want)
+	}
+
+	// Distinct bodies must not collide, or one edit would silently authorize
+	// the other script too.
+	if got[0] == got[1] {
+		t.Error("different script bodies produced the same hash")
+	}
+
+	if h := inlineScriptHashes([]byte("<p>no scripts here</p>")); len(h) != 0 {
+		t.Errorf("expected no hashes for script-free html, got %v", h)
+	}
+}
+
+// buildScriptSrc must never emit 'unsafe-inline' — that was the finding this
+// replaced — and must always allow same-origin bundles.
+func TestScriptSrcDirective(t *testing.T) {
+	if strings.Contains(scriptSrc, "unsafe-inline") {
+		t.Errorf("script-src still allows unsafe-inline: %s", scriptSrc)
+	}
+	if !strings.HasPrefix(scriptSrc, "'self'") {
+		t.Errorf("script-src must allow same-origin bundles, got: %s", scriptSrc)
 	}
 }
 

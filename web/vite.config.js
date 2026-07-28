@@ -14,6 +14,14 @@ export default defineConfig({
     outDir: '../cmd/junkie/static/app',
     emptyOutDir: true,
   },
+  // `npm test` (vitest run). jsdom gives the DOM and localStorage the app code
+  // reaches for; anything browser-only that jsdom lacks — Notification, service
+  // workers — is stubbed per test, since faking those is precisely the point.
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.js'],
+    restoreMocks: true,
+  },
   server: {
     port: 5173,
     proxy: {
