@@ -2694,7 +2694,17 @@ func (h *hub) leave(code string, c *websocket.Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.rooms[code], c)
+	// Drop the channel once its last viewer goes: the map is keyed by room
+	// code and by per-user channel, so leaving the empty inner map behind
+	// meant every ephemeral room and every user who ever connected kept a
+	// permanent entry in a process that runs for weeks.
+	if len(h.rooms[code]) == 0 {
+		delete(h.rooms, code)
+	}
 }
+
+// broadcastTimeout bounds how long one connection may hold up a broadcast.
+const broadcastTimeout = 2 * time.Second
 
 func (h *hub) broadcast(code, msg string) {
 	h.mu.Lock()
@@ -2703,11 +2713,23 @@ func (h *hub) broadcast(code, msg string) {
 		conns = append(conns, c)
 	}
 	h.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	// One goroutine and one deadline per connection. Writing sequentially
+	// under a single shared deadline meant a connection that had stopped
+	// draining (a phone that slept mid-run) burned the entire budget, and
+	// every remaining member then failed instantly against the dead context
+	// — one stalled viewer silently cost the whole room its phase update.
+	// Conn.Write is safe to call concurrently.
+	var wg sync.WaitGroup
 	for _, c := range conns {
-		_ = c.Write(ctx, websocket.MessageText, []byte(msg))
+		wg.Add(1)
+		go func(c *websocket.Conn) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), broadcastTimeout)
+			defer cancel()
+			_ = c.Write(ctx, websocket.MessageText, []byte(msg))
+		}(c)
 	}
+	wg.Wait()
 }
 
 func (h *hub) broadcastJSON(code string, payload interface{}) {

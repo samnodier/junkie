@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -100,6 +101,35 @@ func TestRateLimiter(t *testing.T) {
 	l.buckets["k"] = rateBucket{count: 99, resetAt: time.Now().Add(-time.Second)}
 	if !l.allow("k", 3, time.Minute) {
 		t.Error("expired window should reset the counter")
+	}
+}
+
+// Expired buckets must be collected on a schedule. The old sweep only ran
+// above 10k keys and deleted nothing while buckets were still live, so it
+// rescanned the whole map on every single call once it crossed that line.
+func TestRateLimiterSweepsExpiredBuckets(t *testing.T) {
+	l := newRateLimiter()
+	for i := range 50 {
+		l.buckets[fmt.Sprintf("stale-%d", i)] = rateBucket{count: 1, resetAt: time.Now().Add(-time.Hour)}
+	}
+	l.buckets["live"] = rateBucket{count: 1, resetAt: time.Now().Add(time.Hour)}
+
+	// No sweep is due yet, so the stale keys are still resident.
+	l.allow("k", 5, time.Minute)
+	if len(l.buckets) < 51 {
+		t.Fatalf("swept before the interval elapsed: %d buckets left", len(l.buckets))
+	}
+
+	// Backdate the last sweep so the next call is due one.
+	l.lastSweep = time.Now().Add(-2 * rateSweepInterval)
+	l.allow("k", 5, time.Minute)
+	if _, ok := l.buckets["live"]; !ok {
+		t.Error("sweep dropped a bucket whose window is still open")
+	}
+	for i := range 50 {
+		if _, ok := l.buckets[fmt.Sprintf("stale-%d", i)]; ok {
+			t.Fatalf("expired bucket stale-%d survived the sweep", i)
+		}
 	}
 }
 

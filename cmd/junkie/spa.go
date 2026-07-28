@@ -536,6 +536,12 @@ func (a *app) apiDiscordLinkContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"discordUsername": discordUsername})
 }
 
+// loginTimingHash is a throwaway hash at the same cost as a real stored
+// password, compared against when the username doesn't exist so that both
+// outcomes take about as long. The plaintext behind it is random per process
+// and never accepted anywhere — it exists only to burn the same CPU.
+var loginTimingHash, _ = bcrypt.GenerateFromPassword([]byte(randomHex(16)), bcrypt.DefaultCost)
+
 // apiLogin and apiSignup are the JSON twins of login/signup: identical
 // validation messages, rate-limit keys, and session behavior, but a JSON
 // verdict instead of a rendered template. The legacy form handlers stay
@@ -545,14 +551,27 @@ func (a *app) apiLogin(w http.ResponseWriter, r *http.Request) {
 	username := strings.ToLower(strings.TrimSpace(r.FormValue("username")))
 	password := r.FormValue("password")
 	next := safeNext(r.FormValue("next"))
+	// The per-user bucket is keyed on validUsername only: no account can exist
+	// under a name that fails the pattern, so an unparseable name has nothing
+	// to protect — and keying on raw input let one caller mint an unbounded
+	// number of distinct buckets from the request body.
 	if !a.limiter.allow("login:"+clientIP(r), 20, 5*time.Minute) ||
-		(username != "" && !a.limiter.allow("login-user:"+username, 10, 15*time.Minute)) {
+		(validUsername(username) && !a.limiter.allow("login-user:"+username, 10, 15*time.Minute)) {
 		writeJSONError(w, http.StatusTooManyRequests, "Too many sign-in attempts. Try again in a few minutes.")
 		return
 	}
 	var id, hash string
 	err := a.db.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+	if err != nil {
+		// Spend a comparable bcrypt round anyway. Returning early here made
+		// "no such user" answer in microseconds while a real account paid the
+		// full hash cost, so response time told an attacker which usernames
+		// exist without ever guessing a password.
+		_ = bcrypt.CompareHashAndPassword(loginTimingHash, []byte(password))
+		writeJSONError(w, http.StatusUnauthorized, "Username or password is incorrect.")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
 		writeJSONError(w, http.StatusUnauthorized, "Username or password is incorrect.")
 		return
 	}

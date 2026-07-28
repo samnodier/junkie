@@ -77,8 +77,9 @@ func isSecureRequest(r *http.Request) bool {
 }
 
 type rateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]rateBucket
+	mu        sync.Mutex
+	buckets   map[string]rateBucket
+	lastSweep time.Time
 }
 
 type rateBucket struct {
@@ -86,8 +87,11 @@ type rateBucket struct {
 	resetAt time.Time
 }
 
+// rateSweepInterval bounds how often expired buckets are collected.
+const rateSweepInterval = time.Minute
+
 func newRateLimiter() *rateLimiter {
-	return &rateLimiter{buckets: map[string]rateBucket{}}
+	return &rateLimiter{buckets: map[string]rateBucket{}, lastSweep: time.Now()}
 }
 
 // allow records one attempt for key and reports whether it stays within
@@ -96,12 +100,18 @@ func (l *rateLimiter) allow(key string, limit int, window time.Duration) bool {
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.buckets) > 10000 {
+	// Sweep on a schedule, not on map size. The size trigger only fired above
+	// 10k keys and then rescanned the whole map on *every* subsequent call —
+	// and since it deletes nothing while the buckets are still live, a flood
+	// of distinct keys turned each rate-limit check into an O(n) scan holding
+	// this global lock, which is exactly when the limiter must stay cheap.
+	if now.Sub(l.lastSweep) >= rateSweepInterval {
 		for k, b := range l.buckets {
 			if now.After(b.resetAt) {
 				delete(l.buckets, k)
 			}
 		}
+		l.lastSweep = now
 	}
 	b, ok := l.buckets[key]
 	if !ok || now.After(b.resetAt) {
