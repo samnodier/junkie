@@ -148,6 +148,12 @@ func (t *timerRun) BreakPending() bool {
 // fresh run instead of blocking on a resume that's never coming.
 const stalePauseTimeout = time.Hour
 
+// maxPhaseAdvances bounds one normalizeTimer call's phase transitions. A run
+// tops out at 12 sessions and each pass through the loop moves it forward, so
+// real traffic never gets near this; it is a backstop against a future state
+// that fails to advance, which would otherwise spin inside a transaction.
+const maxPhaseAdvances = 64
+
 // PauseExpired reports a pause that has outlived stalePauseTimeout.
 func (t *timerRun) PauseExpired(now time.Time) bool {
 	return t != nil && t.PausedAt != nil && now.Sub(*t.PausedAt) >= stalePauseTimeout
@@ -1607,7 +1613,20 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		timer.Phase = "ended"
 		timer.Transitioned = true
 	}
-	for timer.Phase != "ended" && timer.PausedAt == nil && !now.Before(timer.PhaseEndsAt) {
+	// The loop is already bounded in principle: every break->focus pass
+	// increments current_session, and the focus branch ends the run once it
+	// reaches total_sessions (12 max), so even a row with zero-length phases
+	// drains to 'ended' rather than spinning. This cap is insurance against a
+	// future edit to the state machine introducing a pass that doesn't
+	// advance — spinning inside a transaction holding FOR UPDATE would wedge
+	// the request, so stop and log instead. Real traffic settles in one or
+	// two passes and never approaches this.
+	for advances := 0; timer.Phase != "ended" && timer.PausedAt == nil && !now.Before(timer.PhaseEndsAt); advances++ {
+		if advances >= maxPhaseAdvances {
+			log.Printf("normalize timer %s: phase loop made %d advances without settling (phase %q, focus %d, break %d) — stopping",
+				timer.ID, advances, timer.Phase, timer.FocusMinutes, timer.BreakMinutes)
+			break
+		}
 		if timer.Phase == "lobby" {
 			timer.Phase = "focus"
 			timer.PhaseStartedAt = now
