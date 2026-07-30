@@ -1984,8 +1984,14 @@ body.menu-drawer-open { overflow: hidden; }
 .pip-root {
   container: pip / size;
   box-sizing: border-box;
-  width: 100%;
-  height: 100%;
+  /* Viewport units, not percentages. `container-type: size` contains both
+     axes, so the box can't take its height from its own contents — and a
+     percentage against the pop-out's auto-height <body> is indefinite, which
+     collapses it to zero. A zero-height container then reports 0cqh, matches
+     the smallest tier, and leaves the ring nothing to draw in. In this
+     document the viewport is the window, so vw/vh are always definite. */
+  width: 100vw;
+  height: 100vh;
   padding: var(--sp-3);
   overflow: hidden;
 }
