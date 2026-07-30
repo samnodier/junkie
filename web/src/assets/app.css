@@ -2081,10 +2081,13 @@ body.menu-drawer-open { overflow: hidden; }
     .room-focus-name, .circle-timer-step
   ) { display: none; }
   .pip-root form:not(.circle-timer-form) { display: none; }
-  /* One action survives: whatever the primary move is in this phase (start the
-     break, join the block, check in). The secondary ghost controls stay gone —
-     they live in forms without a primary button, so they stay hidden. */
-  .pip-root form:has(.btn-primary) { display: block; }
+  /* One action survives: the phase's leading control — the first one the card
+     offers, which is join / start / resume / pause depending on where the run
+     is. The rest stay hidden. Keyed off document order rather than
+     .btn-primary, because a running break's most useful control (pause) is a
+     ghost button and would otherwise leave the window with nothing to press. */
+  .pip-root :is(.timer-card, .room-focus-shell)
+    > form:not(.circle-timer-form):first-of-type { display: block; }
   .pip-root .circle-timer,
   .pip-root .circle-timer.idle,
   .pip-root .circle-timer.running,
