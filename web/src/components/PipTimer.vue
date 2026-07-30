@@ -27,7 +27,6 @@ const { supported, open, mount, openPip, closePip } = usePipWindow();
         <rect x="2" y="4" width="20" height="16" rx="2"/>
         <rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor" stroke="none"/>
       </svg>
-      <span class="pip-pop-label">Pop out</span>
     </button>
 
     <!-- `to` falls back to body purely to keep Teleport quiet while disabled;

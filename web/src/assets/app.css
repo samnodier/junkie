@@ -1921,40 +1921,58 @@ body.menu-drawer-open { overflow: hidden; }
 
 /* --- Popped-out timer (Document Picture-in-Picture) --------------------
    The card is teleported into a small always-on-top OS window. In the page
-   the wrapper collapses to nothing (display: contents) so the pop-out
-   button, the card and the parked notice all sit directly in the timer
-   column's own flex/grid flow, exactly as the card did before. */
+   the wrapper collapses to nothing (display: contents) so the card keeps the
+   exact box it had before this feature existed — the pop-out control is
+   overlaid on its corner, never inserted into the flow. */
 .pip-slot { display: contents; }
 .pip-stage[data-pip="in"] { display: contents; }
 
+/* Icon only, tucked into the timer card's top-right. Absolutely positioned
+   against the timer column so it costs the layout nothing: the timer and the
+   todo panel keep the sizes they had. */
+.desk-ring-column,
+.room-timer-column,
+.room-focus-page { position: relative; }
 .pip-pop {
-  align-self: flex-end;
-  justify-self: end;
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  z-index: 3;
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-1) var(--sp-3);
-  border: 1px solid var(--border);
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--muted);
-  font-family: inherit;
-  font-size: var(--fs-small);
-  line-height: 1.6;
+  background: transparent;
+  color: var(--faint);
   cursor: pointer;
 }
-.pip-pop:hover { color: var(--ink); border-color: var(--border-strong); }
-.pip-pop svg { width: 15px; height: 15px; }
+.pip-pop:hover {
+  color: var(--ink);
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+.pip-pop svg { width: 16px; height: 16px; }
+/* Holding the card's place while it is out, so nothing reflows. */
 .pip-parked {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: var(--sp-3);
   text-align: center;
 }
+.desk-ring-column .pip-parked { min-height: min(32rem, calc(100vh - 10rem)); }
+.room-timer-column .pip-parked { min-height: 24rem; }
 
-/* The pop-out document itself. It starts with no styles of its own — this
-   whole sheet is copied across at open time (composables/pipWindow.js). */
+/* --- the pop-out document -------------------------------------------------
+   It starts with no styles of its own; this whole sheet is copied across at
+   open time (composables/pipWindow.js). Everything below sizes against the
+   window through container units rather than vh/vw, so the same rules can be
+   rendered — and screenshotted — inside a fixed-size box at design time. */
 .pip-body {
   margin: 0;
   padding: 0;
@@ -1964,26 +1982,29 @@ body.menu-drawer-open { overflow: hidden; }
   font-family: var(--font-sans);
 }
 .pip-root {
+  container: pip / size;
   box-sizing: border-box;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   padding: var(--sp-3);
-  overflow: auto;
+  overflow: hidden;
 }
 .pip-stage[data-pip="out"] {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-2);
-  min-height: 100%;
+  gap: var(--sp-1);
+  width: 100%;
+  height: 100%;
   min-width: 0;
   text-align: center;
 }
 /* Strip the card's panel chrome and its desk-sized fixed height: in here it
    is the whole window, not a card on a page. */
 .pip-root .desk-timer-view,
-.pip-root .timer-card {
+.pip-root .timer-card,
+.pip-root .room-focus-shell {
   width: 100%;
   height: auto;
   min-height: 0;
@@ -1993,35 +2014,23 @@ body.menu-drawer-open { overflow: hidden; }
   background: none;
   box-shadow: none;
 }
-.pip-root .timer-card {
+.pip-root .timer-card,
+.pip-root .room-focus-shell {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
 }
-.pip-root .timer-card > form { margin: 0; }
-/* Fit the ring to the window instead of the desk's viewport-width clamp. */
-.pip-root .circle-timer,
-.pip-root .circle-timer.idle,
-.pip-root .circle-timer.running,
-.pip-root .circle-timer.break-idle,
-.pip-root .circle-timer.break-offer,
-.pip-root .circle-timer.break-running {
-  width: min(40vh, 60vw);
-  max-width: 100%;
-}
-/* Compact the chrome around the ring so the busiest state — a break, with
-   three buttons, two labels and the avatar stack — still fits the default
-   square without scrolling. The desk's 48px touch targets are sized for a
-   full page; this is a window the size of a postcard.
-   !important is the cheap way past the base button rule, whose fifteen
-   chained :not()s put it out of reach of any sane selector here. */
-.pip-root .timer-card,
-.pip-root .room-focus-shell { gap: var(--sp-1); }
 .pip-root .timer-card > form,
 .pip-root .room-focus-shell > form,
 .pip-root form > button { margin: 0; }
+/* Compact the chrome around the ring so the busiest state — a break, with
+   three buttons, two labels and the avatar stack — fits the default window.
+   The desk's 48px touch targets are sized for a full page; this is a window
+   the size of a postcard. !important is the cheap way past the base button
+   rule, whose fifteen chained :not()s put it out of reach of any sane
+   selector here. */
 .pip-root button {
   min-height: 30px !important;
   padding: 0 var(--sp-3) !important;
@@ -2030,27 +2039,125 @@ body.menu-drawer-open { overflow: hidden; }
 .pip-root .circle-timer-step { min-height: 0 !important; padding: 0 !important; }
 .pip-root .participant-avatars { transform: scale(0.85); }
 
-/* Shrunk past the point where the controls are legible: show the ring alone.
-   Join/pause/skip come back by making the window bigger again — or the run
-   keeps advancing on its own, since the server drives the phases. */
-.pip-root[data-pip-size="mini"] { padding: var(--sp-1); }
-.pip-root[data-pip-size="mini"] :is(
-  .label, .muted, .participant-avatars, .room-ready-time, .desk-ring-hint,
-  .break-ready-start, .room-focus-name, .circle-timer-step
-) { display: none; }
-.pip-root[data-pip-size="mini"] form:not(.circle-timer-form) { display: none; }
-.pip-root[data-pip-size="mini"] .circle-timer,
-.pip-root[data-pip-size="mini"] .circle-timer.idle,
-.pip-root[data-pip-size="mini"] .circle-timer.running,
-.pip-root[data-pip-size="mini"] .circle-timer.break-idle,
-.pip-root[data-pip-size="mini"] .circle-timer.break-offer,
-.pip-root[data-pip-size="mini"] .circle-timer.break-running {
-  width: min(92vh, 92vw);
+/* Ring: sized off the window, never below the point where it stops reading as
+   a clock. Under that the layout drops to the next tier rather than squashing
+   it — see the container queries below. */
+.pip-root .circle-timer,
+.pip-root .circle-timer.idle,
+.pip-root .circle-timer.running,
+.pip-root .circle-timer.break-idle,
+.pip-root .circle-timer.break-offer,
+.pip-root .circle-timer.break-running {
+  width: min(40cqh, 62cqw);
+  min-width: 150px;
+  max-width: 100%;
 }
-/* The room's fullscreen focus shell is a page layout; in the pop-out it is
-   just the contents of a small window. */
-.pip-root .room-focus-shell {
-  min-height: 0;
-  padding: 0;
-  gap: var(--sp-2);
+/* The page rule floors the digits at 2.5rem, which is most of a small ring on
+   its own. In here they scale the whole way down with it. */
+.pip-root .circle-timer-countdown { font-size: clamp(1rem, 24cqw, 5.125rem); }
+
+/* Tier 2 — too short or too narrow for the controls: the ring alone, as big
+   as the window allows. The buttons come back when the window is grown; until
+   then the run keeps advancing on its own, since the server drives phases. */
+@container pip (max-height: 379px) or (max-width: 299px) {
+  .pip-root :is(
+    .label, .muted, .participant-avatars, .room-ready-time, .desk-ring-hint,
+    .break-ready-start, .room-focus-name, .circle-timer-step
+  ) { display: none; }
+  .pip-root form:not(.circle-timer-form) { display: none; }
+  .pip-root .circle-timer,
+  .pip-root .circle-timer.idle,
+  .pip-root .circle-timer.running,
+  .pip-root .circle-timer.break-idle,
+  .pip-root .circle-timer.break-offer,
+  .pip-root .circle-timer.break-running {
+    width: min(88cqh, 88cqw);
+    min-width: 0;
+  }
+}
+
+/* Tier 2b — a wide, short window has plenty of room, just not stacked. Lay
+   the card out sideways instead of throwing the controls away: ring on the
+   left sized by the height, everything else in a column beside it. The card's
+   children are a flat list, so the ring is given the full-height first grid
+   column and the rest falls into the second. */
+@container pip (max-height: 379px) and (min-width: 430px) and (min-height: 230px) {
+  .pip-root :is(
+    .label, .participant-avatars, .room-ready-time, .break-ready-start
+  ) { display: block; }
+  .pip-root .participant-avatars { display: flex; }
+  .pip-root form:not(.circle-timer-form) { display: block; }
+  .pip-root .timer-card,
+  .pip-root .room-focus-shell {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    /* Explicit rows so the ring's `1 / -1` has a last line to reach; without
+       them it spans one row, inflates it, and shoves the lower buttons out of
+       the window. Eight covers the busiest state and empty rows collapse. */
+    grid-template-rows: repeat(8, min-content);
+    align-content: center;
+    justify-items: center;
+    gap: var(--sp-1) var(--sp-4);
+  }
+  /* Same variant list as the tier above, or its `.break-running` selectors
+     outrank this one and the ring keeps the full-width size. */
+  .pip-root .circle-timer,
+  .pip-root .circle-timer.idle,
+  .pip-root .circle-timer.running,
+  .pip-root .circle-timer.break-idle,
+  .pip-root .circle-timer.break-offer,
+  .pip-root .circle-timer.break-running {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    align-self: center;
+    width: min(78cqh, 38cqw);
+    min-width: 0;
+  }
+  .pip-root :is(.timer-card, .room-focus-shell) > *:not(.circle-timer) {
+    grid-column: 2;
+    width: auto;
+  }
+  /* The room name is decoration once space is tight. */
+  .pip-root .room-focus-name,
+  .pip-root .desk-ring-hint { display: none; }
+}
+
+/* Tier 3 — no room for a ring worth drawing (a letterbox strip, or a tiny
+   square). Drop the circle and keep the clock itself, scaled to fill. The
+   ring was carrying the focus/break colour, so the digits take that over. */
+@container pip (max-height: 199px) or (max-width: 199px) {
+  .pip-root { padding: var(--sp-1); }
+  .pip-root .circle-timer-svg { display: none; }
+  .pip-root .circle-timer,
+  .pip-root .circle-timer.idle,
+  .pip-root .circle-timer.running,
+  .pip-root .circle-timer.break-idle,
+  .pip-root .circle-timer.break-offer,
+  .pip-root .circle-timer.break-running {
+    width: 100%;
+    min-width: 0;
+    aspect-ratio: auto;
+    container-type: normal;
+    animation: none;
+  }
+  .pip-root .timer-card,
+  .pip-root .room-focus-shell { height: 100%; }
+  .pip-root .circle-timer {
+    flex: 1 1 auto;
+    align-self: stretch;
+    display: grid;
+    place-items: center;
+  }
+  .pip-root .circle-timer-core {
+    width: 100%;
+    justify-content: center;
+  }
+  .pip-root .circle-timer-countdown {
+    font-size: min(66cqh, 30cqw);
+    line-height: 1;
+    color: var(--accent);
+  }
+  .pip-root :is(.break-idle, .break-offer, .break-running) .circle-timer-countdown {
+    color: var(--warn);
+  }
 }

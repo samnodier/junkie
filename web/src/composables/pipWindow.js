@@ -17,12 +17,12 @@ import { setPipVisible } from '@/lib/presence';
 // false there and callers hide the button rather than offering a dead control.
 
 const SIZE_KEY = 'junkie:pip:size';
-// Below this the card can't show its controls legibly, so it collapses to the
-// bare ring (see .pip-root[data-pip-size="mini"] in app.css). The user gets the
-// controls back by making the window bigger again.
-const MINI_WIDTH = 260;
-const MINI_HEIGHT = 300;
-const DEFAULT_SIZE = { width: 380, height: 440 };
+// Big enough for the ring plus the phase label and every control the busiest
+// state shows (a break: three buttons, two labels, the avatar stack). Shrink
+// past that and app.css drops a tier on its own — first the controls, then the
+// ring itself; the layout is container-queried off the window, so nothing here
+// has to measure anything.
+const DEFAULT_SIZE = { width: 380, height: 460 };
 
 export const supported =
   typeof window !== 'undefined' &&
@@ -33,14 +33,12 @@ const win = shallowRef(null);
 // Teleport target. Null whenever the pop-out is closed, which is also the
 // signal that sends the card back to the page.
 const mount = shallowRef(null);
-const size = ref('full');
 const open = ref(false);
 
 export function usePipWindow() {
   return {
     supported,
     open: readonly(open),
-    size: readonly(size),
     mount,
     openPip,
     closePip,
@@ -73,15 +71,6 @@ function copyStyles(doc) {
       doc.head.appendChild(link);
     }
   }
-}
-
-function applySize(target) {
-  const w = target.innerWidth || 0;
-  const h = target.innerHeight || 0;
-  const next = w < MINI_WIDTH || h < MINI_HEIGHT ? 'mini' : 'full';
-  size.value = next;
-  const root = mount.value;
-  if (root) root.dataset.pipSize = next;
 }
 
 function rememberSize(target) {
@@ -133,7 +122,6 @@ export async function openPip() {
   win.value = pip;
   mount.value = root;
   open.value = true;
-  applySize(pip);
 
   // The opener tab is hidden while the pop-out is in use, which throttles its
   // timers to about once a minute. This window is visible, so its timers run
@@ -142,16 +130,8 @@ export async function openPip() {
   syncClock();
   setPipVisible(true);
 
-  const onResize = () => {
-    applySize(pip);
-    rememberSize(pip);
-  };
-  pip.addEventListener('resize', onResize);
-  if (typeof pip.ResizeObserver === 'function') {
-    const observer = new pip.ResizeObserver(() => applySize(pip));
-    observer.observe(doc.documentElement);
-    pip.__junkieObserver = observer;
-  }
+  // Reopen at whatever size it was left at.
+  pip.addEventListener('resize', () => rememberSize(pip));
   // Closing the window (its own close button, or the OS) has to put the card
   // back on the page — dropping the mount does that, since the Teleport falls
   // back to its in-page slot.
@@ -161,12 +141,9 @@ export async function openPip() {
 
 function finish(pip) {
   if (win.value !== pip) return;
-  pip.__junkieObserver?.disconnect();
-  delete pip.__junkieObserver;
   win.value = null;
   mount.value = null;
   open.value = false;
-  size.value = 'full';
   setPipVisible(false);
   // Back to the main window's timers, and resync immediately so the ring shows
   // the true remaining time rather than whatever the last throttled tick left.
@@ -183,5 +160,5 @@ export function closePip() {
 
 // Tests only.
 export function __pipState() {
-  return { win: win.value, mount: mount.value, open: open.value, size: size.value };
+  return { win: win.value, mount: mount.value, open: open.value };
 }

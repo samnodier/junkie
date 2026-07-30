@@ -8,6 +8,7 @@ import { createApp, h, nextTick, ref } from 'vue';
 
 function fakePipWindow({ width, height }) {
   const doc = document.implementation.createHTMLDocument('pip');
+  const requested = { width, height };
   const listeners = {};
   const timers = new Map();
   let nextTimer = 1;
@@ -55,8 +56,8 @@ function fakePipWindow({ width, height }) {
       win.innerWidth = w;
       win.innerHeight = h;
       win.emit('resize');
-      for (const cb of Array.from(listeners.__ro || [])) cb();
     },
+    __requested: requested,
   };
   return win;
 }
@@ -295,18 +296,21 @@ describe('popped-out timer', () => {
     el.remove();
   });
 
-  it('collapses to the ring alone when shrunk, and restores the controls when grown', async () => {
+  it('reopens at the size it was left at', async () => {
+    // What the window collapses to at a given size is decided by container
+    // queries in app.css, not here — all this side has to get right is
+    // remembering how big the user made it.
+    localStorage.clear();
     const { pipMod, opened } = await load();
     await pipMod.openPip();
-    const pip = opened[0];
-    const root = pip.document.querySelector('.pip-root');
-    expect(root.dataset.pipSize).toBe('full');
+    expect(opened[0].__requested).toEqual({ width: 380, height: 460 });
 
-    pip.resize(200, 200);
-    expect(root.dataset.pipSize).toBe('mini');
+    opened[0].resize(240, 240);
+    pipMod.closePip();
 
-    pip.resize(360, 380);
-    expect(root.dataset.pipSize).toBe('full');
+    await pipMod.openPip();
+    expect(opened[1].__requested).toEqual({ width: 240, height: 240 });
+    localStorage.clear();
   });
 
   it('puts the card back on the page when the window is closed from the OS', async () => {
