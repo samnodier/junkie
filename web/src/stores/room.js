@@ -3,6 +3,7 @@ import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
 import { onRoomInvite, onBreakInvite, onTimerEnd, syncTimerNotification } from '@/lib/notify';
+import { isWatching } from '@/lib/presence';
 
 // Room page state, fed by /api/room/{code}. Same mutation pattern as the
 // desk: post to the legacy endpoints via postForm (rejections surface as
@@ -161,8 +162,12 @@ export const useRoomStore = defineStore('room', {
       document.addEventListener('visibilitychange', this._onVisible);
       window.addEventListener('focus', this._onVisible);
       window.addEventListener('online', this._onVisible);
+      // Safety net behind the socket. Gated on isWatching rather than the
+      // tab's visibility: with the timer popped out the tab is hidden while
+      // the user is still watching, and that's the worst moment to stop
+      // re-fetching (see lib/presence.js).
       this.refreshTimer = setInterval(() => {
-        if (document.visibilityState === 'visible') this.refresh();
+        if (isWatching()) this.refresh();
       }, 45000);
     },
     close() {

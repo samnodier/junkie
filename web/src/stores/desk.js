@@ -3,6 +3,7 @@ import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
 import { onRoomInvite, onBreakInvite, syncTimerNotification } from '@/lib/notify';
+import { isWatching } from '@/lib/presence';
 
 // Signed-in desk state, fed by /api/desk. Mutations post to the legacy
 // endpoints (which own all the rules) via postForm — rejections surface as
@@ -158,8 +159,10 @@ export const useDeskStore = defineStore('desk', {
       document.addEventListener('visibilitychange', this._onVisible);
       window.addEventListener('focus', this._onVisible);
       window.addEventListener('online', this._onVisible);
+      // isWatching, not visibilityState: a popped-out timer hides the tab
+      // while the user is still watching it (see lib/presence.js).
       this.refreshTimer = setInterval(() => {
-        if (document.visibilityState === 'visible') this.refresh();
+        if (isWatching()) this.refresh();
       }, 45000);
     },
     disconnect() {

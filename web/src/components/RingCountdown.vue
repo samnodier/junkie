@@ -1,8 +1,12 @@
 <script setup>
-// Running countdown ring: ticks against an absolute deadline (background
-// tabs throttle intervals, so decrementing per tick drifts), fills the ring
-// by remaining/total, emits 'expired' once when it hits zero.
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+// Running countdown ring: reads the shared clock (see composables/clock.js —
+// one tick for every ring, re-homed onto the picture-in-picture window so a
+// hidden opener tab can't throttle it), fills the ring by remaining/total, and
+// emits 'expired' once when it hits zero. Remaining time is always derived
+// from the absolute deadline, never decremented, so a late tick is late rather
+// than wrong.
+import { computed, watch } from 'vue';
+import { useClock } from '@/composables/clock';
 
 const CIRC = 2 * Math.PI * 88;
 
@@ -14,9 +18,16 @@ const props = defineProps({
 });
 const emit = defineEmits(['expired']);
 
-const left = ref(0);
-const compute = () =>
-  Math.max(0, Math.floor((new Date(props.endsAt).getTime() - Date.now()) / 1000));
+const now = useClock();
+const deadline = computed(() => new Date(props.endsAt).getTime());
+// An unparseable deadline reads 00:00 but must never *expire*: a blank endsAt
+// means "no timer yet", and firing the phase-advance nudge on it would kick
+// the run forward on nothing.
+const dated = computed(() => Number.isFinite(deadline.value));
+const left = computed(() => {
+  if (!dated.value) return 0;
+  return Math.max(0, Math.floor((deadline.value - now.value) / 1000));
+});
 
 const display = computed(() => {
   const m = String(Math.floor(left.value / 60)).padStart(2, '0');
@@ -27,19 +38,22 @@ const dashOffset = computed(() =>
   CIRC * (1 - Math.max(0, Math.min(1, left.value / props.totalSeconds)))
 );
 
-let handle = null;
+// Fire once per deadline. Callers key this component per phase so it normally
+// remounts, but a moved-forward deadline (same key, new run) rearms it too.
 let expired = false;
-onMounted(() => {
-  left.value = compute();
-  handle = setInterval(() => {
-    left.value = compute();
-    if (left.value <= 0 && !expired) {
+watch(deadline, () => {
+  expired = false;
+});
+watch(
+  left,
+  (value) => {
+    if (value <= 0 && dated.value && !expired) {
       expired = true;
       emit('expired');
     }
-  }, 1000);
-});
-onUnmounted(() => clearInterval(handle));
+  },
+  { immediate: true, flush: 'post' }
+);
 </script>
 
 <template>

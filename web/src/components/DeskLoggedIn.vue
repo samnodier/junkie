@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useDeskStore } from '@/stores/desk';
 import SoloTimerCard from './SoloTimerCard.vue';
 import RoomTimerCard from './RoomTimerCard.vue';
+import PipTimer from './PipTimer.vue';
 import TodoRow from './TodoRow.vue';
 import TodoGroups from './TodoGroups.vue';
 import JoinPromptModal from './JoinPromptModal.vue';
@@ -128,10 +129,12 @@ onUnmounted(() => {
 
     <section class="grid two desk-grid">
       <div class="desk-ring-column">
-        <SoloTimerCard v-show="mode === 'private'" />
-        <template v-for="r in desk.rooms" :key="r.code">
-          <RoomTimerCard v-show="mode === 'room' && r.code === room" :room="r" />
-        </template>
+        <PipTimer>
+          <SoloTimerCard v-show="mode === 'private'" />
+          <template v-for="r in desk.rooms" :key="r.code">
+            <RoomTimerCard v-show="mode === 'room' && r.code === room" :room="r" />
+          </template>
+        </PipTimer>
       </div>
 
       <article class="panel desk-todos-panel" :data-has-rooms="hasRooms ? 'true' : undefined">

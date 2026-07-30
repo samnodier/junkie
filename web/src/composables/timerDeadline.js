@@ -1,4 +1,5 @@
-import { computed, onUnmounted, ref } from 'vue';
+import { computed } from 'vue';
+import { useClock } from './clock';
 
 // The API reports whole `secondsLeft` at fetch time. Deriving a deadline from
 // it on every refresh shifts the anchor by the server's truncation plus
@@ -10,11 +11,9 @@ import { computed, onUnmounted, ref } from 'vue';
 // keeps the countdown immune to client/server clock skew, unlike trusting the
 // server's absolute endsAt.
 export function useTimerDeadline(timer) {
-  const now = ref(Date.now());
-  const tick = setInterval(() => {
-    now.value = Date.now();
-  }, 500);
-  onUnmounted(() => clearInterval(tick));
+  // Shared with every ring on the page, and re-homed onto the picture-in-
+  // picture window while one is open so a hidden opener tab can't throttle it.
+  const now = useClock();
 
   let anchor = { key: '', ms: 0 };
   const anchorMs = () => {

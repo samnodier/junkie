@@ -19,6 +19,7 @@ import ParticipantStack from '@/components/ParticipantStack.vue';
 import TodoGroups from '@/components/TodoGroups.vue';
 import JoinPromptModal from '@/components/JoinPromptModal.vue';
 import StartConfirmModal from '@/components/StartConfirmModal.vue';
+import PipTimer from '@/components/PipTimer.vue';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -175,16 +176,18 @@ onUnmounted(() => {
             <span class="room-membership-name">{{ room.room.name }}</span>
           </a>
         </div>
-        <section class="room-focus-shell">
-          <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
-          <p class="room-focus-name">{{ room.room.name }}</p>
-          <RingCountdown :key="`${timer.runId}-focus-mode`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
-          <ParticipantStack v-if="timer.participants?.length > 1" :members="timer.participants" />
-          <p class="label">{{ timer.participants?.length === 1 ? 'Focusing solo' : `${timer.participants.length} focusing` }}</p>
-          <form @submit.prevent="room.action('timer-leave')">
-            <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
-          </form>
-        </section>
+        <PipTimer>
+          <section class="room-focus-shell">
+            <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
+            <p class="room-focus-name">{{ room.room.name }}</p>
+            <RingCountdown :key="`${timer.runId}-focus-mode`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
+            <ParticipantStack v-if="timer.participants?.length > 1" :members="timer.participants" />
+            <p class="label">{{ timer.participants?.length === 1 ? 'Focusing solo' : `${timer.participants.length} focusing` }}</p>
+            <form @submit.prevent="room.action('timer-leave')">
+              <button type="submit" class="btn-ghost timer-cancel">Leave focus block</button>
+            </form>
+          </section>
+        </PipTimer>
       </div>
 
       <!-- Normal room shell -->
@@ -218,84 +221,86 @@ onUnmounted(() => {
 
         <section class="grid two room-desk-grid">
           <div class="room-timer-column">
-            <article v-if="timer" class="timer-card panel" :class="phase">
-              <!-- lobby -->
-              <template v-if="phase === 'lobby'">
-                <p class="label label-accent">Starting · join now</p>
-                <RingCountdown :key="`${timer.runId}-lobby`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-active-ring" aria-label="Focus lobby countdown" @expired="expired" />
-                <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small />
-                <p class="label label-accent">{{ timer.participants?.length || 0 }} joined · in when it starts</p>
-                <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
-                <form v-else @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
-              </template>
+            <PipTimer>
+              <article v-if="timer" class="timer-card panel" :class="phase">
+                <!-- lobby -->
+                <template v-if="phase === 'lobby'">
+                  <p class="label label-accent">Starting · join now</p>
+                  <RingCountdown :key="`${timer.runId}-lobby`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-active-ring" aria-label="Focus lobby countdown" @expired="expired" />
+                  <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small />
+                  <p class="label label-accent">{{ timer.participants?.length || 0 }} joined · in when it starts</p>
+                  <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
+                  <form v-else @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
+                </template>
 
-              <!-- focus (not participating, else focus mode above) -->
-              <template v-else-if="phase === 'focus'">
-                <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
-                <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-active-ring" @expired="expired" />
-                <template v-if="!timer.participant">
-                  <template v-if="room.waiting">
-                    <p class="label label-accent">In for the break · you'll join automatically</p>
-                    <form @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Cancel</button></form>
+                <!-- focus (not participating, else focus mode above) -->
+                <template v-else-if="phase === 'focus'">
+                  <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
+                  <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-active-ring" @expired="expired" />
+                  <template v-if="!timer.participant">
+                    <template v-if="room.waiting">
+                      <p class="label label-accent">In for the break · you'll join automatically</p>
+                      <form @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Cancel</button></form>
+                    </template>
+                    <form v-else @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join at the break</button></form>
                   </template>
-                  <form v-else @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join at the break</button></form>
                 </template>
-              </template>
 
-              <!-- break -->
-              <template v-else>
-                <p class="label label-warn">
-                  {{ timer.breakPending ? 'Break ready · set the length · tap to start' : timer.paused ? 'Break paused' : 'Break · next session in' }}
-                </p>
-                <!-- Waiting break: the shared set-and-start control (desk twin) -->
-                <BreakReadyRing v-if="timer.breakPending" :break-minutes="timer.breakMinutes" :focus-minutes="timer.focusMinutes" :room-name="room.room.name" @start="startBreak" />
-                <!-- Paused mid-break: the ring holds still at what's left -->
-                <div v-else-if="timer.paused" class="circle-timer break-running" role="timer" aria-label="Break paused">
-                  <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-                    <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
-                    <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" :stroke-dashoffset="553 * (1 - Math.min(1, seconds / totalSeconds))"/>
-                  </svg>
-                  <div class="circle-timer-core">
-                    <div class="circle-timer-countdown">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</div>
+                <!-- break -->
+                <template v-else>
+                  <p class="label label-warn">
+                    {{ timer.breakPending ? 'Break ready · set the length · tap to start' : timer.paused ? 'Break paused' : 'Break · next session in' }}
+                  </p>
+                  <!-- Waiting break: the shared set-and-start control (desk twin) -->
+                  <BreakReadyRing v-if="timer.breakPending" :break-minutes="timer.breakMinutes" :focus-minutes="timer.focusMinutes" :room-name="room.room.name" @start="startBreak" />
+                  <!-- Paused mid-break: the ring holds still at what's left -->
+                  <div v-else-if="timer.paused" class="circle-timer break-running" role="timer" aria-label="Break paused">
+                    <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+                      <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+                      <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" :stroke-dashoffset="553 * (1 - Math.min(1, seconds / totalSeconds))"/>
+                    </svg>
+                    <div class="circle-timer-core">
+                      <div class="circle-timer-countdown">{{ String(Math.floor(seconds / 60)).padStart(2, '0') }}:{{ String(seconds % 60).padStart(2, '0') }}</div>
+                    </div>
                   </div>
-                </div>
-                <!-- Running break: counts down like every other phase -->
-                <RingCountdown v-else :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather" aria-label="Break countdown" @expired="expired" />
-                <p v-if="!timer.breakPending" class="label">Next block · {{ timer.focusMinutes }}:00</p>
-                <template v-if="room.room.requireCheckin && timer.participant">
-                  <form v-if="!timer.checkedIn" @submit.prevent="room.action('timer-checkin')">
-                    <button type="submit" class="btn-primary">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
+                  <!-- Running break: counts down like every other phase -->
+                  <RingCountdown v-else :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather" aria-label="Break countdown" @expired="expired" />
+                  <p v-if="!timer.breakPending" class="label">Next block · {{ timer.focusMinutes }}:00</p>
+                  <template v-if="room.room.requireCheckin && timer.participant">
+                    <form v-if="!timer.checkedIn" @submit.prevent="room.action('timer-checkin')">
+                      <button type="submit" class="btn-primary">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
+                    </form>
+                    <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
+                  </template>
+                  <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
+                  <form v-if="!timer.breakPending" @submit.prevent="room.action(timer.paused ? 'timer-resume' : 'timer-pause')">
+                    <button type="submit" :class="timer.paused ? 'btn-primary' : 'btn-ghost'">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
                   </form>
-                  <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
+                  <form v-if="!room.room.requireCheckin" @submit.prevent="room.action('timer-skip-break')"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
+                  <form v-if="timer.participant" @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
                 </template>
-                <form v-if="!timer.participant" @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-primary">Join this block</button></form>
-                <form v-if="!timer.breakPending" @submit.prevent="room.action(timer.paused ? 'timer-resume' : 'timer-pause')">
-                  <button type="submit" :class="timer.paused ? 'btn-primary' : 'btn-ghost'">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
-                </form>
-                <form v-if="!room.room.requireCheckin" @submit.prevent="room.action('timer-skip-break')"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
-                <form v-if="timer.participant" @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
-              </template>
 
-              <template v-if="phase !== 'lobby'">
-                <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small :checkin="room.room.requireCheckin && phase === 'break'" />
-                <p class="label">{{ timer.participants?.length === 1 ? 'Focusing solo' : `${timer.participants?.length || 0} focusing` }}</p>
-              </template>
-            </article>
+                <template v-if="phase !== 'lobby'">
+                  <ParticipantStack v-if="timer.participants?.length" :members="timer.participants" small :checkin="room.room.requireCheckin && phase === 'break'" />
+                  <p class="label">{{ timer.participants?.length === 1 ? 'Focusing solo' : `${timer.participants?.length || 0} focusing` }}</p>
+                </template>
+              </article>
 
-            <!-- idle / ready -->
-            <article v-else class="timer-card panel idle ready-card">
-              <p class="label label-accent">Ready · {{ room.room.autoSessions }} × {{ room.room.focusMinutes }}/{{ room.room.breakMinutes }}</p>
-              <div class="room-ready-time mono">{{ room.room.focusMinutes }}:00</div>
-              <form :data-room-name="room.room.name" @submit.prevent="confirmStart = true"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
-              <template v-if="room.waiting">
-                <p class="label label-accent">Waiting · you'll join automatically when someone starts</p>
-                <form @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Stop waiting</button></form>
-              </template>
-              <template v-else>
-                <form @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-ghost">Join when it starts</button></form>
-                <p class="muted room-ready-hint">Start alone or with others — or wait here and get pulled in automatically when anyone starts.</p>
-              </template>
-            </article>
+              <!-- idle / ready -->
+              <article v-else class="timer-card panel idle ready-card">
+                <p class="label label-accent">Ready · {{ room.room.autoSessions }} × {{ room.room.focusMinutes }}/{{ room.room.breakMinutes }}</p>
+                <div class="room-ready-time mono">{{ room.room.focusMinutes }}:00</div>
+                <form :data-room-name="room.room.name" @submit.prevent="confirmStart = true"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
+                <template v-if="room.waiting">
+                  <p class="label label-accent">Waiting · you'll join automatically when someone starts</p>
+                  <form @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Stop waiting</button></form>
+                </template>
+                <template v-else>
+                  <form @submit.prevent="room.action('timer-join')"><button type="submit" class="btn-ghost">Join when it starts</button></form>
+                  <p class="muted room-ready-hint">Start alone or with others — or wait here and get pulled in automatically when anyone starts.</p>
+                </template>
+              </article>
+            </PipTimer>
 
             <template v-if="!timer">
               <details class="room-details panel" data-room-section="settings" :open="sections.settings.value" @toggle="toggleSection('settings', $event.target.open)">

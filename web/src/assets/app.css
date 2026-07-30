@@ -1918,3 +1918,139 @@ body.menu-drawer-open { overflow: hidden; }
   *, body { transition: none !important; animation: none !important; }
   .menu-drawer, .focus-todos-panel, .focus-todos-toggle, .circle-timer-progress { transition: none !important; }
 }
+
+/* --- Popped-out timer (Document Picture-in-Picture) --------------------
+   The card is teleported into a small always-on-top OS window. In the page
+   the wrapper collapses to nothing (display: contents) so the pop-out
+   button, the card and the parked notice all sit directly in the timer
+   column's own flex/grid flow, exactly as the card did before. */
+.pip-slot { display: contents; }
+.pip-stage[data-pip="in"] { display: contents; }
+
+.pip-pop {
+  align-self: flex-end;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.pip-pop:hover { color: var(--ink); border-color: var(--border-strong); }
+.pip-pop svg { width: 15px; height: 15px; }
+.pip-parked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  text-align: center;
+}
+
+/* The pop-out document itself. It starts with no styles of its own — this
+   whole sheet is copied across at open time (composables/pipWindow.js). */
+.pip-body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+.pip-root {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  padding: var(--sp-3);
+  overflow: auto;
+}
+.pip-stage[data-pip="out"] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 100%;
+  min-width: 0;
+  text-align: center;
+}
+/* Strip the card's panel chrome and its desk-sized fixed height: in here it
+   is the whole window, not a card on a page. */
+.pip-root .desk-timer-view,
+.pip-root .timer-card {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.pip-root .timer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.pip-root .timer-card > form { margin: 0; }
+/* Fit the ring to the window instead of the desk's viewport-width clamp. */
+.pip-root .circle-timer,
+.pip-root .circle-timer.idle,
+.pip-root .circle-timer.running,
+.pip-root .circle-timer.break-idle,
+.pip-root .circle-timer.break-offer,
+.pip-root .circle-timer.break-running {
+  width: min(40vh, 60vw);
+  max-width: 100%;
+}
+/* Compact the chrome around the ring so the busiest state — a break, with
+   three buttons, two labels and the avatar stack — still fits the default
+   square without scrolling. The desk's 48px touch targets are sized for a
+   full page; this is a window the size of a postcard.
+   !important is the cheap way past the base button rule, whose fifteen
+   chained :not()s put it out of reach of any sane selector here. */
+.pip-root .timer-card,
+.pip-root .room-focus-shell { gap: var(--sp-1); }
+.pip-root .timer-card > form,
+.pip-root .room-focus-shell > form,
+.pip-root form > button { margin: 0; }
+.pip-root button {
+  min-height: 30px !important;
+  padding: 0 var(--sp-3) !important;
+  font-size: var(--fs-small) !important;
+}
+.pip-root .circle-timer-step { min-height: 0 !important; padding: 0 !important; }
+.pip-root .participant-avatars { transform: scale(0.85); }
+
+/* Shrunk past the point where the controls are legible: show the ring alone.
+   Join/pause/skip come back by making the window bigger again — or the run
+   keeps advancing on its own, since the server drives the phases. */
+.pip-root[data-pip-size="mini"] { padding: var(--sp-1); }
+.pip-root[data-pip-size="mini"] :is(
+  .label, .muted, .participant-avatars, .room-ready-time, .desk-ring-hint,
+  .break-ready-start, .room-focus-name, .circle-timer-step
+) { display: none; }
+.pip-root[data-pip-size="mini"] form:not(.circle-timer-form) { display: none; }
+.pip-root[data-pip-size="mini"] .circle-timer,
+.pip-root[data-pip-size="mini"] .circle-timer.idle,
+.pip-root[data-pip-size="mini"] .circle-timer.running,
+.pip-root[data-pip-size="mini"] .circle-timer.break-idle,
+.pip-root[data-pip-size="mini"] .circle-timer.break-offer,
+.pip-root[data-pip-size="mini"] .circle-timer.break-running {
+  width: min(92vh, 92vw);
+}
+/* The room's fullscreen focus shell is a page layout; in the pop-out it is
+   just the contents of a small window. */
+.pip-root .room-focus-shell {
+  min-height: 0;
+  padding: 0;
+  gap: var(--sp-2);
+}

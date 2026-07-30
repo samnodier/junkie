@@ -17,6 +17,7 @@ import ToastHolder from '@/components/ToastHolder.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
 import RingIdle from '@/components/RingIdle.vue';
 import ParticipantStack from '@/components/ParticipantStack.vue';
+import PipTimer from '@/components/PipTimer.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -149,73 +150,75 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <section class="room-focus-shell">
-        <!-- Waiting room: no run yet, gather and start -->
-        <template v-if="phase === 'idle'">
-          <p class="label label-accent">Ready · {{ room.room?.autoSessions }} × {{ room.room?.focusMinutes }}/{{ room.room?.breakMinutes }}</p>
-          <p class="room-focus-name">{{ room.room?.name }}</p>
-          <div class="circle-timer room-focus-ring" role="img" :aria-label="`${room.room?.focusMinutes} minute focus block, ready to start`">
-            <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-              <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
-              <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
-            </svg>
-            <div class="circle-timer-core">
-              <div class="circle-timer-countdown">{{ room.room?.focusMinutes }}:00</div>
+      <PipTimer>
+        <section class="room-focus-shell">
+          <!-- Waiting room: no run yet, gather and start -->
+          <template v-if="phase === 'idle'">
+            <p class="label label-accent">Ready · {{ room.room?.autoSessions }} × {{ room.room?.focusMinutes }}/{{ room.room?.breakMinutes }}</p>
+            <p class="room-focus-name">{{ room.room?.name }}</p>
+            <div class="circle-timer room-focus-ring" role="img" :aria-label="`${room.room?.focusMinutes} minute focus block, ready to start`">
+              <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+                <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+                <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+              </svg>
+              <div class="circle-timer-core">
+                <div class="circle-timer-countdown">{{ room.room?.focusMinutes }}:00</div>
+              </div>
             </div>
-          </div>
-          <ParticipantStack v-if="heads.length" :members="heads" />
-          <p class="label">{{ heads.length === 1 ? 'Just you so far' : `${heads.length} here` }} · waiting to start</p>
-          <form @submit.prevent="start"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
-          <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
-        </template>
-
-        <!-- Lobby: 30s countdown before the first focus session -->
-        <template v-else-if="phase === 'lobby'">
-          <p class="label label-accent">Starting · join now</p>
-          <p class="room-focus-name">{{ room.room?.name }}</p>
-          <RingCountdown :key="`${timer.runId}-lobby`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-focus-ring" aria-label="Starting countdown" @expired="expired" />
-          <ParticipantStack v-if="heads.length" :members="heads" />
-          <p class="label">{{ heads.length }} in · here when it starts</p>
-          <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
-        </template>
-
-        <!-- Focus: the distraction-free block -->
-        <template v-else-if="phase === 'focus'">
-          <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
-          <p class="room-focus-name">{{ room.room?.name }}</p>
-          <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
-          <ParticipantStack v-if="heads.length > 1" :members="heads" />
-          <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
-          <template v-if="!timer.participant">
-            <p class="label label-accent" v-if="room.waiting">In for the break · you'll join automatically</p>
-            <button v-else type="button" class="btn-primary" @click="room.action('timer-join')">Join at the break</button>
+            <ParticipantStack v-if="heads.length" :members="heads" />
+            <p class="label">{{ heads.length === 1 ? 'Just you so far' : `${heads.length} here` }} · waiting to start</p>
+            <form @submit.prevent="start"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
+            <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
           </template>
-          <button v-else type="button" class="btn-ghost timer-cancel" @click="leave">Leave focus block</button>
-        </template>
 
-        <!-- Break: the joinable window between sessions -->
-        <template v-else>
-          <p class="label label-warn">
-            {{ timer.breakPending || timer.paused ? 'Break ready · set the length · tap to start' : 'Break · next session in' }}
-          </p>
-          <p class="room-focus-name">{{ room.room?.name }}</p>
-          <RingCountdown v-if="!timer.breakPending && !timer.paused" :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather room-focus-ring" aria-label="Break countdown" @expired="expired" />
-          <form v-else class="circle-timer-form" @submit.prevent="startBreak">
-            <RingIdle v-model="breakLength" :min="1" :max="60" ring-class="break-idle room-focus-ring" aria-label="Set break length" input-label="Break minutes" @submit="startBreak" />
-          </form>
-          <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
-          <button v-if="timer.breakPending || timer.paused" type="button" class="btn-primary" @click="startBreak">Start break</button>
-          <ParticipantStack v-if="heads.length" :members="heads" :checkin="room.room?.requireCheckin" />
-          <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
-          <template v-if="room.room?.requireCheckin && timer.participant">
-            <button v-if="!timer.checkedIn" type="button" class="btn-primary" @click="room.action('timer-checkin')">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
-            <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
+          <!-- Lobby: 30s countdown before the first focus session -->
+          <template v-else-if="phase === 'lobby'">
+            <p class="label label-accent">Starting · join now</p>
+            <p class="room-focus-name">{{ room.room?.name }}</p>
+            <RingCountdown :key="`${timer.runId}-lobby`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-focus-ring" aria-label="Starting countdown" @expired="expired" />
+            <ParticipantStack v-if="heads.length" :members="heads" />
+            <p class="label">{{ heads.length }} in · here when it starts</p>
+            <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
           </template>
-          <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join this block</button>
-          <button v-if="!room.room?.requireCheckin" type="button" class="btn-ghost" @click="room.action('timer-skip-break')">Skip break</button>
-          <button v-if="timer.participant" type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
-        </template>
-      </section>
+
+          <!-- Focus: the distraction-free block -->
+          <template v-else-if="phase === 'focus'">
+            <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
+            <p class="room-focus-name">{{ room.room?.name }}</p>
+            <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
+            <ParticipantStack v-if="heads.length > 1" :members="heads" />
+            <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
+            <template v-if="!timer.participant">
+              <p class="label label-accent" v-if="room.waiting">In for the break · you'll join automatically</p>
+              <button v-else type="button" class="btn-primary" @click="room.action('timer-join')">Join at the break</button>
+            </template>
+            <button v-else type="button" class="btn-ghost timer-cancel" @click="leave">Leave focus block</button>
+          </template>
+
+          <!-- Break: the joinable window between sessions -->
+          <template v-else>
+            <p class="label label-warn">
+              {{ timer.breakPending || timer.paused ? 'Break ready · set the length · tap to start' : 'Break · next session in' }}
+            </p>
+            <p class="room-focus-name">{{ room.room?.name }}</p>
+            <RingCountdown v-if="!timer.breakPending && !timer.paused" :key="`${timer.runId}-break`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="break-running breather room-focus-ring" aria-label="Break countdown" @expired="expired" />
+            <form v-else class="circle-timer-form" @submit.prevent="startBreak">
+              <RingIdle v-model="breakLength" :min="1" :max="60" ring-class="break-idle room-focus-ring" aria-label="Set break length" input-label="Break minutes" @submit="startBreak" />
+            </form>
+            <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
+            <button v-if="timer.breakPending || timer.paused" type="button" class="btn-primary" @click="startBreak">Start break</button>
+            <ParticipantStack v-if="heads.length" :members="heads" :checkin="room.room?.requireCheckin" />
+            <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
+            <template v-if="room.room?.requireCheckin && timer.participant">
+              <button v-if="!timer.checkedIn" type="button" class="btn-primary" @click="room.action('timer-checkin')">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
+              <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
+            </template>
+            <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join this block</button>
+            <button v-if="!room.room?.requireCheckin" type="button" class="btn-ghost" @click="room.action('timer-skip-break')">Skip break</button>
+            <button v-if="timer.participant" type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
+          </template>
+        </section>
+      </PipTimer>
     </div>
   </main>
   <ToastHolder />
