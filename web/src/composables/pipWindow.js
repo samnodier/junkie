@@ -23,6 +23,12 @@ const SIZE_KEY = 'junkie:pip:size';
 // ring itself; the layout is container-queried off the window, so nothing here
 // has to measure anything.
 const DEFAULT_SIZE = { width: 380, height: 460 };
+// The floor: below this the clock and the phase's one action stop fitting
+// together, and the window is only good for staring at. Chrome lets a
+// picture-in-picture window be dragged far smaller than that, so we push back
+// (best effort — if a browser declines the resize, the layout still degrades
+// cleanly rather than clipping, which is what the tiers in app.css are for).
+const MIN_SIZE = { width: 300, height: 220 };
 
 export const supported =
   typeof window !== 'undefined' &&
@@ -73,6 +79,25 @@ function copyStyles(doc) {
   }
 }
 
+// Drag it below the floor and it springs back. resizeTo works in outer
+// dimensions, so the window's own chrome has to be added back on.
+function enforceMinimum(target) {
+  const shortBy = MIN_SIZE.width - target.innerWidth;
+  const squatBy = MIN_SIZE.height - target.innerHeight;
+  if (shortBy <= 0 && squatBy <= 0) return false;
+  const chromeW = Math.max(0, target.outerWidth - target.innerWidth);
+  const chromeH = Math.max(0, target.outerHeight - target.innerHeight);
+  try {
+    target.resizeTo(
+      Math.max(target.innerWidth, MIN_SIZE.width) + chromeW,
+      Math.max(target.innerHeight, MIN_SIZE.height) + chromeH
+    );
+  } catch {
+    /* browser declined — the small-window tiers still render legibly */
+  }
+  return true;
+}
+
 function rememberSize(target) {
   try {
     localStorage.setItem(
@@ -89,7 +114,12 @@ function lastSize() {
     const saved = JSON.parse(localStorage.getItem(SIZE_KEY) || 'null');
     const width = Number(saved?.width);
     const height = Number(saved?.height);
-    if (width > 0 && height > 0) return { width, height };
+    if (width > 0 && height > 0) {
+      return {
+        width: Math.max(width, MIN_SIZE.width),
+        height: Math.max(height, MIN_SIZE.height),
+      };
+    }
   } catch {
     /* fall through to the default */
   }
@@ -130,8 +160,11 @@ export async function openPip() {
   syncClock();
   setPipVisible(true);
 
-  // Reopen at whatever size it was left at.
-  pip.addEventListener('resize', () => rememberSize(pip));
+  // Reopen at whatever size it was left at, never below the floor.
+  pip.addEventListener('resize', () => {
+    if (!enforceMinimum(pip)) rememberSize(pip);
+  });
+  enforceMinimum(pip);
   // Closing the window (its own close button, or the OS) has to put the card
   // back on the page — dropping the mount does that, since the Teleport falls
   // back to its in-page slot.

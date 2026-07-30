@@ -16,7 +16,18 @@ function fakePipWindow({ width, height }) {
     document: doc,
     innerWidth: width,
     innerHeight: height,
+    // Real windows carry title-bar chrome; resizeTo works in outer dimensions,
+    // so the fake reproduces the gap.
+    outerWidth: width + 8,
+    outerHeight: height + 40,
     closed: false,
+    resizeTo: vi.fn((w, h) => {
+      win.innerWidth = w - 8;
+      win.innerHeight = h - 40;
+      win.outerWidth = w;
+      win.outerHeight = h;
+      win.emit('resize');
+    }),
     addEventListener(type, fn) {
       (listeners[type] ||= []).push(fn);
     },
@@ -55,6 +66,8 @@ function fakePipWindow({ width, height }) {
     resize(w, h) {
       win.innerWidth = w;
       win.innerHeight = h;
+      win.outerWidth = w + 8;
+      win.outerHeight = h + 40;
       win.emit('resize');
     },
     __requested: requested,
@@ -297,19 +310,54 @@ describe('popped-out timer', () => {
   });
 
   it('reopens at the size it was left at', async () => {
-    // What the window collapses to at a given size is decided by container
-    // queries in app.css, not here — all this side has to get right is
-    // remembering how big the user made it.
+    // Which layout a given size gets is decided by container queries in
+    // app.css, not here — all this side owes is remembering how big the user
+    // made it, and refusing to go below the floor.
     localStorage.clear();
     const { pipMod, opened } = await load();
     await pipMod.openPip();
     expect(opened[0].__requested).toEqual({ width: 380, height: 460 });
 
-    opened[0].resize(240, 240);
+    opened[0].resize(340, 300);
     pipMod.closePip();
 
     await pipMod.openPip();
-    expect(opened[1].__requested).toEqual({ width: 240, height: 240 });
+    expect(opened[1].__requested).toEqual({ width: 340, height: 300 });
+    localStorage.clear();
+  });
+
+  it('springs back when dragged below the size the clock and its button need', async () => {
+    localStorage.clear();
+    const { pipMod, opened } = await load();
+    await pipMod.openPip();
+    const pip = opened[0];
+
+    pip.resize(180, 120);
+    expect(pip.resizeTo).toHaveBeenCalled();
+    expect(pip.innerWidth).toBe(300);
+    expect(pip.innerHeight).toBe(220);
+
+    // Only the axis that went under is pushed back.
+    pip.resizeTo.mockClear();
+    pip.resize(520, 140);
+    expect(pip.innerWidth).toBe(520);
+    expect(pip.innerHeight).toBe(220);
+
+    // A legitimate size is left alone, and remembered.
+    pip.resizeTo.mockClear();
+    pip.resize(420, 380);
+    expect(pip.resizeTo).not.toHaveBeenCalled();
+    pipMod.closePip();
+    await pipMod.openPip();
+    expect(opened[1].__requested).toEqual({ width: 420, height: 380 });
+    localStorage.clear();
+  });
+
+  it('never reopens below the floor, even from a stale remembered size', async () => {
+    localStorage.setItem('junkie:pip:size', JSON.stringify({ width: 120, height: 90 }));
+    const { pipMod, opened } = await load();
+    await pipMod.openPip();
+    expect(opened[0].__requested).toEqual({ width: 300, height: 220 });
     localStorage.clear();
   });
 

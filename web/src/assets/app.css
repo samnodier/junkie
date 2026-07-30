@@ -2043,6 +2043,13 @@ body.menu-drawer-open { overflow: hidden; }
   font-size: var(--fs-small) !important;
 }
 .pip-root .circle-timer-step { min-height: 0 !important; padding: 0 !important; }
+/* The adjustable ring sits in a form; shrink-to-fit collapses it to the width
+   of the -/+ controls, so stretch it and let the ring size itself. */
+.pip-root .circle-timer-form {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
 .pip-root .participant-avatars { transform: scale(0.85); }
 
 /* Ring: sized off the window, never below the point where it stops reading as
@@ -2061,16 +2068,23 @@ body.menu-drawer-open { overflow: hidden; }
 /* The page rule floors the digits at 2.5rem, which is most of a small ring on
    its own. In here they scale the whole way down with it. */
 .pip-root .circle-timer-countdown { font-size: clamp(1rem, 24cqw, 5.125rem); }
+/* Same for the settable minutes on a pending break: it is the clock in that
+   state, and the page floors it at 2rem — most of a small window on its own. */
+.pip-root .circle-timer-time input { font-size: clamp(0.85rem, 15cqw, 3rem); }
 
 /* Tier 2 — too short or too narrow for the controls: the ring alone, as big
    as the window allows. The buttons come back when the window is grown; until
    then the run keeps advancing on its own, since the server drives phases. */
 @container pip (max-height: 379px) or (max-width: 299px) {
   .pip-root :is(
-    .label, .muted, .participant-avatars, .room-ready-time, .desk-ring-hint,
-    .break-ready-start, .room-focus-name, .circle-timer-step
+    .label, .muted, .participant-avatars, .desk-ring-hint,
+    .room-focus-name, .circle-timer-step
   ) { display: none; }
   .pip-root form:not(.circle-timer-form) { display: none; }
+  /* One action survives: whatever the primary move is in this phase (start the
+     break, join the block, check in). The secondary ghost controls stay gone —
+     they live in forms without a primary button, so they stay hidden. */
+  .pip-root form:has(.btn-primary) { display: block; }
   .pip-root .circle-timer,
   .pip-root .circle-timer.idle,
   .pip-root .circle-timer.running,
@@ -2107,6 +2121,11 @@ body.menu-drawer-open { overflow: hidden; }
   }
   /* Same variant list as the tier above, or its `.break-running` selectors
      outrank this one and the ring keeps the full-width size. */
+  /* On a pending break the ring arrives wrapped in a form, so whichever of the
+     two is the card's own child takes the left column — otherwise the ring
+     lands in the right-hand stack, column one collapses to nothing, and the
+     whole card overflows the window. */
+  .pip-root :is(.timer-card, .room-focus-shell) > .circle-timer-form,
   .pip-root .circle-timer,
   .pip-root .circle-timer.idle,
   .pip-root .circle-timer.running,
@@ -2119,7 +2138,11 @@ body.menu-drawer-open { overflow: hidden; }
     width: min(78cqh, 38cqw);
     min-width: 0;
   }
-  .pip-root :is(.timer-card, .room-focus-shell) > *:not(.circle-timer) {
+  .pip-root :is(.timer-card, .room-focus-shell) > .circle-timer-form > .circle-timer {
+    width: 100%;
+  }
+  .pip-root :is(.timer-card, .room-focus-shell)
+    > *:not(.circle-timer):not(.circle-timer-form) {
     grid-column: 2;
     width: auto;
   }
@@ -2146,11 +2169,17 @@ body.menu-drawer-open { overflow: hidden; }
     container-type: normal;
     animation: none;
   }
+  /* Clock and its one button read as a pair — let the card centre them
+     together rather than stretching the clock and stranding the button on the
+     bottom edge. */
   .pip-root .timer-card,
-  .pip-root .room-focus-shell { height: 100%; }
+  .pip-root .room-focus-shell {
+    height: 100%;
+    justify-content: center;
+    gap: var(--sp-2);
+  }
   .pip-root .circle-timer {
-    flex: 1 1 auto;
-    align-self: stretch;
+    flex: 0 1 auto;
     display: grid;
     place-items: center;
   }
@@ -2158,12 +2187,19 @@ body.menu-drawer-open { overflow: hidden; }
     width: 100%;
     justify-content: center;
   }
-  .pip-root .circle-timer-countdown {
-    font-size: min(66cqh, 30cqw);
+  .pip-root .circle-timer-countdown,
+  .pip-root .room-ready-time {
+    font-size: min(56cqh, 28cqw);
     line-height: 1;
     color: var(--accent);
   }
-  .pip-root :is(.break-idle, .break-offer, .break-running) .circle-timer-countdown {
+  .pip-root .circle-timer-time input {
+    font-size: min(56cqh, 24cqw);
+    line-height: 1;
+    color: var(--warn);
+  }
+  .pip-root :is(.break-idle, .break-offer, .break-running) .circle-timer-countdown,
+  .pip-root .timer-card.break .room-ready-time {
     color: var(--warn);
   }
 }
