@@ -210,7 +210,7 @@ onUnmounted(() => {
             <ParticipantStack v-if="heads.length" :members="heads" :checkin="room.room?.requireCheckin" />
             <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
             <template v-if="room.room?.requireCheckin && timer.participant">
-              <button v-if="!timer.checkedIn" type="button" class="btn-primary" @click="room.action('timer-checkin')">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
+              <button v-if="!timer.checkedIn" type="button" class="btn-primary" @click="room.action('timer-checkin')">Check in for session {{ timer.currentSession + 1 }}</button>
               <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
             </template>
             <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join this block</button>

@@ -268,7 +268,7 @@ onUnmounted(() => {
                   <p v-if="!timer.breakPending" class="label">Next block · {{ timer.focusMinutes }}:00</p>
                   <template v-if="room.room.requireCheckin && timer.participant">
                     <form v-if="!timer.checkedIn" @submit.prevent="room.action('timer-checkin')">
-                      <button type="submit" class="btn-primary">I'm here — check in for session {{ timer.currentSession + 1 }}</button>
+                      <button type="submit" class="btn-primary">Check in for session {{ timer.currentSession + 1 }}</button>
                     </form>
                     <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
                   </template>
@@ -322,7 +322,7 @@ onUnmounted(() => {
                   <div class="settings-auto-roll">
                     <div>
                       <strong>Session check-in</strong>
-                      <p class="muted">Everyone taps “I'm here” during each break to stay in the next session. No-shows are dropped from the block.</p>
+                      <p class="muted">Everyone taps “Check in” during each break to stay in the next session. No-shows are dropped from the block.</p>
                     </div>
                     <label class="toggle-control">
                       <input type="checkbox" name="require_checkin" value="1" :checked="room.room.requireCheckin" aria-label="Session check-in">
