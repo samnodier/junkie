@@ -1397,6 +1397,14 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	case "timer-checkin":
 		if a.confirmCheckin(r.Context(), rm.ID, u.ID) {
 			action = "timer-phase"
+			// A check-in is exactly what the live message's "In:" line and its
+			// you're-about-to-be-dropped mentions are built from, so checking
+			// in from the web has to refresh it — otherwise Discord goes on
+			// pinging someone who already confirmed, and the room reads as
+			// though they never showed up.
+			if timer, err := a.activeTimer(r.Context(), rm.ID, u.ID); err == nil && timer != nil {
+				a.notifyDiscord(rm, timer, false)
+			}
 		} else {
 			action = ""
 		}
