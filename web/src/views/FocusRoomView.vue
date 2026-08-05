@@ -42,6 +42,13 @@ const heads = computed(() =>
   timer.value?.participants?.length ? timer.value.participants : room.waiters
 );
 
+// Same rule as the room view: a check-in room hides Skip break unless you are
+// the only one in the run, since skipping shuts everyone else's check-in
+// window. Counted off participants, not heads, which folds in the waiting list.
+const canSkipBreak = computed(
+  () => !room.room?.requireCheckin || (timer.value?.participants?.length ?? 0) <= 1
+);
+
 const { endsAt, seconds } = useTimerDeadline(timer);
 const phaseKey = () =>
   `${phase.value}:${timer.value?.paused ? 1 : 0}:${timer.value?.breakPending ? 1 : 0}`;
@@ -217,7 +224,7 @@ onUnmounted(() => {
               <p v-else class="label label-accent">Checked in ✓ · in for session {{ timer.currentSession + 1 }}</p>
             </template>
             <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join this block</button>
-            <button v-if="!room.room?.requireCheckin" type="button" class="btn-ghost" @click="room.action('timer-skip-break')">Skip break</button>
+            <button v-if="canSkipBreak" type="button" class="btn-ghost" @click="room.action('timer-skip-break')">Skip break</button>
             <button v-if="timer.participant" type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
           </template>
         </section>

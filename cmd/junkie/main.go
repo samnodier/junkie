@@ -1429,12 +1429,20 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			a.notifyDiscord(rm, timer, false)
 		}
 	case "timer-skip-break":
-		// Skipping would slam the check-in window shut on everyone else, so
-		// check-in rooms sit out the full (or resized) break.
-		if rm.RequireCheckin {
+		// Skipping ends the window in which everyone else confirms they're
+		// staying, so a check-in room can't offer it — unless the skipper is
+		// the only one in the run, where there is no one else's window to
+		// close and a long break is just time they're sitting out alone.
+		if rm.RequireCheckin && !a.soleParticipant(r.Context(), rm.ID, u.ID) {
 			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Breaks can't be skipped while session check-in is on."), http.StatusSeeOther)
 			return
 		}
+		// Cutting the break short to get back to work is about as clear a
+		// "I'm here" as exists, so it counts as one — same as pause, resume
+		// and setting the break length. Without it the skipper is dropped at
+		// the very transition they asked for, and since they're necessarily
+		// alone in a check-in room, that empties the run and ends it.
+		a.confirmCheckin(r.Context(), rm.ID, u.ID)
 		if timer, changed, err := a.skipRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
 			http.Error(w, "could not skip break", http.StatusInternalServerError)
 			return
@@ -2391,6 +2399,22 @@ func (a *app) endTimerIfNoParticipants(ctx context.Context, runID string) bool {
 }
 
 // timerParticipants returns a run's participants with the identity bits the
+// soleParticipant reports whether userID is the only one in the room's live
+// run. It gates the controls whose cost is borne by everyone else — skipping a
+// check-in room's break, so far — where being alone means there is no one else
+// to bear it. False when nothing is running or the query fails, so the caller
+// falls back to the shared-room rule rather than the permissive one.
+func (a *app) soleParticipant(ctx context.Context, roomID, userID string) bool {
+	var alone bool
+	err := a.db.QueryRow(ctx, `
+		SELECT count(*) = 1 AND bool_and(tp.user_id = $2)
+		FROM timer_participants tp
+		JOIN timer_runs tr ON tr.id = tp.timer_run_id
+		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'`,
+		roomID, userID).Scan(&alone)
+	return err == nil && alone
+}
+
 // avatar stack needs (id + avatar presence/version), not just display names,
 // so participant lists can show profile pictures like every other surface.
 func (a *app) timerParticipants(ctx context.Context, runID string) ([]user, error) {

@@ -40,6 +40,12 @@ const copied = ref('');
 const timer = computed(() => room.timer);
 const phase = computed(() => timer.value?.phase || 'idle');
 const focusMode = computed(() => phase.value === 'focus' && timer.value?.participant);
+// Skipping a break closes the check-in window early, so a check-in room only
+// offers it to someone running the block alone — nobody else to drop. The
+// server enforces the same rule; this just keeps a dead button off the card.
+const canSkipBreak = computed(
+  () => !room.room?.requireCheckin || (timer.value?.participants?.length ?? 0) <= 1
+);
 const { endsAt, seconds } = useTimerDeadline(timer);
 const phaseKey = () =>
   `${phase.value}:${timer.value?.paused ? 1 : 0}:${timer.value?.breakPending ? 1 : 0}`;
@@ -279,7 +285,7 @@ onUnmounted(() => {
                   <form v-if="!timer.breakPending" @submit.prevent="room.action(timer.paused ? 'timer-resume' : 'timer-pause')">
                     <button type="submit" :class="timer.paused ? 'btn-primary' : 'btn-ghost'">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
                   </form>
-                  <form v-if="!room.room.requireCheckin" @submit.prevent="room.action('timer-skip-break')"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
+                  <form v-if="canSkipBreak" @submit.prevent="room.action('timer-skip-break')"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
                   <form v-if="timer.participant" @submit.prevent="room.action('timer-leave')"><button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button></form>
                 </template>
 

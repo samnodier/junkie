@@ -38,6 +38,12 @@ const totalSeconds = computed(() => {
   if (t.phase === 'focus') return t.focusMinutes * 60;
   return t.breakMinutes * 60;
 });
+// A check-in room hides Skip break unless you're running the block alone —
+// skipping ends the window where everyone else confirms they're staying.
+const canSkipBreak = computed(
+  () => !props.room?.requireCheckin || (timer.value?.participants?.length ?? 0) <= 1
+);
+
 const { endsAt } = useTimerDeadline(timer);
 const phaseKey = () =>
   `${phase.value}:${timer.value?.paused ? 1 : 0}:${timer.value?.breakPending ? 1 : 0}`;
@@ -99,7 +105,7 @@ function expired() {
         </template>
         <div v-if="phase === 'break' && !timer.breakPending" class="desk-timer-actions-row">
           <button type="button" :class="timer.paused ? 'btn-primary' : 'btn-ghost'" @click="desk.roomTimer(room.code, timer.paused ? 'timer-resume' : 'timer-pause')">{{ timer.paused ? 'Resume break' : 'Pause break' }}</button>
-          <button v-if="!room.requireCheckin" type="button" class="btn-ghost timer-cancel" @click="desk.roomTimer(room.code, 'timer-skip-break')">Skip break</button>
+          <button v-if="canSkipBreak" type="button" class="btn-ghost timer-cancel" @click="desk.roomTimer(room.code, 'timer-skip-break')">Skip break</button>
         </div>
         <form v-if="timer.participant" @submit.prevent="desk.roomTimer(room.code, 'timer-leave')">
           <button type="submit" class="btn-ghost timer-cancel">Leave this focus block</button>
