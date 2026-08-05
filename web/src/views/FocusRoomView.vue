@@ -12,6 +12,7 @@ import { useRoomStore } from '@/stores/room';
 import { requestPermission } from '@/lib/notify';
 import { useWakeLock } from '@/composables/wakeLock';
 import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
+import { useFocusChrome } from '@/composables/focusChrome';
 import TopBar from '@/components/TopBar.vue';
 import ToastHolder from '@/components/ToastHolder.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
@@ -94,6 +95,8 @@ function goHome() {
 function expired() {
   expireNudge(() => room.refresh(), phaseKey);
 }
+
+const { toggle: toggleChrome } = useFocusChrome(focusing);
 
 watchEffect(() => {
   document.body.classList.toggle('focus-active', focusing.value);
@@ -185,7 +188,7 @@ onUnmounted(() => {
           <template v-else-if="phase === 'focus'">
             <p class="label label-accent">Focus · session {{ timer.currentSession }} of {{ timer.totalSessions }}</p>
             <p class="room-focus-name">{{ room.room?.name }}</p>
-            <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring" aria-label="Focus countdown" @expired="expired" />
+            <RingCountdown :key="`${timer.runId}-focus`" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring focus-chrome-toggle" aria-label="Focus countdown" @expired="expired" @click="toggleChrome" />
             <ParticipantStack v-if="heads.length > 1" :members="heads" />
             <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
             <template v-if="!timer.participant">

@@ -94,6 +94,34 @@ body.focus-active .topbar {
 body.focus-active .topbar:hover {
   opacity: 1;
 }
+/* A room focus block goes further and hides the bar outright — see
+   composables/focusChrome.js for why only the room views opt in. It still
+   occupies its strip, so hovering there brings it back with no affordance
+   needed; :focus-within does the same for a keyboard, which is the whole
+   accessibility story since the ring toggle below is pointer-only. */
+body.focus-immersive .topbar {
+  opacity: 0;
+}
+body.focus-immersive .topbar:hover,
+body.focus-immersive .topbar:focus-within,
+body.focus-immersive.chrome-shown .topbar {
+  opacity: 1;
+}
+/* Without hover there is no way to discover the strip, so the ring toggles the
+   bar instead — and while it's hidden it stops taking taps, so an invisible
+   menu can't swallow one meant for the page. */
+@media (hover: none) {
+  body.focus-immersive .topbar {
+    pointer-events: none;
+  }
+  body.focus-immersive.chrome-shown .topbar {
+    pointer-events: auto;
+  }
+}
+.focus-chrome-toggle {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 .mono, .room-code-input, code {
   font-family: var(--font-mono);
 }
