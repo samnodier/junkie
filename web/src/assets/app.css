@@ -1142,8 +1142,15 @@ span.room-member-locked { color: var(--muted); cursor: default; }
   background: var(--backdrop);
 }
 .join-prompt-card {
+  /* Card width tops out at 24rem; there is no separate min-width.
+     Min-height is 3/5 of that design width (14.4rem) so short dialogs
+     (start confirm / join prompt) feel less stubby. Content can grow past it. */
   width: min(100%, 24rem);
+  min-height: 14.4rem;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .join-prompt-card h2 {
   margin: var(--sp-3) 0 var(--sp-6);
