@@ -23,12 +23,15 @@ const SIZE_KEY = 'junkie:pip:size';
 // ring itself; the layout is container-queried off the window, so nothing here
 // has to measure anything.
 const DEFAULT_SIZE = { width: 380, height: 460 };
-// The floor: below this the clock and the phase's one action stop fitting
-// together, and the window is only good for staring at. Chrome lets a
-// picture-in-picture window be dragged far smaller than that, so we push back
-// (best effort — if a browser declines the resize, the layout still degrades
-// cleanly rather than clipping, which is what the tiers in app.css are for).
-const MIN_SIZE = { width: 300, height: 220 };
+// The floor: the smallest window that still holds the whole card. Both numbers
+// are the tier-1 breakpoints in app.css — one pixel shorter or narrower and the
+// container query starts hiding the phase label, the avatars, and every control
+// but one, which is what made a floor of 300x220 feel like a window you could
+// only stare at. Chrome lets a picture-in-picture window be dragged far smaller
+// than this, so we push back (best effort — if a browser declines the resize,
+// the layout still degrades cleanly rather than clipping, which is what the
+// tiers in app.css are for).
+const MIN_SIZE = { width: 300, height: 380 };
 
 export const supported =
   typeof window !== 'undefined' &&

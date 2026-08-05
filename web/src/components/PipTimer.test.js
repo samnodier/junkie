@@ -318,11 +318,11 @@ describe('popped-out timer', () => {
     await pipMod.openPip();
     expect(opened[0].__requested).toEqual({ width: 380, height: 460 });
 
-    opened[0].resize(340, 300);
+    opened[0].resize(340, 420);
     pipMod.closePip();
 
     await pipMod.openPip();
-    expect(opened[1].__requested).toEqual({ width: 340, height: 300 });
+    expect(opened[1].__requested).toEqual({ width: 340, height: 420 });
     localStorage.clear();
   });
 
@@ -335,13 +335,13 @@ describe('popped-out timer', () => {
     pip.resize(180, 120);
     expect(pip.resizeTo).toHaveBeenCalled();
     expect(pip.innerWidth).toBe(300);
-    expect(pip.innerHeight).toBe(220);
+    expect(pip.innerHeight).toBe(380);
 
     // Only the axis that went under is pushed back.
     pip.resizeTo.mockClear();
     pip.resize(520, 140);
     expect(pip.innerWidth).toBe(520);
-    expect(pip.innerHeight).toBe(220);
+    expect(pip.innerHeight).toBe(380);
 
     // A legitimate size is left alone, and remembered.
     pip.resizeTo.mockClear();
@@ -357,7 +357,7 @@ describe('popped-out timer', () => {
     localStorage.setItem('junkie:pip:size', JSON.stringify({ width: 120, height: 90 }));
     const { pipMod, opened } = await load();
     await pipMod.openPip();
-    expect(opened[0].__requested).toEqual({ width: 300, height: 220 });
+    expect(opened[0].__requested).toEqual({ width: 300, height: 380 });
     localStorage.clear();
   });
 
