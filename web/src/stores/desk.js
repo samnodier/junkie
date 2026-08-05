@@ -92,7 +92,11 @@ export const useDeskStore = defineStore('desk', {
     },
 
     // --- live sync ---
-    connect(meId) {
+    // `rooms: false` keeps the personal socket and drops the room ones. The
+    // solo focus screen (/solo) uses it: room traffic arrives as join prompts
+    // and toasts, which is the one thing a distraction-free screen must not
+    // do. The desk is still there for anyone who wants to see them.
+    connect(meId, { rooms = true } = {}) {
       this.disconnect();
       const toasts = useToastStore();
 
@@ -102,7 +106,7 @@ export const useDeskStore = defineStore('desk', {
         })
       );
 
-      for (const room of this.rooms) {
+      for (const room of rooms ? this.rooms : []) {
         const code = room.code;
         const name = room.name;
         this.sockets.push(

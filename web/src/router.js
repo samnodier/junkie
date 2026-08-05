@@ -74,6 +74,14 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // The private twin of a room's focus page. "solo" is already a reserved
+    // username, so this can't be shadowed by the /{username} catch-all below.
+    path: '/solo',
+    name: 'solo-focus',
+    component: () => import('./views/SoloFocusView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/f/:code',
     name: 'focus-room',
     component: () => import('./views/FocusRoomView.vue'),

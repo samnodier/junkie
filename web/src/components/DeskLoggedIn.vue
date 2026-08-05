@@ -119,7 +119,14 @@ onUnmounted(() => {
 
 <template>
   <div class="desk-shell" v-if="desk.loaded">
-    <div v-if="mode === 'room' && activeRoom" class="desk-room-bar">
+    <div v-if="mode === 'private'" class="desk-room-bar">
+      <RouterLink class="room-membership-pill" to="/solo">
+        <span class="room-membership-dot" aria-hidden="true"></span>
+        <span class="room-membership-label">Private</span>
+        <span class="room-membership-name">{{ auth.privateRoomName }}</span>
+      </RouterLink>
+    </div>
+    <div v-else-if="mode === 'room' && activeRoom" class="desk-room-bar">
       <a class="room-membership-pill" :href="`/r/${activeRoom.code}`" :data-membership-room="activeRoom.code" :data-membership-name="activeRoom.name">
         <span class="room-membership-dot" aria-hidden="true"></span>
         <span class="room-membership-label">Room</span>

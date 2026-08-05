@@ -12,6 +12,12 @@ export const useAuthStore = defineStore('auth', {
     },
     avatarURL: (s) =>
       s.user?.hasAvatar ? `/avatar/${s.user.id}?v=${s.user.avatarVersion}` : '',
+    // Private mode gets the same "a place you go" framing a room has, so the
+    // desk can name it on a pill that leads to the solo focus screen (/solo).
+    privateRoomName: (s) => {
+      const name = s.user?.displayName || '';
+      return name ? `${name}’s room` : 'Your room';
+    },
   },
   actions: {
     async load() {

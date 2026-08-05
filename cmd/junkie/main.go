@@ -293,6 +293,9 @@ func main() {
 	// that would collide with them are reserved at signup.
 	mux.HandleFunc("GET /{username}", a.publicProfilePage)
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
+	// Private focus screen. Public shell like the pages above; the Vue guard
+	// bounces guests to /login?next=/solo and /api/desk keeps the auth.
+	mux.HandleFunc("GET /solo", a.spaPage)
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
 	mux.HandleFunc("POST /solo/break/start", a.requireAuth(a.startSoloBreak))
