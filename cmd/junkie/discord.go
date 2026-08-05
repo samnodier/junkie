@@ -578,8 +578,19 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	// Superseded in-run messages get cleaned up so the channel holds one
 	// live message per run; a new lobby keeps the previous run's completion
 	// message as its record.
-	if repost && messageID != "" && (timer == nil || timer.Phase != "lobby") {
+	if repost && messageID != "" && timer != nil && timer.Phase != "lobby" {
 		_ = a.discord.session.ChannelMessageDelete(channelID, messageID)
+	}
+	// A finished run keeps its last live message instead: deleting it left a
+	// completed run with no trace it was ever announced, so a member who
+	// looked afterwards saw only "run complete" and reasonably concluded the
+	// start had never been posted. Its buttons come off — the run is over, so
+	// the completion message below is the only live control.
+	if timer == nil && messageID != "" {
+		spent := []discordgo.MessageComponent{}
+		_, _ = a.discord.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: channelID, ID: messageID, Components: &spent,
+		})
 	}
 	_, _ = a.db.Exec(ctx, `UPDATE discord_guilds SET live_message_id = $1 WHERE room_id = $2`, msg.ID, rm.ID)
 }
