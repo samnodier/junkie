@@ -186,6 +186,15 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// Nothing here uses these, so deny them outright: an injected script or
+		// an embedded frame cannot then prompt for them in junkie's name.
+		// Notifications and service workers are deliberately absent -- the
+		// timer relies on both. autoplay is denied because nothing plays sound
+		// today; the ambient-sound player on the backlog would need it dropped.
+		h.Set("Permissions-Policy",
+			"accelerometer=(), autoplay=(), camera=(), display-capture=(), "+
+				"encrypted-media=(), geolocation=(), gyroscope=(), magnetometer=(), "+
+				"microphone=(), midi=(), payment=(), usb=()")
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src "+scriptSrc+"; "+

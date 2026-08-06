@@ -237,10 +237,17 @@ func main() {
 	mux.HandleFunc("GET /assets/icon-512.png", a.serveStaticAsset("icon-512.png", "image/png"))
 	mux.HandleFunc("GET /assets/icon-maskable-512.png", a.serveStaticAsset("icon-maskable-512.png", "image/png"))
 	mux.HandleFunc("GET /assets/apple-touch-icon.png", a.serveStaticAsset("apple-touch-icon.png", "image/png"))
+	mux.HandleFunc("GET /assets/og-image.png", a.serveStaticAsset("og-image.png", "image/png"))
+	// Browsers and link scrapers request /favicon.ico by convention even when
+	// the page declares an SVG icon; without this it fell through to the
+	// /{username} route and 404d.
+	mux.HandleFunc("GET /favicon.ico", a.serveStaticAsset("favicon.ico", "image/x-icon"))
+	mux.HandleFunc("GET /robots.txt", a.serveStaticAsset("robots.txt", "text/plain; charset=utf-8"))
 	mux.HandleFunc("GET /manifest.webmanifest", a.serveStaticAsset("manifest.webmanifest", "application/manifest+json"))
 	mux.HandleFunc("GET /sw.js", a.serveStaticAsset("sw.js", "application/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /offline", a.serveStaticAsset("offline.html", "text/html; charset=utf-8"))
 	mux.HandleFunc("GET /.well-known/assetlinks.json", a.serveStaticAsset("assetlinks.json", "application/json"))
+	mux.HandleFunc("GET /.well-known/security.txt", a.serveStaticAsset("security.txt", "text/plain; charset=utf-8"))
 	mux.HandleFunc("GET /app/", a.spaAsset)
 	mux.HandleFunc("GET /api/me", a.apiMe)
 	mux.HandleFunc("GET /api/auth-context", a.apiAuthContext)

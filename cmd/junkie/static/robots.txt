@@ -1,0 +1,24 @@
+# junkie is a login-gated app. Only the landing page, /privacy and /terms
+# render anything for a signed-out visitor -- every other route redirects or
+# 404s for a crawler. Those routes are listed anyway so crawl budget is not
+# spent discovering that the hard way.
+User-agent: *
+Disallow: /api/
+Disallow: /app/
+Disallow: /admin/
+Disallow: /avatar/
+Disallow: /connect/
+Disallow: /connections
+Disallow: /dashboard
+Disallow: /discord/
+Disallow: /join/
+Disallow: /login
+Disallow: /profile
+Disallow: /r/
+Disallow: /reset-password/
+Disallow: /rooms
+Disallow: /signup
+Disallow: /solo
+Disallow: /todos
+
+# No Sitemap: line -- three public pages do not need one.

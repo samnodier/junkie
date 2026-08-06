@@ -1,0 +1,6 @@
+# RFC 9116. Served at /.well-known/security.txt.
+# Expires is mandatory -- bump it (and this file) before the date below.
+Contact: mailto:sam0132nodier@gmail.com
+Expires: 2027-08-05T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://junkie-blin.onrender.com/.well-known/security.txt
