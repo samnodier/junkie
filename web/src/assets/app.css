@@ -66,9 +66,15 @@
 }
 * { box-sizing: border-box; }
 html { font-size: 16px; }
+/* Viewport-height convention, for mobile browsers whose URL bar retracts:
+   svh (smallest viewport) for floors, so a short page never grows tall enough
+   to scroll on its own; dvh (dynamic) for boxes that clamp to or fill the
+   visible area, so nothing hides under the chrome. Plain vh is the *largest*
+   viewport and overflows on both counts — only the pop-out document below
+   still uses it, since a chromeless window has no retracting bar. */
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100svh;
   color: var(--ink);
   background-color: var(--bg);
   background-image:
@@ -470,10 +476,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-shell {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 68px);
+  min-height: calc(100svh - 68px);
 }
 .desk-shell:not(.desk-shell-focus) {
-  max-height: calc(100vh - 68px);
+  max-height: calc(100dvh - 68px);
   overflow: hidden;
 }
 .desk-shell-focus .focus-desk { flex: 1 1 auto; min-height: 0; }
@@ -529,7 +535,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
 .desk-timer-card,
 .desk-todos-panel {
   width: 100%;
-  height: min(32rem, calc(100vh - 10rem));
+  height: min(32rem, calc(100dvh - 10rem));
   margin-bottom: 0;
 }
 .desk-timer-card {
@@ -544,7 +550,7 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
      check-in) instead of clipping them: the fixed height above becomes the
      floor. overflow stays visible so nothing is silently hidden. */
   height: auto;
-  min-height: min(32rem, calc(100vh - 10rem));
+  min-height: min(32rem, calc(100dvh - 10rem));
   overflow: visible;
 }
 .desk-timer-card > .label { margin: 0; text-align: center; }
@@ -1195,7 +1201,7 @@ span.room-member-locked { color: var(--muted); cursor: default; }
 .timer-cancel { margin-top: var(--sp-4); }
 .focus-desk {
   position: relative;
-  min-height: calc(100vh - 68px);
+  min-height: calc(100svh - 68px);
   display: grid;
   place-items: center;
 }
@@ -1241,9 +1247,9 @@ span.room-member-locked { color: var(--muted); cursor: default; }
 .focus-todos-backdrop[hidden] { display: none !important; }
 .focus-todos-panel {
   position: fixed;
-  top: 25vh;
+  top: 25dvh;
   right: 0;
-  height: 50vh;
+  height: 50dvh;
   width: min(320px, 85vw);
   z-index: 20;
   display: flex;
@@ -1290,7 +1296,7 @@ span.room-member-locked { color: var(--muted); cursor: default; }
   right: 0;
   z-index: 100;
   width: min(380px, 100%);
-  height: 100vh;
+  height: 100dvh;
   padding: var(--sp-5);
   overflow-y: auto;
   background: var(--surface);
@@ -1533,7 +1539,7 @@ body.menu-drawer-open { overflow: hidden; }
 .room-focus-page {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 68px);
+  min-height: calc(100svh - 68px);
 }
 .room-focus-page .desk-room-bar {
   flex-shrink: 0;
@@ -1544,7 +1550,7 @@ body.menu-drawer-open { overflow: hidden; }
   min-height: 0;
 }
 .room-focus-shell {
-  min-height: calc(100vh - 68px);
+  min-height: calc(100svh - 68px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1993,7 +1999,7 @@ body.menu-drawer-open { overflow: hidden; }
   gap: var(--sp-3);
   text-align: center;
 }
-.desk-ring-column .pip-parked { min-height: min(32rem, calc(100vh - 10rem)); }
+.desk-ring-column .pip-parked { min-height: min(32rem, calc(100dvh - 10rem)); }
 .room-timer-column .pip-parked { min-height: 24rem; }
 
 /* --- the pop-out document -------------------------------------------------
