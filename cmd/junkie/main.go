@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,7 +37,10 @@ type app struct {
 	hub                 *hub
 	limiter             *rateLimiter
 	currentUserOverride func(*http.Request) (user, bool)
-	discord             *discordBot
+	// discord is nil until the gateway connects, and is published from the
+	// background retry goroutine while request handlers read it, so it's
+	// atomic rather than a plain field.
+	discord atomic.Pointer[discordBot]
 
 	// wakeups dedupes the phase-end wakeups (schedulePhaseWakeup) so
 	// overlapping notify calls don't stack timers for the same room+phase.
@@ -221,13 +225,16 @@ func main() {
 	}
 
 	// Opt-in: no-op unless DISCORD_BOT_TOKEN is set, so existing deployments
-	// are unaffected.
+	// are unaffected. A misconfiguration (token without application ID) is a
+	// deploy mistake worth failing on, but the *connection* is made in the
+	// background: when Discord is down or rate-limiting us, junkie serves the
+	// web app without the bot and picks the gateway up when it recovers.
 	discordBot, err := newDiscordBot(a)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if discordBot != nil {
-		a.discord = discordBot
+		discordBot.startWithRetry()
 		defer discordBot.Close()
 	}
 

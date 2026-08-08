@@ -164,9 +164,9 @@ var discordCommands = []*discordgo.ApplicationCommand{
 	},
 }
 
-// newDiscordBot opens the gateway connection and registers slash commands
-// when DISCORD_BOT_TOKEN is set. It returns (nil, nil) when the bot isn't
-// configured, so main can skip it without treating that as a startup error.
+// newDiscordBot builds the bot from the environment without touching the
+// network. It returns (nil, nil) when the bot isn't configured, so main can
+// skip it without treating that as a startup error.
 func newDiscordBot(a *app) (*discordBot, error) {
 	token := os.Getenv("DISCORD_BOT_TOKEN")
 	if token == "" {
@@ -183,20 +183,51 @@ func newDiscordBot(a *app) (*discordBot, error) {
 	}
 	bot := &discordBot{app: a, session: session, appID: appID}
 	session.AddHandler(bot.onInteraction)
+	return bot, nil
+}
 
-	if err := session.Open(); err != nil {
-		return nil, fmt.Errorf("open discord gateway: %w", err)
+// connect opens the gateway and registers the slash commands. Kept separate
+// from newDiscordBot so a failure here is retryable: Discord being unreachable
+// or rate-limiting us must never stop junkie's web app from serving.
+func (b *discordBot) connect() error {
+	if err := b.session.Open(); err != nil {
+		return fmt.Errorf("open discord gateway: %w", err)
 	}
 	// Registered globally (guildID "") so the command shows up in any server
 	// the bot is invited to without a per-guild registration step. Discord
 	// can take up to ~1 hour to propagate a *new* global command to clients;
 	// updates to an already-registered command apply immediately.
 	for _, cmd := range discordCommands {
-		if _, err := session.ApplicationCommandCreate(appID, "", cmd); err != nil {
+		if _, err := b.session.ApplicationCommandCreate(b.appID, "", cmd); err != nil {
 			log.Printf("discord: register command %s: %v", cmd.Name, err)
 		}
 	}
-	return bot, nil
+	return nil
+}
+
+// startWithRetry connects in the background, retrying with capped backoff, and
+// publishes the bot on the app only once the gateway is actually up. Discord
+// outages and Cloudflare rate-limit responses (which come back as non-JSON
+// bodies discordgo can't parse) then degrade junkie to web-only instead of
+// crash-looping the whole process.
+func (b *discordBot) startWithRetry() {
+	go func() {
+		backoff := 5 * time.Second
+		const maxBackoff = 5 * time.Minute
+		for attempt := 1; ; attempt++ {
+			if err := b.connect(); err != nil {
+				log.Printf("discord: connect attempt %d failed, retrying in %s: %v", attempt, backoff, err)
+				time.Sleep(backoff)
+				if backoff *= 2; backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				continue
+			}
+			b.app.discord.Store(b)
+			log.Printf("discord: gateway connected (attempt %d)", attempt)
+			return
+		}
+	}()
 }
 
 func (b *discordBot) Close() error {
@@ -501,7 +532,8 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	// wakeup advances the state machine at the deadline and fires the web
 	// broadcast and notifications even when no tab is foregrounded.
 	a.schedulePhaseWakeup(rm, timer)
-	if a.discord == nil {
+	bot := a.discord.Load()
+	if bot == nil {
 		return
 	}
 	ctx := context.Background()
@@ -564,13 +596,13 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	repost := freshRun || timer == nil || (timer.Phase == "break" && timer.Transitioned) || sessionStart
 	if !repost && messageID != "" {
 		edit := &discordgo.MessageEdit{Channel: channelID, ID: messageID, Content: &content, Components: &components}
-		if _, err := a.discord.session.ChannelMessageEditComplex(edit); err == nil {
+		if _, err := bot.session.ChannelMessageEditComplex(edit); err == nil {
 			return
 		}
 		// The tracked message was deleted or is unreachable; fall through and
 		// post a replacement.
 	}
-	msg, err := a.discord.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: content, Components: components})
+	msg, err := bot.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: content, Components: components})
 	if err != nil {
 		log.Printf("discord: notify %s: %v", rm.Code, err)
 		return
@@ -579,7 +611,7 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	// live message per run; a new lobby keeps the previous run's completion
 	// message as its record.
 	if repost && messageID != "" && timer != nil && timer.Phase != "lobby" {
-		_ = a.discord.session.ChannelMessageDelete(channelID, messageID)
+		_ = bot.session.ChannelMessageDelete(channelID, messageID)
 	}
 	// A finished run keeps its last live message instead: deleting it left a
 	// completed run with no trace it was ever announced, so a member who
@@ -588,7 +620,7 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	// the completion message below is the only live control.
 	if timer == nil && messageID != "" {
 		spent := []discordgo.MessageComponent{}
-		_, _ = a.discord.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		_, _ = bot.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
 			Channel: channelID, ID: messageID, Components: &spent,
 		})
 	}
