@@ -310,14 +310,42 @@ func interactionUserID(i *discordgo.InteractionCreate) string {
 	return ""
 }
 
-// discordTimestamp renders a phase deadline as both a wall-clock time and a
-// countdown, each in the viewer's own locale and timezone. The relative form
-// alone reads imprecisely on long blocks — Discord rounds it to one coarse
-// unit, so an 80 minute focus session renders as "in an hour" — while the
-// absolute form is exact and never rounds. Both tick along client-side, so
-// the message stays right without us editing it.
+// discordTimestamp renders a phase deadline as a countdown plus the wall-clock
+// time it lands at, the latter as <t:...:t> so it reads in the viewer's own
+// locale and timezone.
+//
+// The countdown is plain text we compute, not Discord's <t:...:R> relative
+// form, because that form does not tick reliably: the mobile clients render it
+// once and never re-render, so a 50 minute block sits at "in 50 minutes" for
+// the whole session, and desktop only refreshes it when the message is
+// re-rendered (scrolling away and back). Server-rendered text can't tick on
+// its own either — refreshDiscordLive edits the live message to keep it
+// honest — but it is the same for every viewer on every platform, and the
+// absolute time next to it is exact regardless.
 func discordTimestamp(t time.Time) string {
-	return fmt.Sprintf("at <t:%d:t> · <t:%d:R>", t.Unix(), t.Unix())
+	left := discordRemaining(time.Until(t))
+	if left == "" {
+		return fmt.Sprintf("at <t:%d:t>", t.Unix())
+	}
+	return fmt.Sprintf("in %s · at <t:%d:t>", left, t.Unix())
+}
+
+// discordRemaining renders a countdown at minute resolution, rounding up so a
+// block never reads as finished while time is left on it. Empty once the
+// deadline has passed, which reads as an omitted countdown rather than a
+// stale one.
+func discordRemaining(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return ""
+	case d < time.Minute:
+		return "under a minute"
+	}
+	minutes := int((d + time.Minute - 1) / time.Minute)
+	if minutes < 60 {
+		return fmt.Sprintf("%d min", minutes)
+	}
+	return fmt.Sprintf("%dh %02dm", minutes/60, minutes%60)
 }
 
 // timerComponents renders the live message's buttons: always Join, plus the
@@ -541,6 +569,169 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	if err := a.db.QueryRow(ctx, `SELECT channel_id, live_message_id FROM discord_guilds WHERE room_id = $1`, rm.ID).Scan(&channelID, &messageID); err != nil {
 		return
 	}
+	// A session starting after a break (session 1 is lobby->focus, already
+	// announced by the lobby post) reposts as a fresh message below and pings
+	// everyone in it: Discord only marks *new* messages unread, and "break's
+	// over" is exactly the moment people need pulling back.
+	sessionStart := timer != nil && timer.Phase == "focus" && timer.Transitioned && timer.CurrentSession > 1
+	content, components := a.discordLiveRender(ctx, rm, timer, sessionStart)
+	// Post a fresh message at the moments people want to be told about — a
+	// new run's lobby, a finished focus block (the joinable break window),
+	// a break's end (the next session starting), and run completion — because
+	// Discord only marks *new* messages unread; silent in-place edits cover
+	// everything else (join/leave updates, pause/resume). Transitioned
+	// distinguishes a real phase flip from a pause tweak that merely
+	// re-renders the break.
+	repost := freshRun || timer == nil || (timer.Phase == "break" && timer.Transitioned) || sessionStart
+	if !repost && messageID != "" {
+		edit := &discordgo.MessageEdit{Channel: channelID, ID: messageID, Content: &content, Components: &components}
+		if _, err := bot.session.ChannelMessageEditComplex(edit); err == nil {
+			a.rememberDiscordLive(rm.ID, timer, content)
+			return
+		}
+		// The tracked message was deleted or is unreachable; fall through and
+		// post a replacement.
+	}
+	msg, err := bot.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: content, Components: components})
+	if err != nil {
+		log.Printf("discord: notify %s: %v", rm.Code, err)
+		return
+	}
+	a.rememberDiscordLive(rm.ID, timer, content)
+	// Superseded in-run messages get cleaned up so the channel holds one
+	// live message per run; a new lobby keeps the previous run's completion
+	// message as its record.
+	if repost && messageID != "" && timer != nil && timer.Phase != "lobby" {
+		_ = bot.session.ChannelMessageDelete(channelID, messageID)
+	}
+	// A finished run keeps its last live message instead: deleting it left a
+	// completed run with no trace it was ever announced, so a member who
+	// looked afterwards saw only "run complete" and reasonably concluded the
+	// start had never been posted. Its buttons come off — the run is over, so
+	// the completion message below is the only live control.
+	if timer == nil && messageID != "" {
+		spent := []discordgo.MessageComponent{}
+		_, _ = bot.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel: channelID, ID: messageID, Components: &spent,
+		})
+	}
+	_, _ = a.db.Exec(ctx, `UPDATE discord_guilds SET live_message_id = $1 WHERE room_id = $2`, msg.ID, rm.ID)
+}
+
+// discordLiveRefreshInterval is how often running rooms' live messages are
+// re-rendered. Well under a minute, so a countdown that has ticked over is
+// corrected promptly, and the no-op check below keeps the cost at roughly one
+// edit per minute per running room — nowhere near Discord's edit rate limit.
+const discordLiveRefreshInterval = 20 * time.Second
+
+// refreshDiscordLive keeps the countdown in every running room's live message
+// honest. The message can't tick on its own: Discord's <t:...:R> relative
+// timestamps never re-render on the mobile clients and only re-render on
+// desktop when the message is scrolled back into view, which is why a phone
+// left the whole run reading "in 50 min". Editing the message pushes a
+// MESSAGE_UPDATE that every client re-renders, so the text we control is the
+// text everyone sees.
+func (a *app) refreshDiscordLive(ctx context.Context) {
+	ticker := time.NewTicker(discordLiveRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		a.refreshDiscordLiveOnce(ctx)
+	}
+}
+
+// refreshDiscordLiveOnce re-renders the live message of every Discord-linked
+// room with a phase currently counting down, editing only those whose text
+// actually changed. Paused and pending breaks are skipped in SQL: they have no
+// deadline to count down, so their message is already correct.
+func (a *app) refreshDiscordLiveOnce(ctx context.Context) {
+	bot := a.discord.Load()
+	if bot == nil {
+		return
+	}
+	type live struct {
+		rm        room
+		channelID string
+		messageID string
+	}
+	var rooms []live
+	rows, err := a.db.Query(ctx, `
+		SELECT rooms.id, rooms.code, rooms.name, rooms.creator_id, rooms.focus_minutes, rooms.break_minutes, rooms.auto_sessions, rooms.auto_roll, rooms.ephemeral, rooms.require_checkin,
+			discord_guilds.channel_id, discord_guilds.live_message_id
+		FROM discord_guilds
+		JOIN rooms ON rooms.id = discord_guilds.room_id
+		WHERE discord_guilds.live_message_id <> ''
+		  AND EXISTS (
+			SELECT 1 FROM timer_runs tr
+			WHERE tr.room_id = rooms.id AND tr.ended_at IS NULL AND tr.phase <> 'ended' AND tr.paused_at IS NULL)`)
+	if err != nil {
+		log.Printf("discord: refresh live: %v", err)
+		return
+	}
+	for rows.Next() {
+		var l live
+		if err := rows.Scan(&l.rm.ID, &l.rm.Code, &l.rm.Name, &l.rm.CreatorID, &l.rm.FocusMinutes, &l.rm.BreakMinutes, &l.rm.AutoSessions, &l.rm.AutoRoll, &l.rm.Ephemeral, &l.rm.RequireCheckin, &l.channelID, &l.messageID); err == nil {
+			rooms = append(rooms, l)
+		}
+	}
+	rows.Close()
+	for _, l := range rooms {
+		// The creator is a stand-in viewer: they only shape the Participant
+		// flag, which the live message doesn't render.
+		timer, err := a.activeTimer(ctx, l.rm.ID, l.rm.CreatorID)
+		if err != nil || timer == nil {
+			continue
+		}
+		// sessionStart is false: the break-is-over ping belongs to the message
+		// the transition posted, not to a countdown tick.
+		content, components := a.discordLiveRender(ctx, l.rm, timer, false)
+		if a.discordLiveUnchanged(l.rm.ID, content) {
+			continue
+		}
+		edit := &discordgo.MessageEdit{Channel: l.channelID, ID: l.messageID, Content: &content, Components: &components}
+		if _, err := bot.session.ChannelMessageEditComplex(edit); err != nil {
+			// Usually the message was deleted from the channel. Nothing to fix
+			// here — the next phase change posts a replacement.
+			continue
+		}
+		a.rememberDiscordLive(l.rm.ID, timer, content)
+	}
+}
+
+// rememberDiscordLive records what a room's live message now says, so a
+// countdown refresh can tell a real change from a pointless edit. A finished
+// run drops its entry: nothing will refresh it, and rooms come and go.
+func (a *app) rememberDiscordLive(roomID string, timer *timerRun, content string) {
+	a.discordLiveMu.Lock()
+	defer a.discordLiveMu.Unlock()
+	if timer == nil {
+		delete(a.discordLive, roomID)
+		return
+	}
+	if a.discordLive == nil {
+		a.discordLive = map[string]string{}
+	}
+	a.discordLive[roomID] = content
+}
+
+// discordLiveUnchanged reports whether the freshly rendered message is what we
+// last sent. An unknown room counts as changed — after a restart the cache is
+// empty, and one corrective edit is cheaper than assuming the channel is right.
+func (a *app) discordLiveUnchanged(roomID, content string) bool {
+	a.discordLiveMu.Lock()
+	defer a.discordLiveMu.Unlock()
+	last, ok := a.discordLive[roomID]
+	return ok && last == content
+}
+
+// discordLiveRender builds the live message's body and controls for a room's
+// current timer state. Split out of notifyDiscord so the countdown refresh can
+// re-render the exact same message a phase change would have posted.
+func (a *app) discordLiveRender(ctx context.Context, rm room, timer *timerRun, sessionStart bool) (string, []discordgo.MessageComponent) {
 	// Re-fetch the participant list every time: joins and leaves call in
 	// with a snapshot taken before their own write, and the whole point of
 	// the names line is showing who's in *now*.
@@ -574,11 +765,9 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	if checkinBreak && len(pending) > 0 {
 		content += "\n" + a.discordMentions(ctx, pending) + " — tap **Join** to check in and stay in the next session, or you're dropped."
 	}
-	// A session starting after a break (session 1 is lobby->focus, already
-	// announced by the lobby post) reposts as a fresh message below and pings
-	// everyone in it: Discord only marks *new* messages unread, and "break's
-	// over" is exactly the moment people need pulling back.
-	sessionStart := timer != nil && timer.Phase == "focus" && timer.Transitioned && timer.CurrentSession > 1
+	// The break-is-over ping rides on the message the transition posts, so it
+	// lands as an unread mention; a later re-render of that same message drops
+	// it, the ping having already been delivered.
 	if sessionStart && len(in) > 0 {
 		content += "\n" + a.discordMentions(ctx, in) + " — break's over, focus is starting!"
 	}
@@ -586,45 +775,7 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	if timer == nil {
 		components = nil
 	}
-	// Post a fresh message at the moments people want to be told about — a
-	// new run's lobby, a finished focus block (the joinable break window),
-	// a break's end (the next session starting), and run completion — because
-	// Discord only marks *new* messages unread; silent in-place edits cover
-	// everything else (join/leave updates, pause/resume). Transitioned
-	// distinguishes a real phase flip from a pause tweak that merely
-	// re-renders the break.
-	repost := freshRun || timer == nil || (timer.Phase == "break" && timer.Transitioned) || sessionStart
-	if !repost && messageID != "" {
-		edit := &discordgo.MessageEdit{Channel: channelID, ID: messageID, Content: &content, Components: &components}
-		if _, err := bot.session.ChannelMessageEditComplex(edit); err == nil {
-			return
-		}
-		// The tracked message was deleted or is unreachable; fall through and
-		// post a replacement.
-	}
-	msg, err := bot.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: content, Components: components})
-	if err != nil {
-		log.Printf("discord: notify %s: %v", rm.Code, err)
-		return
-	}
-	// Superseded in-run messages get cleaned up so the channel holds one
-	// live message per run; a new lobby keeps the previous run's completion
-	// message as its record.
-	if repost && messageID != "" && timer != nil && timer.Phase != "lobby" {
-		_ = bot.session.ChannelMessageDelete(channelID, messageID)
-	}
-	// A finished run keeps its last live message instead: deleting it left a
-	// completed run with no trace it was ever announced, so a member who
-	// looked afterwards saw only "run complete" and reasonably concluded the
-	// start had never been posted. Its buttons come off — the run is over, so
-	// the completion message below is the only live control.
-	if timer == nil && messageID != "" {
-		spent := []discordgo.MessageComponent{}
-		_, _ = bot.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			Channel: channelID, ID: messageID, Components: &spent,
-		})
-	}
-	_, _ = a.db.Exec(ctx, `UPDATE discord_guilds SET live_message_id = $1 WHERE room_id = $2`, msg.ID, rm.ID)
+	return content, components
 }
 
 // handleRegister connects the guild to a room: an existing one when a room

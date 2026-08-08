@@ -46,6 +46,12 @@ type app struct {
 	// overlapping notify calls don't stack timers for the same room+phase.
 	wakeupMu sync.Mutex
 	wakeups  map[string]string
+
+	// discordLive holds, per room, the text its Discord live message was last
+	// sent with, so refreshDiscordLive edits only when the render actually
+	// changed instead of every tick.
+	discordLiveMu sync.Mutex
+	discordLive   map[string]string
 }
 
 type user struct {
@@ -338,6 +344,7 @@ func main() {
 	go a.sweepInactiveTodos(ctx)
 	go a.sweepAbandonedEphemeralRooms(ctx)
 	go a.sweepStaleRoomWaiting(ctx)
+	go a.refreshDiscordLive(ctx)
 
 	// Reject state-changing requests from other origins (CSRF). Requests
 	// without browser origin metadata (curl, health checks) still pass.

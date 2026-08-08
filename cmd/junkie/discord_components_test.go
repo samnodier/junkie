@@ -77,14 +77,61 @@ func TestSplitCheckedIn(t *testing.T) {
 }
 
 func TestDiscordStatusContentFocus(t *testing.T) {
-	ends := time.Date(2026, 7, 21, 21, 19, 0, 0, time.UTC)
+	ends := time.Now().Add(80 * time.Minute)
 	timer := &timerRun{Phase: "focus", FocusMinutes: 80, BreakMinutes: 20, TotalSessions: 2, CurrentSession: 1, PhaseEndsAt: ends}
 	got := discordStatusContent(room{Name: "getting there"}, timer)
-	// Both timestamp styles: :R alone rounds an 80 minute block to "in an
-	// hour", so the exact wall-clock time rides along with it.
-	for _, want := range []string{"80 min", fmt.Sprintf("at <t:%d:t>", ends.Unix()), fmt.Sprintf("<t:%d:R>", ends.Unix())} {
+	// The countdown is rendered here, not left to Discord's <t:...:R>, which
+	// never ticks on mobile; the absolute time rides along beside it.
+	for _, want := range []string{"80 min", "in 1h 20m", fmt.Sprintf("at <t:%d:t>", ends.Unix())} {
 		if !strings.Contains(got, want) {
 			t.Errorf("content %q missing %q", got, want)
 		}
+	}
+	if strings.Contains(got, ":R>") {
+		t.Errorf("content %q still leans on Discord's relative timestamp", got)
+	}
+}
+
+func TestDiscordRemaining(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{-time.Second, ""},
+		{0, ""},
+		{30 * time.Second, "under a minute"},
+		// Rounded up, so a block never reads as done with time left on it.
+		{90 * time.Second, "2 min"},
+		{25 * time.Minute, "25 min"},
+		{59*time.Minute + 30*time.Second, "1h 00m"},
+		{80 * time.Minute, "1h 20m"},
+		{2 * time.Hour, "2h 00m"},
+	}
+	for _, c := range cases {
+		if got := discordRemaining(c.d); got != c.want {
+			t.Errorf("discordRemaining(%s) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
+// The refresh loop edits only when the render actually changed, so a paused or
+// otherwise static room costs nothing per tick.
+func TestDiscordLiveUnchanged(t *testing.T) {
+	a := &app{}
+	if a.discordLiveUnchanged("room", "hello") {
+		t.Error("unknown room reported unchanged; a cold cache must re-render")
+	}
+	timer := &timerRun{}
+	a.rememberDiscordLive("room", timer, "hello")
+	if !a.discordLiveUnchanged("room", "hello") {
+		t.Error("identical content reported changed")
+	}
+	if a.discordLiveUnchanged("room", "hello · in 24 min") {
+		t.Error("ticked countdown reported unchanged")
+	}
+	// A finished run drops its entry rather than pinning it in memory.
+	a.rememberDiscordLive("room", nil, "run complete")
+	if a.discordLiveUnchanged("room", "hello") {
+		t.Error("entry survived the end of the run")
 	}
 }
