@@ -327,7 +327,10 @@ func discordTimestamp(t time.Time) string {
 	if left == "" {
 		return fmt.Sprintf("at <t:%d:t>", t.Unix())
 	}
-	return fmt.Sprintf("in %s · at <t:%d:t>", left, t.Unix())
+	// Bold, because the countdown is the one thing everyone reads the message
+	// for, and it sits inline next to the block length — two numbers in "min"
+	// a few words apart, one live and one fixed. The weight tells them apart.
+	return fmt.Sprintf("in **%s** · at <t:%d:t>", left, t.Unix())
 }
 
 // discordRemaining renders a countdown at minute resolution, rounding up so a

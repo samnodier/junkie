@@ -82,7 +82,7 @@ func TestDiscordStatusContentFocus(t *testing.T) {
 	got := discordStatusContent(room{Name: "getting there"}, timer)
 	// The countdown is rendered here, not left to Discord's <t:...:R>, which
 	// never ticks on mobile; the absolute time rides along beside it.
-	for _, want := range []string{"80 min", "in 1h 20m", fmt.Sprintf("at <t:%d:t>", ends.Unix())} {
+	for _, want := range []string{"80 min", "in **1h 20m**", fmt.Sprintf("at <t:%d:t>", ends.Unix())} {
 		if !strings.Contains(got, want) {
 			t.Errorf("content %q missing %q", got, want)
 		}
