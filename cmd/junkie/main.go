@@ -107,6 +107,11 @@ type todo struct {
 	ReadOnly    bool
 	RoomCode    string
 	CreatedAt   time.Time
+	// HasAvatar and AvatarVersion mirror the author's profile so a read-only
+	// row can decide whether to request /avatar/{id} at all. Personal todos
+	// leave them zero: those rows render a checkbox, not an author.
+	HasAvatar     bool
+	AvatarVersion int64
 }
 
 type roomTodosSplit struct {
@@ -2642,7 +2647,9 @@ func (a *app) personalTodos(ctx context.Context, userID string) ([]todo, error) 
 }
 
 func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
-	rows, err := a.db.Query(ctx, `SELECT t.id, t.text, t.done, t.removed, u.display_name, t.user_id, t.created_at FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1 ORDER BY t.removed, t.done, t.created_at DESC`, roomID)
+	rows, err := a.db.Query(ctx, `SELECT t.id, t.text, t.done, t.removed, u.display_name, t.user_id, t.created_at,
+			u.avatar IS NOT NULL, COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+		FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1 ORDER BY t.removed, t.done, t.created_at DESC`, roomID)
 	if err != nil {
 		return nil, err
 	}
@@ -2650,7 +2657,8 @@ func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
 	var todos []todo
 	for rows.Next() {
 		var t todo
-		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.Removed, &t.DisplayName, &t.UserID, &t.CreatedAt) == nil {
+		if rows.Scan(&t.ID, &t.Text, &t.Done, &t.Removed, &t.DisplayName, &t.UserID, &t.CreatedAt,
+			&t.HasAvatar, &t.AvatarVersion) == nil {
 			todos = append(todos, t)
 		}
 	}

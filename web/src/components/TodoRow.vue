@@ -65,7 +65,7 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
 
 <template>
   <li :class="todo.removed ? 'removed' : todo.done ? 'done' : ''">
-    <span v-if="todo.readOnly" class="todo-avatar" aria-hidden="true"><img class="avatar-img" :src="`/avatar/${todo.userId}`" alt="" loading="lazy" onerror="this.remove()">{{ initial(todo.displayName) }}</span>
+    <span v-if="todo.readOnly" class="todo-avatar" aria-hidden="true"><img v-if="todo.hasAvatar" class="avatar-img" :src="`/avatar/${todo.userId}?v=${todo.avatarVersion}`" alt="" loading="lazy"><template v-else>{{ initial(todo.displayName) }}</template></span>
     <button
       v-else
       type="button"

@@ -814,8 +814,10 @@ h2 { font-size: var(--fs-card-title); letter-spacing: -0.02em; }
   position: relative;
   overflow: hidden;
 }
-/* Uploaded pictures sit on top of the initial letter; when a user has no
-   avatar the request 404s and the img removes itself, revealing the letter. */
+/* An uploaded picture replaces the initial letter -- every avatar site
+   renders one or the other, never both, so a user without a picture never
+   costs a request. Absolute inset fills the circle whatever the source's
+   aspect ratio. */
 .avatar-img {
   position: absolute;
   inset: 0;

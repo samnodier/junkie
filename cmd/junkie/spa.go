@@ -190,6 +190,10 @@ type apiTodo struct {
 	UserID      string `json:"userId,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
 	ReadOnly    bool   `json:"readOnly,omitempty"`
+	// HasAvatar tells the row whether to request a picture; without it the
+	// row would have to fetch /avatar/{id} blind and hide the 404 itself.
+	HasAvatar     bool  `json:"hasAvatar,omitempty"`
+	AvatarVersion int64 `json:"avatarVersion,omitempty"`
 }
 
 func apiTodos(todos []todo) []apiTodo {
@@ -198,6 +202,7 @@ func apiTodos(todos []todo) []apiTodo {
 		out = append(out, apiTodo{
 			ID: t.ID, Text: t.Text, Done: t.Done, Removed: t.Removed,
 			UserID: t.UserID, DisplayName: t.DisplayName, ReadOnly: t.ReadOnly,
+			HasAvatar: t.HasAvatar, AvatarVersion: t.AvatarVersion,
 		})
 	}
 	return out
