@@ -915,8 +915,14 @@ func (a *app) startSoloBreak(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 		return
 	}
-	ends := time.Now().Add(time.Duration(timer.BreakMinutes) * time.Minute)
-	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase_started_at = now(), phase_ends_at = $1 WHERE id = $2`, ends, timer.ID)
+	// Set the length and start in one motion, the same shape (and the same
+	// 1-60 bounds) as a room's timer-break-length: the private break ring is
+	// the room's break ring, so it has to accept what that ring can produce.
+	// A request without minutes — an older tab — keeps the length derived
+	// from the focus block.
+	minutes := clampInt(r.FormValue("minutes"), 1, 60, timer.BreakMinutes)
+	ends := time.Now().Add(time.Duration(minutes) * time.Minute)
+	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET break_minutes = $1, phase_started_at = now(), phase_ends_at = $2 WHERE id = $3 AND phase = 'break' AND ended_at IS NULL`, minutes, ends, timer.ID)
 	a.hub.broadcast(userChannel(u.ID), "solo-timer")
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }

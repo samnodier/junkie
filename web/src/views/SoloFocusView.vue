@@ -17,6 +17,7 @@ import { useFocusChrome } from '@/composables/focusChrome';
 import AppShell from '@/components/AppShell.vue';
 import RingCountdown from '@/components/RingCountdown.vue';
 import RingIdle from '@/components/RingIdle.vue';
+import BreakReadyRing from '@/components/BreakReadyRing.vue';
 import PipTimer from '@/components/PipTimer.vue';
 
 const auth = useAuthStore();
@@ -103,10 +104,9 @@ onUnmounted(() => {
 
           <!-- Break waiting to start -->
           <template v-else-if="timer.breakPending">
-            <p class="label label-warn">Private break ready</p>
+            <p class="label label-warn">Private break ready · set the length · tap to start</p>
             <p class="room-focus-name">{{ auth.privateRoomName }}</p>
-            <div class="room-ready-time mono">{{ timer.breakMinutes }}:00</div>
-            <button type="button" class="btn-primary" @click="desk.soloBreakStart()">Start break</button>
+            <BreakReadyRing :break-minutes="timer.breakMinutes" :room-name="auth.privateRoomName" ring-class="room-focus-ring" @start="desk.soloBreakStart" />
             <button type="button" class="btn-ghost timer-cancel" @click="desk.soloBreakSkip()">Skip break</button>
           </template>
 

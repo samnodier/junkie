@@ -76,8 +76,10 @@ export const useDeskStore = defineStore('desk', {
       await postForm('/solo/cancel');
       await this.refresh();
     },
-    async soloBreakStart() {
-      await postForm('/solo/break/start');
+    // Minutes come from the break ring, the same set-and-start motion a room
+    // break has. Omitting them leaves the server's derived length in place.
+    async soloBreakStart(minutes) {
+      await postForm('/solo/break/start', minutes ? { minutes: String(minutes) } : {});
       await this.refresh();
     },
     async soloBreakSkip() {

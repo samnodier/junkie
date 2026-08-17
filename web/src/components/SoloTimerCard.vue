@@ -1,14 +1,18 @@
 <script setup>
 // Private solo timer card, ported from desk-private-timer: idle adjustable
-// ring, focus countdown, pending break, running break. Server owns the state;
-// countdown expiry re-fetches and the server transitions the phase.
+// ring, focus countdown, pending break (the room card's set-and-start ring,
+// so the control is the same one either way), running break. Server owns the
+// state; countdown expiry re-fetches and the server transitions the phase.
 import { computed } from 'vue';
+import { useAuthStore } from '@/stores/auth';
 import { useDeskStore } from '@/stores/desk';
 import { requestPermission, onTimerEnd } from '@/lib/notify';
 import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import RingIdle from './RingIdle.vue';
 import RingCountdown from './RingCountdown.vue';
+import BreakReadyRing from './BreakReadyRing.vue';
 
+const auth = useAuthStore();
 const desk = useDeskStore();
 const timer = computed(() => desk.soloTimer);
 const { endsAt } = useTimerDeadline(timer);
@@ -37,9 +41,8 @@ function expired(phase) {
         <form @submit.prevent="cancel"><button type="submit" class="btn-ghost timer-cancel">End early</button></form>
       </template>
       <template v-else-if="timer.breakPending">
-        <p class="label label-warn">Private break ready</p>
-        <div class="room-ready-time mono">{{ timer.breakMinutes }}:00</div>
-        <form @submit.prevent="desk.soloBreakStart()"><button type="submit" class="btn-primary">Start break</button></form>
+        <p class="label label-warn">Private break ready · set the length · tap to start</p>
+        <BreakReadyRing :break-minutes="timer.breakMinutes" :room-name="auth.privateRoomName" @start="desk.soloBreakStart" />
         <form @submit.prevent="desk.soloBreakSkip()"><button type="submit" class="btn-ghost timer-cancel">Skip break</button></form>
       </template>
       <template v-else>
