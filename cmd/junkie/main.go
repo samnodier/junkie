@@ -2343,6 +2343,19 @@ func soloBreakPending(t *timerRun) bool {
 	return t.Phase == "break" && !t.PhaseEndsAt.After(t.PhaseStartedAt)
 }
 
+// soloBreakStale reports a pending private break left untouched past
+// stalePauseTimeout — the private twin of a room's expired pause. A private
+// break arrives waiting to be started, exactly like an auto-roll-off room's
+// does, so it ages on the same clock and ends the same way: the run is over,
+// the focus minutes it earned are already banked, and the screen goes back to
+// the idle ring rather than offering a break from yesterday.
+//
+// The clock is phase_started_at, which is when focus actually ended (see
+// normalizeSoloTimer) rather than when the flip was recorded.
+func soloBreakStale(t *timerRun, now time.Time) bool {
+	return t != nil && soloBreakPending(t) && now.Sub(t.PhaseStartedAt) >= stalePauseTimeout
+}
+
 func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun, error) {
 	timer, err := a.activeSoloTimer(ctx, userID)
 	if err != nil || timer == nil {
@@ -2351,12 +2364,18 @@ func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun,
 	now := time.Now()
 	if timer.Phase == "focus" && now.After(timer.PhaseEndsAt) {
 		breakMins := soloBreakMinutes(timer.FocusMinutes)
+		// The break is stamped at the moment focus ended, not at this read.
+		// A private run has no server-side wakeup pushing it along the way a
+		// room does (schedulePhaseWakeup), so the boundary is only recorded
+		// whenever its owner next looks — dating it "now" would restart an
+		// abandoned break's clock on every visit and it could never go stale.
+		boundary := timer.PhaseEndsAt
 		// Claim the focus->break flip first: the WHERE phase='focus' guard
 		// means exactly one of several racing requests (two tabs polling the
 		// boundary) wins the row, and only the winner credits the minutes —
 		// the activity add is cumulative, so crediting per-caller would
 		// double-count.
-		tag, err := a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'break', break_minutes = $1, phase_started_at = $2, phase_ends_at = $2 WHERE id = $3 AND phase = 'focus'`, breakMins, now, timer.ID)
+		tag, err := a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'break', break_minutes = $1, phase_started_at = $2, phase_ends_at = $2 WHERE id = $3 AND phase = 'focus'`, breakMins, boundary, timer.ID)
 		if err == nil && tag.RowsAffected() > 0 {
 			_, _ = a.db.Exec(ctx, `
 				INSERT INTO activity (user_id, activity_date, focus_minutes)
@@ -2366,10 +2385,18 @@ func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun,
 		}
 		timer.Phase = "break"
 		timer.BreakMinutes = breakMins
-		timer.PhaseStartedAt = now
-		timer.PhaseEndsAt = now
+		timer.PhaseStartedAt = boundary
+		timer.PhaseEndsAt = boundary
 	} else if timer.Phase == "break" && timer.PhaseEndsAt.After(timer.PhaseStartedAt) && now.After(timer.PhaseEndsAt) {
 		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND phase = 'break'`, timer.ID)
+		return nil, nil
+	}
+	// A break nobody came back to ends the run, same as a room's expired
+	// pause: whoever started it walked away, and the next visit should offer
+	// a fresh block rather than a stale break. Runs against both the flip
+	// above and a break that was already pending on an earlier visit.
+	if soloBreakStale(timer, now) {
+		_, _ = a.db.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND phase = 'break' AND ended_at IS NULL`, timer.ID)
 		return nil, nil
 	}
 	timer.Participant = true

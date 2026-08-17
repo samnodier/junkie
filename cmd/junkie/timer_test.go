@@ -31,6 +31,36 @@ func TestPauseExpired(t *testing.T) {
 	}
 }
 
+func TestSoloBreakStale(t *testing.T) {
+	now := time.Now()
+	// A pending private break: phase_ends_at never moved past phase_started_at.
+	pendingFor := func(d time.Duration) *timerRun {
+		at := now.Add(-d)
+		return &timerRun{Phase: "break", PhaseStartedAt: at, PhaseEndsAt: at}
+	}
+	if soloBreakStale(nil, now) {
+		t.Error("nil timer should not be stale")
+	}
+	if soloBreakStale(&timerRun{Phase: "focus", PhaseStartedAt: now.Add(-2 * time.Hour), PhaseEndsAt: now.Add(time.Minute)}, now) {
+		t.Error("a running focus block should not be stale")
+	}
+	// A break someone actually started runs on its own deadline; expiring it
+	// is the running-break branch's job, not this one's.
+	started := &timerRun{Phase: "break", PhaseStartedAt: now.Add(-3 * time.Hour), PhaseEndsAt: now.Add(-2 * time.Hour)}
+	if soloBreakStale(started, now) {
+		t.Error("a started break should not be stale")
+	}
+	if soloBreakStale(pendingFor(59*time.Minute), now) {
+		t.Error("59-minute pending break should not be stale")
+	}
+	if !soloBreakStale(pendingFor(time.Hour), now) {
+		t.Error("exactly one-hour pending break should be stale")
+	}
+	if !soloBreakStale(pendingFor(30*time.Hour), now) {
+		t.Error("day-old pending break should be stale")
+	}
+}
+
 func TestRequestedRoomFocusMinutes(t *testing.T) {
 	tests := []struct {
 		name     string
