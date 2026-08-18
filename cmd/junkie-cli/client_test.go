@@ -9,6 +9,14 @@ import (
 	"testing"
 )
 
+// httptestServer starts a throwaway server and returns its URL.
+func httptestServer(t *testing.T, h http.HandlerFunc) string {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
 func testClient(t *testing.T, h http.HandlerFunc) *client {
 	t.Helper()
 	srv := httptest.NewServer(h)

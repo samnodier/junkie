@@ -147,17 +147,17 @@ func websocketURL(baseURL string) string {
 func parseSignal(room string, data []byte) signal {
 	text := string(data)
 	if !strings.HasPrefix(strings.TrimSpace(text), "{") {
-		return signal{room: room, kind: text}
+		return signal{room: room, kind: sanitize(text)}
 	}
 	var event map[string]any
 	if err := json.Unmarshal(data, &event); err != nil {
-		return signal{room: room, kind: text}
+		return signal{room: room, kind: sanitize(text)}
 	}
 	kind, _ := event["type"].(string)
 	if kind == "" {
 		kind = text
 	}
-	return signal{room: room, kind: kind, event: event}
+	return signal{room: room, kind: sanitize(kind), event: event}
 }
 
 func (s *sockets) close() {
@@ -168,10 +168,12 @@ func (s *sockets) close() {
 	s.wg.Wait()
 }
 
-// eventString reads a string field out of a signal's payload.
+// str reads a string field out of a signal's payload. Room names, display
+// names and todo text arrive here having been typed by other people, so they
+// are cleaned on the way out — see sanitize.
 func (s signal) str(key string) string {
 	v, _ := s.event[key].(string)
-	return v
+	return sanitize(v)
 }
 
 // eventTime reads an RFC3339 field — the deadlines the server sends with a

@@ -61,6 +61,9 @@ func cmdLogin(args []string) error {
 		return err
 	}
 
+	if warning := insecureURLWarning(cfg.BaseURL); warning != "" {
+		fmt.Fprintln(os.Stderr, styleWarn.Render(warning))
+	}
 	fmt.Fprintf(os.Stderr, "signing in to %s…\n", cfg.BaseURL)
 	c := newClient(config{BaseURL: cfg.BaseURL})
 	token, err := c.login(username, password)
@@ -81,6 +84,25 @@ func cmdLogin(args []string) error {
 	path, _ := configPath()
 	fmt.Printf("Signed in as %s. Session stored in %s\n", username, path)
 	return nil
+}
+
+// insecureURLWarning flags a plaintext server. The password goes over that
+// connection and the session cookie comes back over it, so anyone on the
+// path has both. Localhost is exempt: that is the development server, and
+// the traffic never leaves the machine.
+func insecureURLWarning(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme != "http" {
+		return ""
+	}
+	// Hostname strips the port and an IPv6 address's brackets, which hand
+	// -rolled splitting on ":" gets wrong.
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return ""
+	}
+	return "Warning: " + baseURL + " is not HTTPS. Your password and session " +
+		"will cross the network in the clear."
 }
 
 func cmdLogout(args []string) error {

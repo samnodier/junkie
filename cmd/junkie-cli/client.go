@@ -135,7 +135,7 @@ func redirectError(resp *http.Response) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	msg := strings.TrimSpace(loc.Query().Get("error"))
+	msg := sanitize(strings.TrimSpace(loc.Query().Get("error")))
 	return msg, msg != ""
 }
 
@@ -147,7 +147,9 @@ func httpError(resp *http.Response) error {
 		Error string `json:"error"`
 	}
 	if json.Unmarshal(body, &payload) == nil && payload.Error != "" {
-		return errors.New(payload.Error)
+		// The server writes these for humans, but a few interpolate names
+		// somebody else chose.
+		return errors.New(sanitize(payload.Error))
 	}
 	return fmt.Errorf("%s said %s", resp.Request.URL.Path, resp.Status)
 }
@@ -189,18 +191,28 @@ func (c *client) logout() error { return c.post("/logout", nil) }
 func (c *client) me() (meResponse, error) {
 	var out meResponse
 	err := c.getJSON("/api/me", &out)
+	if out.User != nil {
+		sanitizeUser(out.User)
+	}
 	return out, err
 }
 
 func (c *client) profile() (profileResponse, error) {
 	var out profileResponse
 	err := c.getJSON("/api/profile", &out)
+	for i := range out.Heatmap.Cells {
+		out.Heatmap.Cells[i].Date = sanitize(out.Heatmap.Cells[i].Date)
+	}
+	for i := range out.Heatmap.Months {
+		out.Heatmap.Months[i].Label = sanitize(out.Heatmap.Months[i].Label)
+	}
 	return out, err
 }
 
 func (c *client) desk() (deskResponse, error) {
 	var out deskResponse
 	err := c.getJSON("/api/desk", &out)
+	sanitizeDesk(&out)
 	return out, err
 }
 
