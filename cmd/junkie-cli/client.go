@@ -192,6 +192,12 @@ func (c *client) me() (meResponse, error) {
 	return out, err
 }
 
+func (c *client) profile() (profileResponse, error) {
+	var out profileResponse
+	err := c.getJSON("/api/profile", &out)
+	return out, err
+}
+
 func (c *client) desk() (deskResponse, error) {
 	var out deskResponse
 	err := c.getJSON("/api/desk", &out)

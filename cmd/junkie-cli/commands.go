@@ -210,6 +210,26 @@ func cmdRooms(args []string) error {
 	return nil
 }
 
+func cmdStats(args []string) error {
+	args, asJSON := hasFlag(args, "json")
+	if len(args) > 0 {
+		return errors.New("usage: junkie stats [--json]")
+	}
+	c, _, err := authed()
+	if err != nil {
+		return err
+	}
+	profile, err := c.profile()
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(profile)
+	}
+	fmt.Print(renderStats(profile, terminalWidth()))
+	return nil
+}
+
 func cmdFocus(args []string) error {
 	args, watch := hasFlag(args, "watch")
 	minutes, err := optionalMinutes(args, "junkie focus [MINUTES] [--watch]")
