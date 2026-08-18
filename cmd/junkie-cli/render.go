@@ -76,10 +76,19 @@ var glyphs = map[rune][5]string{
 	' ': {"   ", "   ", "   ", "   ", "   "},
 }
 
-// bigDigits renders text as five rows of block glyphs. Unknown runes are
-// skipped rather than substituted, so a caller can only ever widen the
-// output by passing something odd, never break the row alignment.
-func bigDigits(text string) []string {
+// bigDigits renders text as five rows of block glyphs, each cell drawn
+// scale columns wide. Scale 2 squares the glyphs up for a full-screen
+// countdown; scale 1 is the narrow form that still fits a side strip. A
+// scale of zero or less means this tier draws no glyphs at all, and reports
+// that as no rows rather than as five empty ones.
+//
+// Unknown runes are skipped rather than substituted, so a caller can only
+// ever widen the output by passing something odd, never break the alignment
+// between rows.
+func bigDigits(text string, scale int) []string {
+	if scale < 1 {
+		return nil
+	}
 	rows := make([]string, 5)
 	first := true
 	for _, r := range text {
@@ -91,17 +100,35 @@ func bigDigits(text string) []string {
 			if !first {
 				rows[i] += " "
 			}
-			// Double every cell horizontally — blanks included, or a row
-			// with gaps comes out narrower than a solid one and the digits
-			// shear apart. A 3-wide glyph five rows tall reads as a thin
-			// sliver at single width.
+			// Every cell widens, blanks included: doubling only the filled
+			// ones makes a row with gaps narrower than a solid one, and the
+			// digits shear apart.
 			for _, cell := range g[i] {
-				rows[i] += string(cell) + string(cell)
+				rows[i] += strings.Repeat(string(cell), scale)
 			}
 		}
 		first = false
 	}
 	return rows
+}
+
+// digitWidth is how wide bigDigits will render text, so a caller can decide
+// whether it fits before drawing it.
+func digitWidth(text string, scale int) int {
+	if scale < 1 {
+		return 0
+	}
+	glyphCount := 0
+	for _, r := range text {
+		if _, ok := glyphs[r]; ok {
+			glyphCount++
+		}
+	}
+	if glyphCount == 0 {
+		return 0
+	}
+	// Three cells per glyph, plus one blank column between neighbours.
+	return glyphCount*3*scale + (glyphCount - 1)
 }
 
 // progressBar draws elapsed-vs-remaining as a filled track. frac is clamped

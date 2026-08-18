@@ -30,24 +30,45 @@ func TestFormatDuration(t *testing.T) {
 }
 
 func TestBigDigits(t *testing.T) {
-	rows := bigDigits("25:00")
-	if len(rows) != 5 {
-		t.Fatalf("expected 5 rows, got %d", len(rows))
-	}
-	// Every row must be the same width or the digits shear apart.
-	width := len([]rune(rows[0]))
-	for i, row := range rows {
-		if got := len([]rune(row)); got != width {
-			t.Errorf("row %d is %d wide, row 0 is %d", i, got, width)
+	for _, scale := range []int{1, 2} {
+		rows := bigDigits("25:00", scale)
+		if len(rows) != 5 {
+			t.Fatalf("scale %d: expected 5 rows, got %d", scale, len(rows))
+		}
+		// Every row must be the same width or the digits shear apart. This
+		// is the check that caught blanks not being widened alongside the
+		// filled cells.
+		width := len([]rune(rows[0]))
+		for i, row := range rows {
+			if got := len([]rune(row)); got != width {
+				t.Errorf("scale %d: row %d is %d wide, row 0 is %d", scale, i, got, width)
+			}
+		}
+		// digitWidth is what the tiers use to decide whether the countdown
+		// fits, so it has to agree with what actually gets drawn.
+		if got := digitWidth("25:00", scale); got != width {
+			t.Errorf("scale %d: digitWidth says %d, rendered %d", scale, got, width)
+		}
+		if !strings.Contains(strings.Join(rows, "\n"), "█") {
+			t.Errorf("scale %d: expected block glyphs", scale)
 		}
 	}
-	if !strings.Contains(strings.Join(rows, "\n"), "█") {
-		t.Error("expected block glyphs in the output")
+	// Doubling the scale doubles the cells but not the single-column gaps
+	// between glyphs, so the widths are not simply 2x.
+	if w1, w2 := digitWidth("25:00", 1), digitWidth("25:00", 2); w2 <= w1 {
+		t.Errorf("scale 2 (%d) should be wider than scale 1 (%d)", w2, w1)
 	}
-	// An unmappable rune is skipped, not substituted, so it cannot widen a
+	// A tier that draws no glyphs asks for scale 0 and must get nothing
+	// back, not five blank rows that would push the layout around.
+	if rows := bigDigits("25:00", 0); rows != nil {
+		t.Errorf("scale 0 rendered %d rows, want none", len(rows))
+	}
+	if got := digitWidth("25:00", 0); got != 0 {
+		t.Errorf("digitWidth at scale 0 = %d, want 0", got)
+	}
+	// An unmappable rune is skipped, not rendered, so it cannot widen a
 	// single row and break the alignment checked above.
-	withJunk := bigDigits("2x5")
-	if len([]rune(withJunk[0])) != len([]rune(bigDigits("25")[0])) {
+	if len([]rune(bigDigits("2x5", 2)[0])) != len([]rune(bigDigits("25", 2)[0])) {
 		t.Error("unknown runes should be skipped, not rendered")
 	}
 }
