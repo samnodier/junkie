@@ -30,7 +30,7 @@ func sampleDesk() deskResponse {
 }
 
 func dashAt(width, height int) *dashModel {
-	m := newDashModel(nil, "sam", sampleDesk())
+	m := newDashModel(nil, "sam", "me-id", sampleDesk())
 	m.width, m.height = width, height
 	return m
 }
@@ -385,5 +385,147 @@ func TestDashScrollsToKeepTheCursorVisible(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "todo number 30") {
 		t.Errorf("the selected row scrolled off:\n%s", m.View())
+	}
+}
+
+func lobbySignal(starterID string, deadline time.Time) signal {
+	return signal{room: "ABC-123", kind: "timer-lobby", event: map[string]any{
+		"type": "timer-lobby", "roomCode": "ABC-123", "roomName": "Deep work",
+		"starterName": "Ada", "starterUserId": starterID,
+		"lobbyDeadline": deadline.UTC().Format(time.RFC3339Nano),
+	}}
+}
+
+// The server opens a 30-second lobby when a run starts and broadcasts it.
+// The terminal's job is to ask, and to take silence for an answer.
+func TestDashShowsTheJoinPrompt(t *testing.T) {
+	m := dashAt(80, 24)
+	m.Update(lobbySignal("someone-else", time.Now().Add(22*time.Second)))
+	if m.prompt == nil {
+		t.Fatal("expected a join prompt")
+	}
+	view := m.View()
+	for _, want := range []string{"Ada", "Deep work", "join?", "y/n"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("banner missing %q:\n%s", want, view)
+		}
+	}
+	if !strings.Contains(view, "no answer means you sit this one out") {
+		t.Errorf("the footer should explain what silence does:\n%s", view)
+	}
+	// The banner sits under the header rather than over the screen: half a
+	// minute to answer is no reason to hide what you were doing.
+	if !strings.Contains(view, "FOCUS") {
+		t.Errorf("the desk should still be visible behind the prompt:\n%s", view)
+	}
+}
+
+// Your own start is not an invitation; you are already in it.
+func TestDashIgnoresYourOwnLobby(t *testing.T) {
+	m := dashAt(80, 24)
+	m.Update(lobbySignal("me-id", time.Now().Add(30*time.Second)))
+	if m.prompt != nil {
+		t.Error("your own lobby should not prompt you")
+	}
+}
+
+func TestDashJoinPromptAnswers(t *testing.T) {
+	m := dashAt(80, 24)
+	m.Update(lobbySignal("someone-else", time.Now().Add(30*time.Second)))
+	if cmd := press(m, "y"); cmd == nil {
+		t.Fatal("y should join")
+	}
+	if m.prompt != nil {
+		t.Error("answering should close the prompt")
+	}
+
+	m.Update(lobbySignal("someone-else", time.Now().Add(30*time.Second)))
+	if cmd := press(m, "n"); cmd != nil {
+		t.Error("declining should not post anything")
+	}
+	if m.prompt != nil {
+		t.Error("declining should close the prompt")
+	}
+	if !strings.Contains(m.View(), "not joining") {
+		t.Errorf("expected the decline in the footer:\n%s", m.View())
+	}
+}
+
+// An unanswered lobby closes on its own, and that is the answer — the run
+// started without you, exactly as it would have on the web.
+func TestDashJoinPromptExpires(t *testing.T) {
+	m := dashAt(80, 24)
+	m.Update(lobbySignal("someone-else", time.Now().Add(-time.Second)))
+	if m.prompt == nil {
+		t.Fatal("expected a prompt before the tick")
+	}
+	m.Update(tickMsg(time.Now()))
+	if m.prompt != nil {
+		t.Error("an expired lobby should close")
+	}
+	if !strings.Contains(m.View(), "lobby closed") {
+		t.Errorf("expected the expiry in the footer:\n%s", m.View())
+	}
+}
+
+// The prompt must not overflow a narrow window any more than anything else.
+func TestDashJoinPromptFitsNarrowWindows(t *testing.T) {
+	for _, width := range []int{20, 30, 40, 60, 100} {
+		m := dashAt(width, 20)
+		m.Update(lobbySignal("someone-else", time.Now().Add(22*time.Second)))
+		for i, line := range strings.Split(m.View(), "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Errorf("width %d: line %d is %d wide: %q", width, i, got, line)
+			}
+		}
+	}
+}
+
+// Someone else finishing a todo is worth a line; your own echoed back at
+// you is not.
+func TestDashTodoDoneNotice(t *testing.T) {
+	m := dashAt(80, 24)
+	m.Update(signal{room: "ABC-123", kind: "todo-done", event: map[string]any{
+		"type": "todo-done", "actorId": "someone-else", "actor": "Ada", "text": "read the diff",
+	}})
+	if !strings.Contains(m.View(), "Ada completed: read the diff") {
+		t.Errorf("expected the notice:\n%s", m.View())
+	}
+
+	m = dashAt(80, 24)
+	m.Update(signal{room: "ABC-123", kind: "todo-done", event: map[string]any{
+		"type": "todo-done", "actorId": "me-id", "actor": "Sam", "text": "mine",
+	}})
+	if strings.Contains(m.View(), "completed") {
+		t.Errorf("your own completion should not be announced back:\n%s", m.View())
+	}
+}
+
+func TestDashCheckinKickNotice(t *testing.T) {
+	m := dashAt(80, 24)
+	m.Update(signal{room: "ABC-123", kind: "timer-checkin-kick", event: map[string]any{
+		"type": "timer-checkin-kick", "userIds": []any{"someone-else", "me-id"},
+	}})
+	if !strings.Contains(m.View(), "didn't check in") {
+		t.Errorf("expected the kick notice:\n%s", m.View())
+	}
+
+	m = dashAt(80, 24)
+	m.Update(signal{room: "ABC-123", kind: "timer-checkin-kick", event: map[string]any{
+		"type": "timer-checkin-kick", "userIds": []any{"someone-else"},
+	}})
+	if strings.Contains(m.View(), "didn't check in") {
+		t.Errorf("someone else's kick is not your notice:\n%s", m.View())
+	}
+}
+
+// Every other signal is a nudge to re-read, which is what the browser does
+// with them too.
+func TestDashPlainSignalsRefresh(t *testing.T) {
+	for _, kind := range []string{"todos", "solo-timer", "timer-phase", "settings"} {
+		m := dashAt(80, 24)
+		if _, cmd := m.Update(signal{room: "ABC-123", kind: kind}); cmd == nil {
+			t.Errorf("%q should trigger a re-read", kind)
+		}
 	}
 }

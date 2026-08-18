@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -30,6 +31,18 @@ const statusHold = 4 * time.Second
 type dashModel struct {
 	client *client
 	user   string
+	userID string
+
+	// sockets carry the same signals the browser gets. They are what makes
+	// the desk live rather than polled; the refresh interval below is only
+	// the fallback for when they are down.
+	sockets   *sockets
+	roomCodes []string
+
+	// prompt is the "X is starting a block — join?" offer. The server opens
+	// a 30-second lobby when a run starts (startRoomTimer) and broadcasts
+	// it; answering nothing is a real answer, and the offer simply expires.
+	prompt *joinPrompt
 
 	desk deskResponse
 	countdown
@@ -78,17 +91,57 @@ func (e *editor) clear() { e.text = nil }
 
 func (e *editor) value() string { return strings.TrimSpace(string(e.text)) }
 
-func newDashModel(c *client, user string, desk deskResponse) *dashModel {
+// joinPrompt is one room's lobby, waiting on an answer.
+type joinPrompt struct {
+	code     string
+	roomName string
+	starter  string
+	deadline time.Time
+}
+
+func (p *joinPrompt) secondsLeft() int {
+	left := int(time.Until(p.deadline).Seconds())
+	if left < 0 {
+		return 0
+	}
+	return left
+}
+
+func newDashModel(c *client, user, userID string, desk deskResponse) *dashModel {
 	m := &dashModel{
 		client:      c,
 		user:        user,
+		userID:      userID,
 		desk:        desk,
 		lastRefresh: time.Now(),
 		width:       80,
 		height:      24,
 	}
 	m.anchor()
+	m.roomCodes = deskRoomCodes(desk)
 	return m
+}
+
+func deskRoomCodes(desk deskResponse) []string {
+	codes := make([]string, 0, len(desk.Rooms))
+	for _, room := range desk.Rooms {
+		codes = append(codes, room.Code)
+	}
+	return codes
+}
+
+// sameCodes reports whether the room set is unchanged, so the desk only
+// tears its sockets down when it actually has different rooms to watch.
+func sameCodes(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // anchor re-bases the countdown whenever a fresh desk arrives.
@@ -132,7 +185,26 @@ func (m *dashModel) selected() (apiTodo, bool) {
 	return todos[m.cursor], true
 }
 
-func (m *dashModel) Init() tea.Cmd { return tick() }
+func (m *dashModel) Init() tea.Cmd {
+	m.sockets = openSockets(m.client, m.roomCodes)
+	return tea.Batch(tick(), listenFor(m.sockets))
+}
+
+// listenFor waits on the next signal. Bubble Tea drives one command at a
+// time, so each delivered signal re-issues this to wait for the next.
+func listenFor(s *sockets) tea.Cmd {
+	if s == nil {
+		return nil
+	}
+	events := s.events
+	return func() tea.Msg {
+		sig, ok := <-events
+		if !ok {
+			return nil
+		}
+		return sig
+	}
+}
 
 // actionMsg reports a completed mutation. Failure is shown in the footer
 // rather than ending the program: the desk on screen is still true, and the
@@ -176,6 +248,12 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		cmds := []tea.Cmd{tick()}
+		// An unanswered lobby closes on its own. That is the answer: the
+		// run started without you, exactly as it would have on the web.
+		if m.prompt != nil && m.prompt.secondsLeft() <= 0 {
+			m.prompt = nil
+			m.note("the lobby closed — you're not in that block")
+		}
 		t := m.desk.SoloTimer
 		expired := t != nil && !t.BreakPending && m.countdown.remaining() <= 0
 		stale := time.Since(m.lastRefresh) >= dashRefreshInterval
@@ -197,7 +275,22 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.desk = msg.desk
 		m.anchor()
 		m.clampCursor()
+		// Rooms joined or left elsewhere change which channels matter.
+		// Only re-subscribe if there is a subscription to replace: Init
+		// establishes the socket layer, and a desk running without one
+		// (rendered rather than run) should not acquire one on a refresh.
+		if codes := deskRoomCodes(msg.desk); !sameCodes(codes, m.roomCodes) {
+			m.roomCodes = codes
+			if m.sockets != nil {
+				m.sockets.close()
+				m.sockets = openSockets(m.client, codes)
+				return m, listenFor(m.sockets)
+			}
+		}
 		return m, nil
+
+	case signal:
+		return m.handleSignal(msg)
 
 	case actionMsg:
 		if msg.err != nil {
@@ -212,11 +305,94 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleSignal turns a pushed message into whatever the desk should do
+// about it. Most signals only mean "something changed, read it again" —
+// the payload-carrying ones are the invitations.
+func (m *dashModel) handleSignal(sig signal) (tea.Model, tea.Cmd) {
+	next := listenFor(m.sockets)
+	switch sig.kind {
+	case "timer-lobby":
+		// Your own start needs no invitation; you are already in it.
+		if sig.str("starterUserId") == m.userID {
+			break
+		}
+		prompt := &joinPrompt{
+			code:     firstNonEmpty(sig.str("roomCode"), sig.room),
+			roomName: firstNonEmpty(sig.str("roomName"), sig.room),
+			starter:  firstNonEmpty(sig.str("starterName"), "Someone"),
+			deadline: time.Now().Add(30 * time.Second),
+		}
+		if at, ok := sig.at("lobbyDeadline"); ok {
+			prompt.deadline = at
+		}
+		m.prompt = prompt
+		// The whole point is being told while looking at something else.
+		return m, tea.Batch(next, bell(), m.refresh())
+
+	case "timer-break-invite":
+		m.note(firstNonEmpty(sig.str("roomName"), sig.room) + " is on a break — room to join before the next block")
+		return m, tea.Batch(next, bell(), m.refresh())
+
+	case "timer-checkin-kick":
+		if ids, ok := sig.event["userIds"].([]any); ok {
+			for _, id := range ids {
+				if s, _ := id.(string); s == m.userID {
+					m.note("dropped from " + sig.room + " — you didn't check in during the break")
+				}
+			}
+		}
+
+	case "todo-done":
+		if sig.str("actorId") != m.userID {
+			m.note(firstNonEmpty(sig.str("actor"), "Someone") + " completed: " + sig.str("text"))
+		}
+
+	case "deleted":
+		m.note(sig.room + " was deleted")
+	}
+	// Everything else — todos, solo-timer, timer-phase, settings — is a
+	// nudge to re-read, which is the same thing the browser does with them.
+	return m, tea.Batch(next, m.refresh())
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// bell rings the terminal once. A prompt with a 30-second fuse is no use if
+// it arrives silently in a window nobody is looking at.
+func bell() tea.Cmd {
+	return func() tea.Msg {
+		fmt.Fprint(os.Stderr, "\a")
+		return nil
+	}
+}
+
 func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// While a line is being typed, every key belongs to it — otherwise a
 	// todo containing "q" would quit the program mid-word.
 	if m.editing != nil {
 		return m.handleEditKey(msg)
+	}
+	// A lobby is a question with a deadline, so it gets first claim on the
+	// keys that answer it. Everything else still works: ignoring the offer
+	// is a valid way to decline it.
+	if m.prompt != nil {
+		switch msg.String() {
+		case "y", "Y":
+			code := m.prompt.code
+			m.prompt = nil
+			return m, m.do("/r/"+code+"/timer-join", nil, "joined "+code)
+		case "n", "N":
+			m.prompt = nil
+			m.note("not joining")
+			return m, nil
+		}
 	}
 	t := m.desk.SoloTimer
 	switch msg.String() {
@@ -349,6 +525,10 @@ func (m *dashModel) View() string {
 	var b strings.Builder
 	b.WriteString(m.header())
 	b.WriteString("\n")
+	if banner := m.promptBanner(); banner != "" {
+		b.WriteString(banner)
+		b.WriteString("\n")
+	}
 	b.WriteString(m.timerBlock())
 	b.WriteString("\n")
 
@@ -409,6 +589,24 @@ func (m *dashModel) header() string {
 		return fit(left, m.width) + "\n"
 	}
 	return left + strings.Repeat(" ", gap) + right + "\n"
+}
+
+// promptBanner is the lobby offer, with the seconds left on it. It sits
+// directly under the header rather than over the screen: a countdown you
+// have half a minute to answer should not hide what you were doing.
+func (m *dashModel) promptBanner() string {
+	if m.prompt == nil {
+		return ""
+	}
+	left := formatDuration(m.prompt.secondsLeft())
+	full := fmt.Sprintf("%s is starting %s — join? y/n · %s",
+		m.prompt.starter, m.prompt.roomName, left)
+	short := fmt.Sprintf("join %s? y/n · %s", m.prompt.roomName, left)
+	text := full
+	if len([]rune(full)) > m.width {
+		text = short
+	}
+	return styleWarn.Render(clip(text, m.width)) + "\n"
 }
 
 func (m *dashModel) timerBlock() string {
@@ -520,6 +718,9 @@ func (m *dashModel) footer() string {
 	if m.editing != nil {
 		return styleFaint.Render(clip(editKeys, m.width))
 	}
+	if m.prompt != nil {
+		return styleFaint.Render(clip("y join · n decline · no answer means you sit this one out", m.width))
+	}
 	if m.status != "" && time.Now().Before(m.statusUntil) {
 		return styleWarn.Render(clip(m.status, m.width))
 	}
@@ -554,6 +755,18 @@ func runDashboard(c *client, user string) error {
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(newDashModel(c, user, desk), tea.WithAltScreen()).Run()
+	// The user's ID decides which broadcasts are about someone else: a lobby
+	// you opened yourself is not an invitation, and neither is your own
+	// completed todo announced back at you.
+	me, err := c.me()
+	if err != nil {
+		return err
+	}
+	if me.User == nil {
+		return errSessionExpired
+	}
+	m := newDashModel(c, firstNonEmpty(me.User.DisplayName, user), me.User.ID, desk)
+	defer func() { m.sockets.close() }()
+	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
