@@ -142,6 +142,93 @@ junkie is a PWA, so it installs to your home screen and runs fullscreen with no 
 
 Both are the same app pointing at the hosted site; the APK just wraps it so there's nothing to install from a browser.
 
+## Terminal client
+
+junkie also runs in the terminal, against the same account and the same rooms. A block you start here shows up on the web mid-countdown, and one you start on the web can be finished here — the server owns the clock either way, so closing the terminal never loses a block.
+
+### Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/samnodier/junkie/master/install.sh | sh
+```
+
+That puts a `junkie` binary in `~/.local/bin`. Set `JUNKIE_INSTALL_DIR` to choose somewhere else, or `JUNKIE_VERSION=vX.Y.Z` to pin a release. The script verifies the download against the release's published checksums before installing it.
+
+With Go installed you can build it yourself instead:
+
+```sh
+go install github.com/samnodier/junkie/cmd/junkie-cli@latest
+```
+
+That names the binary `junkie-cli`, because `go install` takes the name from the directory and `cmd/junkie` is the server. Rename it to `junkie` if you want the shorter command.
+
+### Signing in
+
+```sh
+junkie login
+```
+
+It asks for your username and password — the same ones you use on the web — and stores the session in `~/.config/junkie/config.json`, mode `0600`. You stay signed in across terminals and reboots until the session expires **30 days after you signed in**; it does not renew as you use it, so roughly once a month you will be asked to sign in again. `junkie logout` ends it immediately, on the server as well as on disk.
+
+Changing your password anywhere signs the terminal out too, because that ends every other session on the account.
+
+### The desk
+
+Run `junkie` on its own and you get the desk full-screen: the timer, your todos, and what your rooms are doing, all live.
+
+| Key | Does |
+| --- | ---- |
+| `f` / `b` / `s` / `c` | start focus · take the break · skip it · cancel the block |
+| `j` `k` | move down and up the todo list |
+| `space` | complete or un-complete |
+| `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
+| `y` / `n` | answer a room's join prompt |
+| `r` / `q` | refresh · quit |
+
+When someone starts a block in one of your rooms, the desk asks whether you want in and counts down the 30 seconds you have to answer. Not answering is an answer: the block starts without you. This only reaches you while the desk is open — when you are away, the Discord bot is what notifies you.
+
+### Commands
+
+| Command | Does |
+| ------- | ---- |
+| `junkie` | open the desk full-screen |
+| `junkie status` | timer, todo counts and room activity, in one glance |
+| `junkie focus [MINUTES]` | start a private block (5–180, default 50) |
+| `junkie break [MINUTES]` · `junkie skip` · `junkie cancel` | take the offered break, skip it, or end the block early |
+| `junkie watch` | the running block, full-screen |
+| `junkie todos` · `junkie rooms` | list them |
+| `junkie stats` | the work map: a year of focused days |
+| `junkie room new NAME` · `junkie room join CODE` | create or join a room |
+| `junkie room start [CODE] [MINUTES]` | start a room's block, opening the 30-second lobby |
+| `junkie room enter` · `leave` · `checkin` · `skip` | act on the block that's running |
+| `junkie whoami` · `junkie logout` | who this terminal is, and sign out |
+
+`junkie room` commands take a room code, and you can leave it out when you are only in one room. Pasting a room's URL works as well as typing its code.
+
+### Sizing
+
+The countdown fits itself to the window, so a terminal parked down the side of a screen is a first-class way to run it — it drops to smaller digits, then to a line of text, then to the numbers alone, rather than wrapping.
+
+```
+   ███ ███     █ █ ███
+     █   █  █  █ █   █          focus
+   ███ ███     ███   █          22:47      22:47
+   █   █    █    █   █
+   ███ ███       █   █
+
+   ~34 columns                  ~16          ~8
+```
+
+### Scripting
+
+Every read command takes `--json`. Piped output is never truncated and `junkie` on its own prints the status instead of opening the full-screen desk, so it stays usable from a script.
+
+`JUNKIE_URL` points a command at another server — a local one, say — without disturbing the login you already have. `JUNKIE_CONFIG` moves the config file.
+
+### Not in the terminal
+
+Avatars, connections and public profiles, the admin space, Discord linking and password reset all stay on the web, where they belong. Guest mode is browser-only by design.
+
 ## Discord bot
 
 junkie has a Discord bot that runs a server's focus room from chat: live countdown messages showing who's in, break notifications, Join and break-control buttons, stats, and a heatmap picture — no browser needed once you're set up.
@@ -211,7 +298,7 @@ Override it with `DATABASE_URL` if needed. Migrations in `migrations/` run autom
 ### Tests
 
 ```sh
-go test ./... -race     # server
+go test ./... -race     # server and terminal client
 npm --prefix web test   # front end (vitest)
 ```
 
@@ -229,12 +316,13 @@ If you put junkie behind your own proxy, make sure it sets `X-Forwarded-Proto` a
 
 Sessions are cookie-based and stored only as hashes. Cross-site requests and WebSocket handshakes are rejected, sign-in and signup are rate limited, and responses carry a Content-Security-Policy with all scripts served from the app itself.
 
+The terminal client strips control characters from anything the server sends before drawing it. Room names and todo text are written by other people, and a terminal executes escape sequences that a browser would only display.
+
 Found a vulnerability? Open an issue or contact the maintainer rather than filing a public exploit.
 
 
 
 ## Later
 
-- Terminal client using the same account and room API.
 - Discord sign-in (the bot exists — see the Discord bot section above; OAuth sign-in does not yet). OAuth would also close the last password-reset gap: verifying your Discord in the browser instead of over DM works even without sharing a server with the bot.
 

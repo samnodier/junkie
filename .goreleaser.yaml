@@ -1,0 +1,49 @@
+# Release build for the junkie terminal client.
+#
+# The command is `junkie` but the package is ./cmd/junkie-cli, because
+# ./cmd/junkie is the server. `binary:` is what makes that invisible to
+# anyone installing a release — the archive contains a binary called junkie.
+# (`go install` cannot: it names the binary after the directory, which is why
+# the README documents that route as junkie-cli.)
+version: 2
+
+project_name: junkie
+
+builds:
+  - id: junkie
+    main: ./cmd/junkie-cli
+    binary: junkie
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    # main.version is printed by `junkie version`; -s -w drop the symbol
+    # table and DWARF, which the server build already does.
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: junkie
+    # Predictable names, because install.sh builds the URL rather than
+    # querying the release API for it.
+    name_template: "junkie_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  filters:
+    # The server and the web app share this repository; a CLI release should
+    # not recite their commits.
+    exclude:
+      - "^web:"
+      - "^docs:"
+
+release:
+  name_template: "junkie {{ .Version }}"
