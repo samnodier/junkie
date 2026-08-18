@@ -61,6 +61,8 @@ func run(args []string) error {
 		return cmdRooms(rest)
 	case "stats", "map":
 		return cmdStats(rest)
+	case "room":
+		return cmdRoom(rest)
 	case "focus", "start":
 		return cmdFocus(rest)
 	case "break":
@@ -141,6 +143,13 @@ Usage:
   junkie todos [--json]       private todos
   junkie rooms [--json]       your rooms and what their timers are doing
   junkie stats [--json]       the work map: a year of focused days
+
+  junkie room new NAME        create a room
+  junkie room join CODE       join a room by its code
+  junkie room start [CODE]    start a block (opens a 30-second lobby)
+  junkie room enter [CODE]    join the block that's running
+  junkie room leave [CODE]    leave the block
+  junkie room checkin [CODE]  confirm you're staying for the next block
 
   junkie focus [MINUTES]      start a private focus block (5–180, default 50)
   junkie break [MINUTES]      start the offered break (1–60)
