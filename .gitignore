@@ -3,6 +3,7 @@
 .gomodcache/
 .gopath/
 /junkie
+/junkie-cli
 tmp/
 *.db
 *.sqlite
