@@ -106,6 +106,17 @@ func (s *sockets) pump(ctx context.Context, c *client, path, room string) error 
 	}
 	conn, _, err := websocket.Dial(ctx, websocketURL(c.baseURL)+path, &websocket.DialOptions{
 		HTTPHeader: header,
+		// Dial falls back to http.DefaultClient, which follows redirects —
+		// and Go forwards an explicitly-set Cookie header to the same domain
+		// or any subdomain of it. The REST client refuses redirects outright
+		// for that reason; the handshake gets the same rule rather than a
+		// weaker one, since a handshake answered with a 3xx is not a
+		// handshake worth completing.
+		HTTPClient: &http.Client{
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	})
 	if err != nil {
 		return err

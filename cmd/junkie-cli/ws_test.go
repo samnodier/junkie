@@ -188,3 +188,32 @@ func TestParseSignalHandlesLeadingSpace(t *testing.T) {
 		t.Errorf("whitespace should stay a bare signal, got %q", got.kind)
 	}
 }
+
+// The handshake must not chase a redirect: Dial would otherwise use
+// http.DefaultClient, which follows them, and Go forwards an explicitly-set
+// Cookie header to the initial host's domain and any subdomain of it.
+func TestSocketHandshakeDoesNotFollowRedirects(t *testing.T) {
+	var reached string
+	target := httptestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		reached = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target+"/elsewhere", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := newClient(config{BaseURL: srv.URL, Token: "test-token"})
+	s := openSockets(c, nil)
+	defer s.close()
+
+	// Give the dial time to fail, and confirm it produced no signals.
+	select {
+	case sig := <-s.events:
+		t.Fatalf("a redirected handshake produced a signal: %+v", sig)
+	case <-time.After(700 * time.Millisecond):
+	}
+	if reached != "" {
+		t.Errorf("the handshake followed a redirect to %s", reached)
+	}
+}
