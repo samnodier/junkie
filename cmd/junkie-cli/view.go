@@ -18,10 +18,10 @@ func labeled(label, body string) string {
 
 // renderStatus is the desk in a dozen lines: what the timer is doing, how
 // the todos stand, and which rooms are live.
-func renderStatus(desk deskResponse) string {
+func renderStatus(desk deskResponse, width int) string {
 	var b strings.Builder
 	b.WriteString("\n")
-	b.WriteString(renderSoloLine(desk.SoloTimer))
+	b.WriteString(renderSoloLine(desk.SoloTimer, width))
 
 	open, done, removed := countTodos(desk.Todos)
 	summary := fmt.Sprintf("%d open", open)
@@ -41,7 +41,7 @@ func renderStatus(desk deskResponse) string {
 			if i > 0 {
 				label = ""
 			}
-			b.WriteString(labeled(label, roomLine(room)))
+			b.WriteString(labeled(label, roomLine(room, width-labelWidth)))
 		}
 	}
 	b.WriteString("\n")
@@ -50,10 +50,10 @@ func renderStatus(desk deskResponse) string {
 
 // renderSoloLine is the timer's two lines — state and, when something is
 // actually counting down, a bar showing how far through the phase it is.
-func renderSoloLine(t *soloTimer) string {
+func renderSoloLine(t *soloTimer, width int) string {
 	if t == nil {
-		return labeled("timer", styleFaint.Render("nothing running")+
-			styleFaint.Render(" · `junkie focus` to start a block")) + "\n"
+		return labeled("timer", styleFaint.Render(
+			fit("nothing running · `junkie focus` to start a block", width-labelWidth))) + "\n"
 	}
 	style := lipgloss.NewStyle().Foreground(phaseColor(t.Phase)).Bold(true)
 	if t.BreakPending {
@@ -70,40 +70,89 @@ func renderSoloLine(t *soloTimer) string {
 	return line + labeled("", bar+styleFaint.Render(" of "+formatDuration(total))) + "\n"
 }
 
-// roomLine states what one room is doing in a single line.
-func roomLine(room deskRoom) string {
-	head := styleInk.Render(room.Code) + styleFaint.Render(" "+room.Name)
+// roomLine states what one room is doing in a single line, fitted to width
+// (0 for no limit).
+//
+// Narrow terminals drop detail in order of what you came for: the extras
+// (who is here, which session) go first, then the time left, and the name is
+// clipped to whatever room is left over. The code and the phase are the last
+// things standing, because a room you cannot identify or whose state you
+// cannot read is not worth a line at all.
+func roomLine(room deskRoom, width int) string {
+	word, rest, tail, style := roomStateParts(room)
+
+	for _, level := range []struct{ withRest, withTail bool }{
+		{true, true}, {true, false}, {false, false},
+	} {
+		plain := room.Code + " · " + word
+		if level.withRest {
+			plain += rest
+		}
+		if level.withTail {
+			plain += tail
+		}
+		if width > 0 && len([]rune(plain)) > width {
+			continue
+		}
+
+		name := room.Name
+		if width > 0 {
+			// One column for the space that would precede it.
+			name = clip(name, width-len([]rune(plain))-1)
+		}
+		out := styleInk.Render(room.Code)
+		if name != "" {
+			out += styleFaint.Render(" " + name)
+		}
+		out += styleFaint.Render(" · ") + style.Render(word)
+		if level.withRest {
+			out += styleFaint.Render(rest)
+		}
+		if level.withTail {
+			out += styleFaint.Render(tail)
+		}
+		return out
+	}
+	// Not even the code and the phase fit; show as much of them as does.
+	return styleInk.Render(clip(room.Code+" · "+word, width))
+}
+
+// roomStateParts breaks what a room's timer is doing into the word for the
+// phase, the time beside it, and the extras — so roomLine can decide how
+// many of them the terminal has room for. They come back as plain text with
+// the phase's colour separately, since measuring a styled string means
+// counting escape sequences.
+func roomStateParts(room deskRoom) (word, rest, tail string, style lipgloss.Style) {
 	t := room.Timer
 	if t == nil {
-		return head + styleFaint.Render(" · idle")
+		return "idle", "", "", lipgloss.NewStyle().Foreground(colFaint)
 	}
-	style := lipgloss.NewStyle().Foreground(phaseColor(t.Phase))
-	var state string
+	style = lipgloss.NewStyle().Foreground(phaseColor(t.Phase))
 	switch {
 	case t.Phase == "lobby":
-		state = style.Render("starting") + fmt.Sprintf(" · %s to join", formatDuration(t.SecondsLeft))
+		word, rest = "starting", fmt.Sprintf(" · %s to join", formatDuration(t.SecondsLeft))
 	case t.BreakPending:
-		state = style.Render("break ready")
+		word = "break ready"
 	case t.Paused:
-		state = style.Render("break paused") + fmt.Sprintf(" · %s left", formatDuration(t.SecondsLeft))
+		word, rest = "break paused", fmt.Sprintf(" · %s left", formatDuration(t.SecondsLeft))
 	default:
-		state = style.Render(t.Phase) + fmt.Sprintf(" · %s left", formatDuration(t.SecondsLeft))
+		word, rest = t.Phase, fmt.Sprintf(" · %s left", formatDuration(t.SecondsLeft))
 	}
 	if t.TotalSessions > 1 {
-		state += styleFaint.Render(fmt.Sprintf(" · session %d/%d", t.CurrentSession, t.TotalSessions))
+		tail += fmt.Sprintf(" · session %d/%d", t.CurrentSession, t.TotalSessions)
 	}
 	if n := len(t.Participants); n > 0 {
-		state += styleFaint.Render(fmt.Sprintf(" · %d here", n))
+		tail += fmt.Sprintf(" · %d here", n)
 	}
 	if !t.Participant {
-		state += styleFaint.Render(" · you're out")
+		tail += " · you're out"
 	}
-	return head + " · " + state
+	return word, rest, tail, style
 }
 
 // renderTodos lists the private todos, open first. Removed ones are counted
 // but not listed: they are a recycle bin on the web, not a working list.
-func renderTodos(todos []apiTodo) string {
+func renderTodos(todos []apiTodo, width int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 	shown := 0
@@ -111,11 +160,10 @@ func renderTodos(todos []apiTodo) string {
 		if t.Removed {
 			continue
 		}
-		mark := styleAccent.Render("[ ]")
-		text := styleInk.Render(t.Text)
+		body := fit(t.Text, width-6)
+		mark, text := styleAccent.Render("[ ]"), styleInk.Render(body)
 		if t.Done {
-			mark = styleFaint.Render("[x]")
-			text = styleFaint.Render(t.Text)
+			mark, text = styleFaint.Render("[x]"), styleFaint.Render(body)
 		}
 		b.WriteString("  " + mark + " " + text + "\n")
 		shown++
@@ -130,7 +178,7 @@ func renderTodos(todos []apiTodo) string {
 	return b.String()
 }
 
-func renderRooms(rooms []deskRoom) string {
+func renderRooms(rooms []deskRoom, width int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 	if len(rooms) == 0 {
@@ -138,7 +186,7 @@ func renderRooms(rooms []deskRoom) string {
 		return b.String()
 	}
 	for _, room := range rooms {
-		b.WriteString("  " + roomLine(room) + "\n")
+		b.WriteString("  " + roomLine(room, width-2) + "\n")
 		if open, _, _ := countTodos(room.Mine); open > 0 {
 			b.WriteString(styleFaint.Render(fmt.Sprintf("    %d of your todos here\n", open)))
 		}

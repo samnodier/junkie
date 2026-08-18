@@ -22,7 +22,7 @@ func watchTimer(c *client) error {
 		return err
 	}
 	if desk.SoloTimer == nil {
-		fmt.Print(renderSoloLine(nil))
+		fmt.Print(renderSoloLine(nil, terminalWidth()))
 		return nil
 	}
 	m := newWatchModel(c, desk.SoloTimer)
@@ -40,13 +40,7 @@ type watchModel struct {
 	client *client
 	timer  *soloTimer
 
-	// baseSeconds and fetchedAt anchor the countdown on the server's own
-	// reading rather than on its wall-clock deadline: secondsLeft was
-	// computed server-side, and time.Since uses a monotonic clock, so
-	// neither clock skew between the two machines nor an NTP correction
-	// mid-block can shift what this displays.
-	baseSeconds int
-	fetchedAt   time.Time
+	countdown
 
 	lastRefresh time.Time
 	refreshing  bool
@@ -59,8 +53,7 @@ func newWatchModel(c *client, t *soloTimer) *watchModel {
 	return &watchModel{
 		client:      c,
 		timer:       t,
-		baseSeconds: t.SecondsLeft,
-		fetchedAt:   time.Now(),
+		countdown:   newCountdown(t.SecondsLeft),
 		lastRefresh: time.Now(),
 		width:       80,
 		height:      24,
@@ -138,23 +131,19 @@ func (m *watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.timer = msg.desk.SoloTimer
-		m.baseSeconds = msg.desk.SoloTimer.SecondsLeft
-		m.fetchedAt = time.Now()
+		m.countdown.reset(msg.desk.SoloTimer.SecondsLeft)
 		return m, nil
 	}
 	return m, nil
 }
 
-// remaining is the countdown's single source of truth for the display.
+// remaining is the countdown's single source of truth for the display. A
+// pending break has no deadline — it is an offer — so it counts nothing.
 func (m *watchModel) remaining() int {
 	if m.timer == nil || m.timer.BreakPending {
 		return 0
 	}
-	left := m.baseSeconds - int(time.Since(m.fetchedAt).Seconds())
-	if left < 0 {
-		return 0
-	}
-	return left
+	return m.countdown.remaining()
 }
 
 func (m *watchModel) View() string {
@@ -233,7 +222,7 @@ func (m *watchModel) viewFull() []string {
 	}
 
 	if m.err != nil {
-		body = append(body, "", styleDanger.Render(fit("offline: "+m.err.Error(), m.width)))
+		body = append(body, "", styleDanger.Render(clip("offline: "+m.err.Error(), m.width)))
 	}
 	return append(body, "", styleFaint.Render(helpLine(m.width)))
 }
@@ -264,7 +253,7 @@ func (m *watchModel) viewCompact() []string {
 func (m *watchModel) viewMini() []string {
 	colour := m.phaseStyle()
 	return []string{
-		colour.Render(fit(phaseLabel(m.timer), m.width)),
+		colour.Render(clip(phaseLabel(m.timer), m.width)),
 		colour.Bold(true).Render(shortenCountdown(m.countdownText(), m.width)),
 	}
 }

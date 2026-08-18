@@ -24,12 +24,12 @@ func TestWatchRemainingCountsDownFromServerReading(t *testing.T) {
 	if got := m.remaining(); got != 1500 {
 		t.Errorf("remaining at t=0 is %d, want 1500", got)
 	}
-	m.fetchedAt = time.Now().Add(-90 * time.Second)
+	m.countdown.fetchedAt = time.Now().Add(-90 * time.Second)
 	if got := m.remaining(); got != 1410 {
 		t.Errorf("remaining after 90s is %d, want 1410", got)
 	}
 	// Past the deadline it floors at zero rather than going negative.
-	m.fetchedAt = time.Now().Add(-2000 * time.Second)
+	m.countdown.fetchedAt = time.Now().Add(-2000 * time.Second)
 	if got := m.remaining(); got != 0 {
 		t.Errorf("remaining past the end is %d, want 0", got)
 	}
@@ -39,7 +39,7 @@ func TestWatchRemainingCountsDownFromServerReading(t *testing.T) {
 // inventing a clock the server does not have.
 func TestWatchPendingBreakHasNoCountdown(t *testing.T) {
 	m := newWatchModel(nil, &soloTimer{Phase: "break", BreakMinutes: 10, BreakPending: true})
-	m.fetchedAt = time.Now().Add(-time.Hour)
+	m.countdown.fetchedAt = time.Now().Add(-time.Hour)
 	if got := m.remaining(); got != 0 {
 		t.Errorf("pending break remaining = %d, want 0", got)
 	}

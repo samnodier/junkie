@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestCountTodos(t *testing.T) {
@@ -23,7 +25,7 @@ func TestCountTodos(t *testing.T) {
 }
 
 func TestRenderStatusEmptyDesk(t *testing.T) {
-	out := renderStatus(deskResponse{})
+	out := renderStatus(deskResponse{}, 0)
 	for _, want := range []string{"nothing running", "junkie focus", "0 open", "none yet"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
@@ -38,7 +40,7 @@ func TestRenderStatusRunningFocus(t *testing.T) {
 			SecondsLeft: 1500, EndsAt: time.Now().Add(25 * time.Minute),
 		},
 		Todos: []apiTodo{{Text: "ship it"}, {Text: "done thing", Done: true}},
-	})
+	}, 0)
 	for _, want := range []string{"focus", "25:00 left", "of 50:00", "1 open", "1 done"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
@@ -51,7 +53,7 @@ func TestRenderStatusRunningFocus(t *testing.T) {
 func TestRenderStatusPendingBreak(t *testing.T) {
 	out := renderStatus(deskResponse{
 		SoloTimer: &soloTimer{Phase: "break", FocusMinutes: 50, BreakMinutes: 10, BreakPending: true},
-	})
+	}, 0)
 	if !strings.Contains(out, "break ready") {
 		t.Errorf("status missing the pending break:\n%s", out)
 	}
@@ -101,7 +103,7 @@ func TestRoomLineStates(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		got := roomLine(tc.room)
+		got := roomLine(tc.room, 0)
 		for _, want := range tc.want {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s: line %q missing %q", tc.name, got, want)
@@ -120,7 +122,7 @@ func TestRenderTodos(t *testing.T) {
 		{Text: "open one"},
 		{Text: "closed one", Done: true},
 		{Text: "binned one", Removed: true},
-	})
+	}, 0)
 	if !strings.Contains(out, "[ ] open one") {
 		t.Errorf("missing the open todo:\n%s", out)
 	}
@@ -137,13 +139,55 @@ func TestRenderTodos(t *testing.T) {
 }
 
 func TestRenderTodosEmpty(t *testing.T) {
-	if out := renderTodos(nil); !strings.Contains(out, "nothing on the list") {
+	if out := renderTodos(nil, 0); !strings.Contains(out, "nothing on the list") {
 		t.Errorf("empty list reads as %q", out)
 	}
 }
 
 func TestRenderRoomsEmpty(t *testing.T) {
-	if out := renderRooms(nil); !strings.Contains(out, "not in any rooms") {
+	if out := renderRooms(nil, 0); !strings.Contains(out, "not in any rooms") {
 		t.Errorf("empty rooms reads as %q", out)
+	}
+}
+
+// A narrow terminal drops room detail in order of what you came for, and
+// never overflows: the code and the phase are the last things standing.
+func TestRoomLineDegradesWithWidth(t *testing.T) {
+	room := deskRoom{Code: "ABC-123", Name: "Deep work sessions", Timer: &roomTimer{
+		Phase: "focus", SecondsLeft: 724, CurrentSession: 2, TotalSessions: 4,
+		Participant: true, Participants: []apiUser{{DisplayName: "Sam"}, {DisplayName: "Ada"}},
+	}}
+	for _, width := range []int{8, 12, 16, 20, 28, 40, 60, 100} {
+		line := roomLine(room, width)
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("width %d: line is %d wide: %q", width, got, line)
+		}
+		// The code identifies the room, so it survives as far as it can.
+		if width >= 8 && !strings.Contains(line, "ABC") {
+			t.Errorf("width %d: lost the room code: %q", width, line)
+		}
+	}
+	// Given room, everything shows.
+	full := roomLine(room, 100)
+	for _, want := range []string{"ABC-123", "Deep work sessions", "focus", "12:04 left", "session 2/4", "2 here"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("full line missing %q: %q", want, full)
+		}
+	}
+	// Squeezed, the extras go before the phase does.
+	tight := roomLine(room, 20)
+	if strings.Contains(tight, "session 2/4") || strings.Contains(tight, "2 here") {
+		t.Errorf("a 20-column line should have dropped the extras: %q", tight)
+	}
+	if !strings.Contains(tight, "focus") {
+		t.Errorf("a 20-column line should keep the phase: %q", tight)
+	}
+}
+
+// Piped output belongs to a script; it is never clipped.
+func TestRoomLineUnlimitedWidth(t *testing.T) {
+	room := deskRoom{Code: "ABC-123", Name: strings.Repeat("long ", 40)}
+	if got := roomLine(room, 0); !strings.Contains(got, strings.Repeat("long ", 40)) {
+		t.Error("width 0 should not clip the name")
 	}
 }

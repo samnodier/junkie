@@ -136,6 +136,20 @@ func cmdWhoami(args []string) error {
 	return nil
 }
 
+func cmdDash(args []string) error {
+	if len(args) > 0 {
+		return errors.New("usage: junkie dash")
+	}
+	c, cfg, err := authed()
+	if err != nil {
+		return err
+	}
+	// The header name comes from the stored login rather than a round trip:
+	// it is only a label, and the desk read that follows will fail loudly
+	// enough if the session is no longer good.
+	return runDashboard(c, cfg.Username)
+}
+
 func cmdStatus(args []string) error {
 	args, asJSON := hasFlag(args, "json")
 	if len(args) > 0 {
@@ -152,7 +166,7 @@ func cmdStatus(args []string) error {
 	if asJSON {
 		return printJSON(desk)
 	}
-	fmt.Print(renderStatus(desk))
+	fmt.Print(renderStatus(desk, terminalWidth()))
 	return nil
 }
 
@@ -172,7 +186,7 @@ func cmdTodos(args []string) error {
 	if asJSON {
 		return printJSON(desk.Todos)
 	}
-	fmt.Print(renderTodos(desk.Todos))
+	fmt.Print(renderTodos(desk.Todos, terminalWidth()))
 	return nil
 }
 
@@ -192,7 +206,7 @@ func cmdRooms(args []string) error {
 	if asJSON {
 		return printJSON(desk.Rooms)
 	}
-	fmt.Print(renderRooms(desk.Rooms))
+	fmt.Print(renderRooms(desk.Rooms, terminalWidth()))
 	return nil
 }
 

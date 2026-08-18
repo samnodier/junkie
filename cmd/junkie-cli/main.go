@@ -33,10 +33,15 @@ func main() {
 }
 
 func run(args []string) error {
-	// Bare `junkie` prints the desk rather than usage: the common case is
-	// wanting to know what's running, not wanting to read the manual.
+	// Bare `junkie` opens the desk rather than printing usage: the common
+	// case is wanting to see what's running, not wanting to read the manual.
+	// Piped, it prints the one-shot status instead — a full-screen program
+	// is no use to a script, and would hang it.
 	if len(args) == 0 {
-		return cmdStatus(nil)
+		if terminalWidth() == 0 {
+			return cmdStatus(nil)
+		}
+		return cmdDash(nil)
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
@@ -46,6 +51,8 @@ func run(args []string) error {
 		return cmdLogout(rest)
 	case "whoami":
 		return cmdWhoami(rest)
+	case "dash", "desk":
+		return cmdDash(rest)
 	case "status", "st":
 		return cmdStatus(rest)
 	case "todos", "todo":
@@ -137,6 +144,9 @@ Usage:
   junkie skip                 skip the break, start the next block
   junkie cancel               end the current block early
   junkie watch                full-screen countdown for the running block
+
+Keys on the desk:
+  f focus · b break · s skip · c cancel · r refresh · q quit
 
 Flags:
   --watch                     on focus/break, stay and draw the countdown

@@ -84,10 +84,25 @@ func terminalWidth() int {
 	return w
 }
 
-// fit truncates text to width, and leaves it alone when width is 0.
+// fit truncates text to width, and leaves it alone when width is 0 — the
+// piped case, where there is no terminal to fit.
 func fit(text string, width int) string {
 	if width <= 0 {
 		return text
+	}
+	return truncate(text, width)
+}
+
+// clip is fit for a place that always has a width: a full-screen model knows
+// how many columns it has, so zero means no room rather than no limit.
+//
+// Both take plain text. Truncating an already-styled string would cut
+// through an ANSI escape and leave the rest of the terminal wearing its
+// colour, so anything with styling is assembled from clipped parts rather
+// than clipped afterwards.
+func clip(text string, width int) string {
+	if width <= 0 {
+		return ""
 	}
 	return truncate(text, width)
 }
