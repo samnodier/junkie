@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -88,14 +89,20 @@ func TestDashNarrowDropsTheBar(t *testing.T) {
 }
 
 func TestDashKeys(t *testing.T) {
-	if !strings.Contains(dashKeys(80), "c cancel") {
+	if !strings.Contains(dashKeys(100), "d remove") {
 		t.Error("a wide footer should name every key")
 	}
-	if got := dashKeys(40); strings.Contains(got, "c cancel") || !strings.Contains(got, "f focus") {
+	if got := dashKeys(60); strings.Contains(got, "d remove") || !strings.Contains(got, "a add") {
 		t.Errorf("a medium footer should shorten, got %q", got)
 	}
 	if got := dashKeys(10); got != "q quit" {
 		t.Errorf("a narrow footer = %q", got)
+	}
+	// Whatever the width, the footer must fit the window it is drawn in.
+	for _, width := range []int{10, 20, 40, 60, 80, 100, 200} {
+		if got := len([]rune(dashKeys(width))); got > width && width >= 10 {
+			t.Errorf("width %d: hints are %d wide", width, got)
+		}
 	}
 }
 
@@ -185,5 +192,198 @@ func TestDashRefreshAdoptsTheNewDesk(t *testing.T) {
 	}
 	if !strings.Contains(view, "b to take it") {
 		t.Errorf("expected the break hint:\n%s", view)
+	}
+}
+
+func key(s string) tea.KeyMsg {
+	switch s {
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
+	case "ctrl+u":
+		return tea.KeyMsg{Type: tea.KeyCtrlU}
+	case "space":
+		return tea.KeyMsg{Type: tea.KeySpace}
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	}
+}
+
+func press(m *dashModel, keys ...string) tea.Cmd {
+	var cmd tea.Cmd
+	for _, k := range keys {
+		_, cmd = m.handleKey(key(k))
+	}
+	return cmd
+}
+
+// Removed todos are a bin, not a working list: putting the cursor on rows
+// whose only action is restore would make j/k walk through the past.
+func TestDashCursorSkipsRemovedTodos(t *testing.T) {
+	m := dashAt(80, 24)
+	if got := len(m.visibleTodos()); got != 2 {
+		t.Fatalf("visible todos = %d, want 2", got)
+	}
+	press(m, "j", "j", "j", "j")
+	if m.cursor != 1 {
+		t.Errorf("cursor ran past the end: %d", m.cursor)
+	}
+	press(m, "k", "k", "k")
+	if m.cursor != 0 {
+		t.Errorf("cursor ran past the start: %d", m.cursor)
+	}
+}
+
+// A list that shrinks underneath the cursor — a todo removed here, or on
+// the web — must not leave the selection pointing at nothing.
+func TestDashCursorSurvivesAShrinkingList(t *testing.T) {
+	m := dashAt(80, 24)
+	press(m, "j")
+	m.Update(deskMsg{desk: deskResponse{Todos: []apiTodo{{ID: "1", Text: "only one"}}}})
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d after the list shrank, want 0", m.cursor)
+	}
+	if _, ok := m.selected(); !ok {
+		t.Error("expected a valid selection")
+	}
+	// An empty list has no selection at all, and no key may act on one.
+	m.Update(deskMsg{desk: deskResponse{}})
+	if _, ok := m.selected(); ok {
+		t.Error("an empty list should have no selection")
+	}
+	if cmd := press(m, "space"); cmd != nil {
+		t.Error("space on an empty list should do nothing")
+	}
+}
+
+func TestDashTogglesTheSelectedTodo(t *testing.T) {
+	m := dashAt(80, 24)
+	if cmd := press(m, "space"); cmd == nil {
+		t.Fatal("space should toggle the selected todo")
+	}
+	view := m.View()
+	if !strings.Contains(view, "›") {
+		t.Errorf("the selection should be marked:\n%s", view)
+	}
+}
+
+// Every key belongs to the field while a line is being typed — otherwise a
+// todo containing "q" would quit the program mid-word.
+func TestDashTypingDoesNotTriggerCommands(t *testing.T) {
+	m := dashAt(80, 24)
+	press(m, "a")
+	if m.editing == nil {
+		t.Fatal("a should open the field")
+	}
+	press(m, "q", "u", "i", "t", " ", "d", "b")
+	if m.editing == nil {
+		t.Fatal("typing q should not have quit")
+	}
+	if got := m.editing.value(); got != "quit db" {
+		t.Errorf("typed %q", got)
+	}
+	if !strings.Contains(m.View(), "quit db") {
+		t.Errorf("the typed text should show in place:\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "esc cancel") {
+		t.Error("the footer should explain the field's keys")
+	}
+}
+
+func TestDashAddSubmits(t *testing.T) {
+	m := dashAt(80, 24)
+	press(m, "a", "h", "i")
+	cmd := press(m, "enter")
+	if cmd == nil {
+		t.Fatal("enter should submit")
+	}
+	if m.editing != nil {
+		t.Error("the field should close on submit")
+	}
+}
+
+// An emptied line is a no-op, not a delete — the same rule the server
+// applies to an edit that arrives blank.
+func TestDashEmptySubmitDoesNothing(t *testing.T) {
+	m := dashAt(80, 24)
+	press(m, "a")
+	if cmd := press(m, "enter"); cmd != nil {
+		t.Error("an empty submit should not post")
+	}
+	if m.editing != nil {
+		t.Error("the field should still close")
+	}
+}
+
+func TestDashEscapeAbandonsTheEdit(t *testing.T) {
+	m := dashAt(80, 24)
+	press(m, "e")
+	if m.editing == nil || m.editingID == "" {
+		t.Fatal("e should open the field on the selected todo")
+	}
+	if m.editing.value() != "ship the terminal client" {
+		t.Errorf("the field should start from the existing text, got %q", m.editing.value())
+	}
+	press(m, "backspace", "backspace")
+	if cmd := press(m, "esc"); cmd != nil {
+		t.Error("esc should not post")
+	}
+	if m.editing != nil {
+		t.Error("esc should close the field")
+	}
+}
+
+// Completed todos keep the text they had when they changed state — the
+// server refuses the edit, so the client says why rather than posting it.
+func TestDashRefusesToEditACompletedTodo(t *testing.T) {
+	m := dashAt(80, 24)
+	press(m, "j")
+	if cmd := press(m, "e"); cmd != nil {
+		t.Error("editing a completed todo should not post")
+	}
+	if !strings.Contains(m.View(), "can't be edited") {
+		t.Errorf("expected the refusal in the footer:\n%s", m.View())
+	}
+}
+
+// Removal is a flag server-side, not a delete, so a one-key undo is real
+// rather than a re-create that would lose the todo's history.
+func TestDashRemoveThenUndo(t *testing.T) {
+	m := dashAt(80, 24)
+	if cmd := press(m, "d"); cmd == nil {
+		t.Fatal("d should remove")
+	}
+	if m.undoID != "1" {
+		t.Errorf("undo target = %q, want the removed todo", m.undoID)
+	}
+	if cmd := press(m, "u"); cmd == nil {
+		t.Fatal("u should restore")
+	}
+	// The undo is spent; a second u has nothing to put back.
+	if cmd := press(m, "u"); cmd != nil {
+		t.Error("a second undo should not post")
+	}
+	if !strings.Contains(m.View(), "nothing to undo") {
+		t.Errorf("expected the refusal in the footer:\n%s", m.View())
+	}
+}
+
+// A long list must keep the selection on screen rather than scrolling it
+// off the bottom.
+func TestDashScrollsToKeepTheCursorVisible(t *testing.T) {
+	m := dashAt(80, 14)
+	var todos []apiTodo
+	for i := 0; i < 40; i++ {
+		todos = append(todos, apiTodo{ID: fmt.Sprint(i), Text: fmt.Sprintf("todo number %d", i)})
+	}
+	m.desk = deskResponse{Todos: todos}
+	for i := 0; i < 30; i++ {
+		press(m, "j")
+	}
+	if !strings.Contains(m.View(), "todo number 30") {
+		t.Errorf("the selected row scrolled off:\n%s", m.View())
 	}
 }
