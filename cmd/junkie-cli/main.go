@@ -36,53 +36,37 @@ func run(args []string) error {
 	// Bare `junkie` opens the desk rather than printing usage: the common
 	// case is wanting to see what's running, not wanting to read the manual.
 	// Piped, it prints the one-shot status instead — a full-screen program
-	// is no use to a script, and would hang it.
+	// would hang a script rather than answer it.
 	if len(args) == 0 {
 		if terminalWidth() == 0 {
 			return cmdStatus(nil)
 		}
 		return cmdDash(nil)
 	}
-	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "login":
-		return cmdLogin(rest)
-	case "logout":
-		return cmdLogout(rest)
-	case "whoami":
-		return cmdWhoami(rest)
-	case "dash", "desk":
-		return cmdDash(rest)
-	case "status", "st":
-		return cmdStatus(rest)
-	case "todos", "todo":
-		return cmdTodos(rest)
-	case "rooms":
-		return cmdRooms(rest)
-	case "stats", "map":
-		return cmdStats(rest)
-	case "room":
-		return cmdRoom(rest)
-	case "focus", "start":
-		return cmdFocus(rest)
-	case "break":
-		return cmdBreak(rest)
-	case "skip":
-		return cmdSkip(rest)
-	case "cancel", "stop":
-		return cmdCancel(rest)
-	case "watch":
-		return cmdWatch(rest)
-	case "version", "--version", "-v":
-		fmt.Println("junkie " + version)
-		return nil
+
+	name, rest := args[0], args[1:]
+	switch name {
 	case "help", "--help", "-h":
-		usage(os.Stdout)
+		writeHelp(os.Stdout, rest)
 		return nil
-	default:
-		usage(os.Stderr)
-		return fmt.Errorf("unknown command %q", cmd)
+	case "version", "--version", "-v":
+		fmt.Println(versionLine())
+		return nil
 	}
+
+	cmd, ok := find(name)
+	if !ok {
+		writeOverview(os.Stderr)
+		return fmt.Errorf("unknown command %q", name)
+	}
+	// `junkie room --help` should explain rooms, not attempt them. Commands
+	// that take a subcommand of their own get first refusal, so
+	// `junkie room join --help` can be theirs to answer later.
+	if wantsHelp(rest) && len(rest) <= 1 {
+		writeCommandHelp(os.Stdout, cmd)
+		return nil
+	}
+	return cmd.run(rest)
 }
 
 // authed loads the stored session and hands back a ready client. Every
@@ -128,44 +112,4 @@ func flagValue(args []string, name string) ([]string, string) {
 		}
 	}
 	return out, value
-}
-
-func usage(w *os.File) {
-	fmt.Fprint(w, `junkie — shared focus, in the terminal
-
-Usage:
-  junkie                      show the desk (same as `+"`junkie status`"+`)
-  junkie login [--url URL]    sign in and store the session
-  junkie logout               end the session and forget it
-  junkie whoami               show who this terminal is signed in as
-
-  junkie status [--json]      solo timer, todo counts, room activity
-  junkie todos [--json]       private todos
-  junkie rooms [--json]       your rooms and what their timers are doing
-  junkie stats [--json]       the work map: a year of focused days
-
-  junkie room new NAME        create a room
-  junkie room join CODE       join a room by its code
-  junkie room start [CODE]    start a block (opens a 30-second lobby)
-  junkie room enter [CODE]    join the block that's running
-  junkie room leave [CODE]    leave the block
-  junkie room checkin [CODE]  confirm you're staying for the next block
-
-  junkie focus [MINUTES]      start a private focus block (5–180, default 50)
-  junkie break [MINUTES]      start the offered break (1–60)
-  junkie skip                 skip the break, start the next block
-  junkie cancel               end the current block early
-  junkie watch                full-screen countdown for the running block
-
-Keys on the desk:
-  f focus · b break · s skip · c cancel · r refresh · q quit
-
-Flags:
-  --watch                     on focus/break, stay and draw the countdown
-  --json                      machine-readable output for read commands
-
-Environment:
-  JUNKIE_URL                  server to talk to (overrides the stored one)
-  JUNKIE_CONFIG               path to the config file
-`)
 }

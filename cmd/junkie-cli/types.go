@@ -49,6 +49,19 @@ type apiTodo struct {
 	ReadOnly    bool   `json:"readOnly,omitempty"`
 }
 
+// roomResponse is one room's own page. It carries what the desk list does
+// not: whether you are queued to join, which is a different state from being
+// in the block and from being out of it.
+type roomResponse struct {
+	Room struct {
+		Code string `json:"code"`
+		Name string `json:"name"`
+	} `json:"room"`
+	Timer       *roomTimer `json:"timer"`
+	Waiting     bool       `json:"waiting"`
+	MemberCount int        `json:"memberCount"`
+}
+
 type deskRoom struct {
 	Code           string     `json:"code"`
 	Name           string     `json:"name"`

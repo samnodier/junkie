@@ -29,7 +29,7 @@ func cmdRoom(args []string) error {
 	case "start":
 		return cmdRoomStart(rest)
 	case "enter":
-		return cmdRoomAction(rest, "timer-join", "joined the block in %s")
+		return cmdRoomEnter(rest)
 	case "leave":
 		return cmdRoomAction(rest, "timer-leave", "left the block in %s")
 	case "checkin":
@@ -149,6 +149,41 @@ func cmdRoomStart(args []string) error {
 	}
 	fmt.Printf("Started a block in %s.\n", room.Name)
 	fmt.Println(styleFaint.Render("The room has 30 seconds to join before focus begins."))
+	return nil
+}
+
+// cmdRoomEnter joins the block, and says which of the three things actually
+// happened. The server does not join you to a focus block already under way
+// — joinTimer queues you instead, and you are in at the next break — so
+// reporting "joined" for every accepted request would be a lie two thirds of
+// the time.
+func cmdRoomEnter(args []string) error {
+	c, _, err := authed()
+	if err != nil {
+		return err
+	}
+	room, err := resolveRoom(c, args)
+	if err != nil {
+		return err
+	}
+	if err := c.post("/r/"+room.Code+"/timer-join", nil); err != nil {
+		return err
+	}
+	state, err := c.room(room.Code)
+	if err != nil {
+		return err
+	}
+	switch {
+	case state.Timer != nil && state.Timer.Participant:
+		fmt.Printf("You're in the block in %s · %s left\n",
+			room.Name, formatDuration(state.Timer.SecondsLeft))
+	case state.Waiting && state.Timer != nil:
+		fmt.Printf("%s is mid-block. You're in the queue — you'll join at the next break.\n", room.Name)
+	case state.Waiting:
+		fmt.Printf("Waiting in %s. You'll be in when someone starts a block.\n", room.Name)
+	default:
+		fmt.Printf("Nothing to join in %s yet — `junkie room start` opens one.\n", room.Name)
+	}
 	return nil
 }
 

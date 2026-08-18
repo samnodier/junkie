@@ -197,6 +197,19 @@ func (c *client) me() (meResponse, error) {
 	return out, err
 }
 
+func (c *client) room(code string) (roomResponse, error) {
+	var out roomResponse
+	err := c.getJSON("/api/room/"+url.PathEscape(code), &out)
+	out.Room.Code = sanitize(out.Room.Code)
+	out.Room.Name = sanitize(out.Room.Name)
+	if out.Timer != nil {
+		for i := range out.Timer.Participants {
+			sanitizeUser(&out.Timer.Participants[i])
+		}
+	}
+	return out, err
+}
+
 func (c *client) profile() (profileResponse, error) {
 	var out profileResponse
 	err := c.getJSON("/api/profile", &out)
