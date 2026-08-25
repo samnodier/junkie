@@ -13,7 +13,12 @@ import (
 const labelWidth = 8
 
 func labeled(label, body string) string {
-	return styleLabel.Render(fmt.Sprintf("%-*s", labelWidth, label)) + body + "\n"
+	cell := fmt.Sprintf("%-*s", labelWidth, label)
+	if len(label) >= labelWidth {
+		// A label that fills the column would otherwise run into its body.
+		cell += " "
+	}
+	return styleLabel.Render(cell) + body + "\n"
 }
 
 // renderStatus is the desk in a dozen lines: what the timer is doing, how
