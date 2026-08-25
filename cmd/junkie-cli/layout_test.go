@@ -68,7 +68,7 @@ func TestWatchViewNeverExceedsItsWidth(t *testing.T) {
 				focusTimer(7325), // over an hour: one glyph wider
 				{Phase: "break", BreakMinutes: 10, BreakPending: true},
 			} {
-				m := newWatchModel(nil, timer)
+				m := newWatchModel(timer)
 				m.width, m.height = width, height
 				for i, line := range strings.Split(m.View(), "\n") {
 					if got := lipgloss.Width(line); got > width {
@@ -85,7 +85,7 @@ func TestWatchViewNeverExceedsItsWidth(t *testing.T) {
 // where 25:00 fits at scale 2 but 2:02:05 does not, the display steps the
 // scale down instead of overflowing.
 func TestWatchDigitsStepDownRatherThanOverflow(t *testing.T) {
-	m := newWatchModel(nil, focusTimer(7325))
+	m := newWatchModel(focusTimer(7325))
 	m.width, m.height = 44, 20
 	rows := m.digits(2)
 	if rows == nil {
@@ -135,7 +135,7 @@ func TestWatchTiersShowTheirEssentials(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		m := newWatchModel(nil, focusTimer(1500))
+		m := newWatchModel(focusTimer(1500))
 		m.width, m.height = tc.width, tc.height
 		view := m.View()
 		for _, want := range tc.want {

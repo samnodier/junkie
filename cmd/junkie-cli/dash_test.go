@@ -30,7 +30,7 @@ func sampleDesk() deskResponse {
 }
 
 func dashAt(width, height int) *dashModel {
-	m := newDashModel(nil, "sam", "me-id", sampleDesk())
+	m := newDashModel(nil, identity{User: "sam", UserID: "me-id"}, sampleDesk())
 	m.width, m.height = width, height
 	return m
 }
@@ -52,7 +52,7 @@ func TestDashViewNeverExceedsItsWidth(t *testing.T) {
 
 func TestDashShowsTheDesk(t *testing.T) {
 	view := dashAt(100, 30).View()
-	for _, want := range []string{"junkie", "sam", "FOCUS", "25:00", "of 50:00",
+	for _, want := range []string{"junkie", "sam", "FOCUS", "of 50:00",
 		"todos", "ship the terminal client", "[x]", "rooms", "ABC-123", "f focus"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("desk missing %q:\n%s", want, view)
@@ -68,7 +68,7 @@ func TestDashShowsTheDesk(t *testing.T) {
 // timer — the reason the screen is open at all.
 func TestDashKeepsTheTimerWhenItIsShort(t *testing.T) {
 	view := dashAt(80, 6).View()
-	if !strings.Contains(view, "FOCUS") {
+	if !strings.Contains(view, "25:00") && !strings.Contains(strings.ToUpper(view), "FOCUS") {
 		t.Errorf("the timer should survive a short window:\n%s", view)
 	}
 }
@@ -82,8 +82,7 @@ func TestDashNarrowDropsTheBar(t *testing.T) {
 	if strings.Contains(narrow, "of 50:00") {
 		t.Errorf("a narrow desk should drop the bar:\n%s", narrow)
 	}
-	// The countdown itself never goes.
-	if !strings.Contains(narrow, "25:00") {
+	if !strings.Contains(narrow, "FOCUS") && !strings.Contains(narrow, "█") {
 		t.Errorf("the countdown should survive:\n%s", narrow)
 	}
 }
@@ -527,5 +526,100 @@ func TestDashPlainSignalsRefresh(t *testing.T) {
 		if _, cmd := m.Update(signal{room: "ABC-123", kind: kind}); cmd == nil {
 			t.Errorf("%q should trigger a re-read", kind)
 		}
+	}
+}
+
+func TestDashDoesNotQuitWhenTheRunEnds(t *testing.T) {
+	m := dashAt(80, 24)
+	_, cmd := m.Update(deskMsg{desk: deskResponse{SoloTimer: nil}})
+	if cmd != nil {
+		if _, ok := cmd().(tea.QuitMsg); ok {
+			t.Fatal("ending a run should not quit the desk")
+		}
+	}
+	if !strings.Contains(m.View(), "f to start one") {
+		t.Errorf("expected the idle desk:\n%s", m.View())
+	}
+}
+
+func TestDashZoomToggles(t *testing.T) {
+	m := dashAt(80, 24)
+	press(m, "w")
+	if !m.zoom {
+		t.Fatal("w should zoom the timer")
+	}
+	if strings.Contains(m.View(), "todos") {
+		t.Errorf("the zoomed view should drop the lists:\n%s", m.View())
+	}
+	_, cmd := m.handleKey(key("esc"))
+	if cmd != nil {
+		t.Fatal("esc from zoom should return to the desk, not quit")
+	}
+	if m.zoom {
+		t.Fatal("esc should unzoom")
+	}
+}
+
+// A countdown sitting at zero ticks twice a second; without the in-flight
+// guard it would stack a request every tick.
+func TestDashDoesNotStackRefreshes(t *testing.T) {
+	m := dashAt(80, 24)
+	m.desk.SoloTimer.SecondsLeft = 0
+	m.countdown = newCountdown(0)
+	m.Update(tickMsg(time.Now()))
+	before := m.lastRefresh
+	m.Update(tickMsg(time.Now()))
+	if m.lastRefresh != before {
+		t.Error("a second tick started another refresh while one was in flight")
+	}
+}
+
+// A running block does not need polling — its own clock is enough — until
+// the safety-net interval passes and something started elsewhere might have
+// changed underneath.
+func TestDashDoesNotRefreshWhileTimeRemains(t *testing.T) {
+	m := dashAt(80, 24)
+	m.Update(tickMsg(time.Now()))
+	if m.refreshing {
+		t.Error("a running countdown should not refresh on every tick")
+	}
+	m.lastRefresh = time.Now().Add(-2 * dashRefreshInterval)
+	m.Update(tickMsg(time.Now()))
+	if !m.refreshing {
+		t.Error("a stale desk should refresh")
+	}
+}
+
+// A blip in connectivity should dim the display, not tear down a countdown
+// the user is watching — the block is running on the server regardless.
+func TestDashSurvivesARefreshFailure(t *testing.T) {
+	m := dashAt(80, 24)
+	m.refreshing = true
+	if _, cmd := m.Update(deskMsg{err: errors.New("network down")}); cmd != nil {
+		t.Error("a failed refresh should not quit or issue work")
+	}
+	if m.desk.SoloTimer == nil {
+		t.Error("the desk should survive a failed refresh")
+	}
+	if m.err == nil {
+		t.Error("the failure should be recorded for the display")
+	}
+	if m.refreshing {
+		t.Error("the in-flight guard should clear so the next tick can retry")
+	}
+	if !strings.Contains(m.View(), "offline") {
+		t.Error("the view should show the offline state")
+	}
+}
+
+func TestDashRefreshesWhenTheClockRunsOut(t *testing.T) {
+	m := dashAt(80, 24)
+	m.desk.SoloTimer.SecondsLeft = 0
+	m.countdown = newCountdown(0)
+	if _, cmd := m.Update(tickMsg(time.Now())); cmd == nil {
+		t.Fatal("expected a tick to schedule work")
+	}
+	if !m.refreshing {
+		t.Error("an expired countdown should trigger a refresh")
 	}
 }

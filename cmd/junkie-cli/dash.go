@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,31 +14,45 @@ import (
 
 // The dashboard is the whole desk in one screen: what the timer is doing,
 // what is on the list, and which rooms are live — the terminal's answer to
-// leaving a browser tab open all day.
+// leaving a browser tab open all day. `junkie watch` is this same program
+// with the timer pane filling the window, not a second one that quits when
+// the block ends.
 //
-// It owns no state of its own. Every key that changes something posts to the
-// server and re-reads, so two terminals and a browser can all be open on the
-// same desk without any of them holding a stale idea of it.
+// It owns no state of its own. Every key that changes something goes to the
+// store and re-reads, so two terminals and a browser can all be open on the
+// same desk without any of them holding a stale idea of it. Guest mode is
+// the same screen against files on this machine.
 
 // dashRefreshInterval is the safety net until the room WebSockets land: the
 // countdown needs no polling, but a block started elsewhere should appear
-// here without the user reaching for r.
+// here without the user reaching for r. Guest has no elsewhere, but the
+// interval still advances an expired local phase.
 const dashRefreshInterval = 20 * time.Second
 
 // statusHold is how long a one-line confirmation stays up before the footer
 // goes back to the key hints.
 const statusHold = 4 * time.Second
 
+type tickMsg time.Time
+
+// deskMsg carries a completed refresh. The error rides along rather than
+// failing the program: a blip in connectivity should dim the display, not
+// tear down a countdown the user is watching.
+type deskMsg struct {
+	desk deskResponse
+	err  error
+}
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second/2, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
 type dashModel struct {
-	client *client
+	store    store
+	identity identity
+
 	user   string
 	userID string
-
-	// sockets carry the same signals the browser gets. They are what makes
-	// the desk live rather than polled; the refresh interval below is only
-	// the fallback for when they are down.
-	sockets   *sockets
-	roomCodes []string
 
 	// prompt is the "X is starting a block — join?" offer. The server opens
 	// a 30-second lobby when a run starts (startRoomTimer) and broadcasts
@@ -67,6 +82,10 @@ type dashModel struct {
 	// is reversible server-side (removed is a flag, not a delete), which is
 	// what makes a one-key undo honest rather than a second guess.
 	undoID string
+
+	// zoom is `junkie watch`: the timer pane takes the window. Esc returns
+	// to the desk; a run ending does not.
+	zoom bool
 
 	width, height int
 }
@@ -107,18 +126,18 @@ func (p *joinPrompt) secondsLeft() int {
 	return left
 }
 
-func newDashModel(c *client, user, userID string, desk deskResponse) *dashModel {
+func newDashModel(s store, id identity, desk deskResponse) *dashModel {
 	m := &dashModel{
-		client:      c,
-		user:        user,
-		userID:      userID,
+		store:       s,
+		identity:    id,
+		user:        id.User,
+		userID:      id.UserID,
 		desk:        desk,
 		lastRefresh: time.Now(),
 		width:       80,
 		height:      24,
 	}
 	m.anchor()
-	m.roomCodes = deskRoomCodes(desk)
 	return m
 }
 
@@ -186,17 +205,19 @@ func (m *dashModel) selected() (apiTodo, bool) {
 }
 
 func (m *dashModel) Init() tea.Cmd {
-	m.sockets = openSockets(m.client, m.roomCodes)
-	return tea.Batch(tick(), listenFor(m.sockets))
+	return tea.Batch(tick(), listenFor(m.store))
 }
 
 // listenFor waits on the next signal. Bubble Tea drives one command at a
 // time, so each delivered signal re-issues this to wait for the next.
-func listenFor(s *sockets) tea.Cmd {
+func listenFor(s store) tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	events := s.events
+	events := s.Events()
+	if events == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		sig, ok := <-events
 		if !ok {
@@ -218,7 +239,10 @@ type actionMsg struct {
 // the server agreed to.
 func (m *dashModel) do(path string, form url.Values, message string) tea.Cmd {
 	return func() tea.Msg {
-		if err := m.client.post(path, form); err != nil {
+		if m.store == nil {
+			return actionMsg{message: message}
+		}
+		if err := m.store.Do(path, form); err != nil {
 			return actionMsg{err: err}
 		}
 		return actionMsg{message: message}
@@ -227,7 +251,10 @@ func (m *dashModel) do(path string, form url.Values, message string) tea.Cmd {
 
 func (m *dashModel) refresh() tea.Cmd {
 	return func() tea.Msg {
-		desk, err := m.client.desk()
+		if m.store == nil {
+			return deskMsg{desk: m.desk}
+		}
+		desk, err := m.store.Load()
 		return deskMsg{desk: desk, err: err}
 	}
 }
@@ -275,18 +302,6 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.desk = msg.desk
 		m.anchor()
 		m.clampCursor()
-		// Rooms joined or left elsewhere change which channels matter.
-		// Only re-subscribe if there is a subscription to replace: Init
-		// establishes the socket layer, and a desk running without one
-		// (rendered rather than run) should not acquire one on a refresh.
-		if codes := deskRoomCodes(msg.desk); !sameCodes(codes, m.roomCodes) {
-			m.roomCodes = codes
-			if m.sockets != nil {
-				m.sockets.close()
-				m.sockets = openSockets(m.client, codes)
-				return m, listenFor(m.sockets)
-			}
-		}
 		return m, nil
 
 	case signal:
@@ -309,7 +324,7 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // about it. Most signals only mean "something changed, read it again" —
 // the payload-carrying ones are the invitations.
 func (m *dashModel) handleSignal(sig signal) (tea.Model, tea.Cmd) {
-	next := listenFor(m.sockets)
+	next := listenFor(m.store)
 	switch sig.kind {
 	case "timer-lobby":
 		// Your own start needs no invitation; you are already in it.
@@ -396,8 +411,17 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	t := m.desk.SoloTimer
 	switch msg.String() {
-	case "q", "esc", "ctrl+c":
+	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "esc":
+		if m.zoom {
+			m.zoom = false
+			return m, nil
+		}
+		return m, tea.Quit
+	case "w":
+		m.zoom = !m.zoom
+		return m, nil
 	case "r":
 		if m.refreshing {
 			return m, nil
@@ -530,6 +554,9 @@ func (m *dashModel) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString(m.timerBlock())
+	if m.zoom {
+		return b.String() + m.footer()
+	}
 	b.WriteString("\n")
 
 	// Sections are dropped from the bottom up when the window is short, so
@@ -576,9 +603,13 @@ func (m *dashModel) sectionBudget(rows int) (todos, rooms int) {
 }
 
 func (m *dashModel) header() string {
+	who := m.user
+	if m.identity.Guest {
+		who = "guest"
+	}
 	left := styleAccent.Render(clip("junkie", m.width))
-	if m.user != "" {
-		left += styleFaint.Render(clip(" · "+m.user, m.width-6))
+	if who != "" {
+		left += styleFaint.Render(clip(" · "+who, m.width-6))
 	}
 	if m.width < 30 {
 		return left + "\n"
@@ -609,29 +640,45 @@ func (m *dashModel) promptBanner() string {
 	return styleWarn.Render(clip(text, m.width)) + "\n"
 }
 
+func (m *dashModel) timerHeight() int {
+	if m.zoom {
+		used := lipgloss.Height(m.header()) + 1
+		if m.prompt != nil {
+			used += 2
+		}
+		h := m.height - used
+		if h < 1 {
+			return 1
+		}
+		return h
+	}
+	if m.desk.SoloTimer == nil {
+		return 1
+	}
+	switch {
+	case m.height >= 22:
+		return 14
+	case m.height >= 14:
+		return 9
+	case m.height >= 8:
+		return 3
+	default:
+		return 1
+	}
+}
+
+func (m *dashModel) timerFace() *watchModel {
+	return &watchModel{
+		timer:     m.desk.SoloTimer,
+		countdown: m.countdown,
+		width:     m.width,
+		height:    m.timerHeight(),
+		chrome:    m.zoom,
+	}
+}
+
 func (m *dashModel) timerBlock() string {
-	t := m.desk.SoloTimer
-	if t == nil {
-		return styleFaint.Render(clip("no block running · f to start one", m.width)) + "\n"
-	}
-	colour := lipgloss.NewStyle().Foreground(phaseColor(t.Phase))
-	if t.BreakPending {
-		head := "BREAK READY"
-		return colour.Bold(true).Render(head) +
-			styleFaint.Render(clip(fmt.Sprintf(" · %d min · b to take it, s to skip", t.BreakMinutes),
-				m.width-len(head))) + "\n"
-	}
-	left := m.countdown.remaining()
-	head := colour.Bold(true).Render(strings.ToUpper(phaseLabel(t))) + "  " +
-		colour.Render(formatDuration(left))
-	// The bar only earns its columns once the text beside it has room.
-	if m.width >= 46 {
-		total := phaseSeconds(t)
-		barWidth := clamp(m.width-lipgloss.Width(head)-14, 8, 30)
-		head += "  " + colour.Render(progressBar(elapsedFraction(left, total), barWidth)) +
-			styleFaint.Render(" of "+formatDuration(total))
-	}
-	return head + "\n"
+	return m.timerFace().View()
 }
 
 func (m *dashModel) todoBlock(rows int) string {
@@ -659,7 +706,12 @@ func (m *dashModel) todoBlock(rows int) string {
 	if m.editing != nil && m.editingID == "" {
 		b.WriteString(m.editorLine() + "\n")
 	} else if shown == 0 {
-		b.WriteString(styleFaint.Render("  nothing on the list · a to add") + "\n")
+		empty := "  nothing on the list · a to add"
+		short := "  nothing on the list"
+		if m.width < len([]rune(empty)) {
+			empty = short
+		}
+		b.WriteString(styleFaint.Render(clip(empty, m.width)) + "\n")
 	}
 	return b.String()
 }
@@ -724,11 +776,27 @@ func (m *dashModel) footer() string {
 	if m.status != "" && time.Now().Before(m.statusUntil) {
 		return styleWarn.Render(clip(m.status, m.width))
 	}
+	if m.zoom {
+		return styleFaint.Render(clip(zoomKeys(m.width), m.width))
+	}
 	return styleFaint.Render(clip(dashKeys(m.width), m.width))
 }
 
-// dashKeys names what the keys do, at whatever length fits. Like the watch
-// screen's help, the short forms are written out rather than cut mid-word.
+// zoomKeys is the footer while the timer pane fills the window.
+func zoomKeys(width int) string {
+	const full = "esc desk · f focus · b break · s skip · c cancel · q quit"
+	const short = "esc desk · f focus · q quit"
+	if width >= len([]rune(full)) {
+		return full
+	}
+	if width >= len([]rune(short)) {
+		return short
+	}
+	return "q quit"
+}
+
+// dashKeys names what the keys do, at whatever length fits. The short forms
+// are written out rather than cut mid-word.
 func dashKeys(width int) string {
 	const full = "j/k move · space done · a add · e edit · d remove · f focus · b break · q quit"
 	const medium = "j/k move · space done · a add · f focus · b break · q quit"
@@ -749,24 +817,28 @@ func dashKeys(width int) string {
 // normal keys apply, and saying so is the whole job.
 const editKeys = "enter save · esc cancel · ctrl+u clear"
 
-// runDashboard opens the desk full-screen.
-func runDashboard(c *client, user string) error {
-	desk, err := c.desk()
+// runDashboard opens the desk full-screen. zoom is `junkie watch`: the
+// timer pane takes the window, but it is the same program and a run ending
+// does not quit it.
+func runDashboard(zoom bool) error {
+	s, id, err := openDeskSession()
+	if errors.Is(err, errSessionExpired) {
+		s, err = openLocalStore()
+		if err != nil {
+			return err
+		}
+		cfg, _ := loadConfig()
+		id = guestIdentity(cfg.BaseURL)
+	} else if err != nil {
+		return err
+	}
+	defer s.Close()
+	desk, err := s.Load()
 	if err != nil {
 		return err
 	}
-	// The user's ID decides which broadcasts are about someone else: a lobby
-	// you opened yourself is not an invitation, and neither is your own
-	// completed todo announced back at you.
-	me, err := c.me()
-	if err != nil {
-		return err
-	}
-	if me.User == nil {
-		return errSessionExpired
-	}
-	m := newDashModel(c, firstNonEmpty(me.User.DisplayName, user), me.User.ID, desk)
-	defer func() { m.sockets.close() }()
+	m := newDashModel(s, id, desk)
+	m.zoom = zoom
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }

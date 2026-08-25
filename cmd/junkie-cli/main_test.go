@@ -36,3 +36,17 @@ func TestUnknownCommandIsAnError(t *testing.T) {
 		t.Error("expected an error for an unknown command")
 	}
 }
+
+func TestStatusRunsWithoutASession(t *testing.T) {
+	t.Setenv("JUNKIE_CONFIG", "/nonexistent/junkie/config.json")
+	t.Setenv("JUNKIE_DATA", t.TempDir())
+	if err := run([]string{"status"}); err != nil {
+		t.Errorf("unsigned status: %v", err)
+	}
+	if err := run([]string{"todos"}); err != nil {
+		t.Errorf("unsigned todos: %v", err)
+	}
+	if err := run([]string{"stats"}); err != nil {
+		t.Errorf("unsigned stats: %v", err)
+	}
+}

@@ -3,138 +3,40 @@ package main
 import (
 	"fmt"
 	"strings"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// watchTimer draws the running block full-screen until the user leaves.
-//
-// The countdown is never authoritative: the server owns phase_ends_at and
-// credits the minutes, and this only renders the remainder and pokes the
-// server when it runs out. Quitting the watch, or closing the terminal
-// outright, therefore costs nothing — the block keeps running and is
-// credited whenever anything next reads it.
-func watchTimer(c *client) error {
-	desk, err := c.desk()
-	if err != nil {
-		return err
-	}
-	if desk.SoloTimer == nil {
-		fmt.Print(renderSoloLine(nil, terminalWidth()))
-		return nil
-	}
-	m := newWatchModel(c, desk.SoloTimer)
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
-	return err
-}
-
-// refreshInterval is the safety net: the countdown itself needs no polling,
-// but a phase started or cancelled elsewhere (the web, another terminal)
-// should show up here within a reasonable time. The room WebSocket makes
-// this exact, and will replace it.
-const refreshInterval = 30 * time.Second
+// watchModel draws one timer at a size. It is not a program of its own —
+// the desk hosts it as a pane, and `junkie watch` is the same desk with
+// that pane filling the window. A run ending is a new state on the same
+// screen, not a reason to quit.
 
 type watchModel struct {
-	client *client
-	timer  *soloTimer
+	timer *soloTimer
 
 	countdown
 
-	lastRefresh time.Time
-	refreshing  bool
-	err         error
-	width       int
-	height      int
+	err    error
+	width  int
+	height int
+	// chrome is the full-screen watch: help line, end time. The desk pane
+	// drops them; the footer already names the keys.
+	chrome bool
 }
 
-func newWatchModel(c *client, t *soloTimer) *watchModel {
+func newWatchModel(t *soloTimer) *watchModel {
+	secs := 0
+	if t != nil {
+		secs = t.SecondsLeft
+	}
 	return &watchModel{
-		client:      c,
-		timer:       t,
-		countdown:   newCountdown(t.SecondsLeft),
-		lastRefresh: time.Now(),
-		width:       80,
-		height:      24,
+		timer:     t,
+		countdown: newCountdown(secs),
+		width:     80,
+		height:    24,
+		chrome:    true,
 	}
-}
-
-type tickMsg time.Time
-
-// deskMsg carries a completed refresh. The error rides along rather than
-// failing the program: a blip in connectivity should dim the display, not
-// tear down a countdown the user is watching.
-type deskMsg struct {
-	desk deskResponse
-	err  error
-}
-
-func tick() tea.Cmd {
-	return tea.Tick(time.Second/2, func(t time.Time) tea.Msg { return tickMsg(t) })
-}
-
-func (m *watchModel) refresh() tea.Cmd {
-	return func() tea.Msg {
-		desk, err := m.client.desk()
-		return deskMsg{desk: desk, err: err}
-	}
-}
-
-func (m *watchModel) Init() tea.Cmd { return tick() }
-
-func (m *watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		return m, nil
-
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "esc", "ctrl+c":
-			return m, tea.Quit
-		case "r":
-			if !m.refreshing {
-				m.refreshing = true
-				return m, m.refresh()
-			}
-		}
-		return m, nil
-
-	case tickMsg:
-		cmds := []tea.Cmd{tick()}
-		// Zero on the clock is the server's cue, not ours: ask it to read
-		// the run, which is what performs the focus->break flip and credits
-		// the minutes. One in-flight refresh at a time, so a countdown
-		// sitting at zero doesn't stack requests every half second.
-		expired := m.timer != nil && !m.timer.BreakPending && m.remaining() <= 0
-		stale := time.Since(m.lastRefresh) >= refreshInterval
-		if !m.refreshing && (expired || stale) {
-			m.refreshing = true
-			m.lastRefresh = time.Now()
-			cmds = append(cmds, m.refresh())
-		}
-		return m, tea.Batch(cmds...)
-
-	case deskMsg:
-		m.refreshing = false
-		m.lastRefresh = time.Now()
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.err = nil
-		// A run that ended — cancelled here or elsewhere, or a break that
-		// went stale — leaves nothing to watch.
-		if msg.desk.SoloTimer == nil {
-			m.timer = nil
-			return m, tea.Quit
-		}
-		m.timer = msg.desk.SoloTimer
-		m.countdown.reset(msg.desk.SoloTimer.SecondsLeft)
-		return m, nil
-	}
-	return m, nil
 }
 
 // remaining is the countdown's single source of truth for the display. A
@@ -148,7 +50,11 @@ func (m *watchModel) remaining() int {
 
 func (m *watchModel) View() string {
 	if m.timer == nil {
-		return ""
+		msg := styleFaint.Render(clip("no block running · f to start one", m.width))
+		if m.chrome && m.height > 1 {
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+		}
+		return msg + "\n"
 	}
 	tier := tierFor(m.width, m.height)
 	var body []string
@@ -165,7 +71,12 @@ func (m *watchModel) View() string {
 		return shortenCountdown(m.countdownText(), m.width)
 	}
 	card := lipgloss.JoinVertical(lipgloss.Center, body...)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
+	if m.chrome {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
+	}
+	// The desk hosts this as a pane: centre it horizontally, but do not
+	// pad it to the budgeted height or the todos underneath starve.
+	return lipgloss.Place(m.width, 0, lipgloss.Center, lipgloss.Top, card)
 }
 
 // countdownText is the number every tier is built around: the time left, or
@@ -218,13 +129,18 @@ func (m *watchModel) viewFull() []string {
 		body = append(body,
 			colour.Render(progressBar(elapsedFraction(m.remaining(), total), barWidth))+
 				styleFaint.Render("  of "+formatDuration(total)))
-		body = append(body, "", styleFaint.Render("ends at "+m.timer.EndsAt.Local().Format("15:04")))
+		if m.chrome {
+			body = append(body, "", styleFaint.Render("ends at "+m.timer.EndsAt.Local().Format("15:04")))
+		}
 	}
 
 	if m.err != nil {
 		body = append(body, "", styleDanger.Render(clip("offline: "+m.err.Error(), m.width)))
 	}
-	return append(body, "", styleFaint.Render(helpLine(m.width)))
+	if m.chrome {
+		body = append(body, "", styleFaint.Render(helpLine(m.width)))
+	}
+	return body
 }
 
 // viewCompact keeps the block digits but drops everything that only
@@ -276,8 +192,8 @@ func shortenCountdown(text string, width int) string {
 // the sentence short mid-word would be worse than saying less, so the short
 // forms are written out rather than truncated.
 func helpLine(width int) string {
-	const full = "q quit · r refresh · the block keeps running either way"
-	const short = "q quit · r refresh"
+	const full = "esc desk · q quit · the block keeps running either way"
+	const short = "esc desk · q quit"
 	if width >= len([]rune(full)) {
 		return full
 	}
@@ -288,8 +204,8 @@ func helpLine(width int) string {
 }
 
 func pendingHint(width int) string {
-	const full = "waiting to start · `junkie break` to take it, `junkie skip` to go on"
-	const short = "`junkie break` or `junkie skip`"
+	const full = "waiting to start · b to take it, s to skip"
+	const short = "b take break · s skip"
 	if width >= len([]rune(full)) {
 		return full
 	}

@@ -1,12 +1,13 @@
 // Command junkie is the terminal client for junkie, the shared focus app.
 //
-// It drives the same server the browser does — the /api/* reads the SPA
-// consumes and the form-encoded mutations its forms post — so a block
-// started here shows up on the web mid-countdown, and one started there can
-// be finished here. The server owns the clock in both: this client only
-// renders phase_ends_at minus now, and asks the server to transition when
-// that hits zero. Focus minutes are credited server-side, so closing the
-// terminal mid-block loses nothing.
+// Bare `junkie` opens a full-screen desk you stay in. Without an account it
+// is a guest on this machine; sign in and it drives the same server the
+// browser does — a block started here shows up on the web mid-countdown,
+// and one started there can be finished here. The server owns the clock
+// when signed in: this client only renders phase_ends_at minus now, and
+// asks the server to transition when that hits zero. Guest blocks persist
+// as an endsAt on disk, so closing the terminal mid-block loses nothing
+// either way.
 package main
 
 import (

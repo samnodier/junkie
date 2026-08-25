@@ -162,14 +162,7 @@ func cmdDash(args []string) error {
 	if len(args) > 0 {
 		return errors.New("usage: junkie dash")
 	}
-	c, cfg, err := authed()
-	if err != nil {
-		return err
-	}
-	// The header name comes from the stored login rather than a round trip:
-	// it is only a label, and the desk read that follows will fail loudly
-	// enough if the session is no longer good.
-	return runDashboard(c, cfg.Username)
+	return runDashboard(false)
 }
 
 func cmdStatus(args []string) error {
@@ -177,11 +170,12 @@ func cmdStatus(args []string) error {
 	if len(args) > 0 {
 		return errors.New("usage: junkie status [--json]")
 	}
-	c, _, err := authed()
+	s, _, err := openDeskSession()
 	if err != nil {
 		return err
 	}
-	desk, err := c.desk()
+	defer s.Close()
+	desk, err := s.Load()
 	if err != nil {
 		return err
 	}
@@ -195,13 +189,14 @@ func cmdStatus(args []string) error {
 func cmdTodos(args []string) error {
 	args, asJSON := hasFlag(args, "json")
 	if len(args) > 0 {
-		return errors.New("usage: junkie todos [--json]\n(adding and completing todos arrives with the interactive dashboard)")
+		return errors.New("usage: junkie todos [--json]\n(adding and completing todos is done from the desk: `junkie`)")
 	}
-	c, _, err := authed()
+	s, _, err := openDeskSession()
 	if err != nil {
 		return err
 	}
-	desk, err := c.desk()
+	defer s.Close()
+	desk, err := s.Load()
 	if err != nil {
 		return err
 	}
@@ -237,11 +232,12 @@ func cmdStats(args []string) error {
 	if len(args) > 0 {
 		return errors.New("usage: junkie stats [--json]")
 	}
-	c, _, err := authed()
+	s, _, err := openDeskSession()
 	if err != nil {
 		return err
 	}
-	profile, err := c.profile()
+	defer s.Close()
+	profile, err := s.Profile()
 	if err != nil {
 		return err
 	}
@@ -261,18 +257,17 @@ func cmdFocus(args []string) error {
 	if minutes != 0 && (minutes < minFocusMinutes || minutes > maxFocusMinutes) {
 		return fmt.Errorf("a focus block is %d–%d minutes", minFocusMinutes, maxFocusMinutes)
 	}
-	c, _, err := authed()
+	s, _, err := openDeskSession()
 	if err != nil {
 		return err
 	}
-	// The server ignores a start request while a run is already live (it
-	// redirects to the desk unchanged), which would look like success here.
-	// Check first so "already running" is said out loud.
-	desk, err := c.desk()
+	desk, err := s.Load()
 	if err != nil {
+		s.Close()
 		return err
 	}
 	if desk.SoloTimer != nil {
+		s.Close()
 		if desk.SoloTimer.BreakPending {
 			return errors.New("a break is waiting — `junkie break` to take it, `junkie skip` to go straight on")
 		}
@@ -283,10 +278,12 @@ func cmdFocus(args []string) error {
 	if minutes != 0 {
 		form.Set("focus_minutes", strconv.Itoa(minutes))
 	}
-	if err := c.post("/solo/start", form); err != nil {
+	if err := s.Do("/solo/start", form); err != nil {
+		s.Close()
 		return err
 	}
-	return afterStart(c, watch, "Focus block started")
+	s.Close()
+	return afterStart(watch, "Focus block started")
 }
 
 func cmdBreak(args []string) error {
@@ -298,60 +295,70 @@ func cmdBreak(args []string) error {
 	if minutes != 0 && (minutes < minBreakMinutes || minutes > maxBreakMinutes) {
 		return fmt.Errorf("a break is %d–%d minutes", minBreakMinutes, maxBreakMinutes)
 	}
-	c, _, err := authed()
+	s, _, err := openDeskSession()
 	if err != nil {
 		return err
 	}
-	desk, err := c.desk()
+	desk, err := s.Load()
 	if err != nil {
+		s.Close()
 		return err
 	}
 	if desk.SoloTimer == nil {
+		s.Close()
 		return errors.New("no break is waiting — `junkie focus` to start a block")
 	}
 	if !desk.SoloTimer.BreakPending {
+		s.Close()
 		return fmt.Errorf("no break is waiting (a %s block is running)", phaseLabel(desk.SoloTimer))
 	}
 	form := url.Values{}
 	if minutes != 0 {
 		form.Set("minutes", strconv.Itoa(minutes))
 	}
-	if err := c.post("/solo/break/start", form); err != nil {
+	if err := s.Do("/solo/break/start", form); err != nil {
+		s.Close()
 		return err
 	}
-	return afterStart(c, watch, "Break started")
+	s.Close()
+	return afterStart(watch, "Break started")
 }
 
 func cmdSkip(args []string) error {
 	if len(args) > 0 {
 		return errors.New("usage: junkie skip")
 	}
-	c, _, err := authed()
+	s, _, err := openDeskSession()
 	if err != nil {
 		return err
 	}
-	desk, err := c.desk()
+	desk, err := s.Load()
 	if err != nil {
+		s.Close()
 		return err
 	}
 	if desk.SoloTimer == nil || desk.SoloTimer.Phase != "break" {
+		s.Close()
 		return errors.New("there is no break to skip")
 	}
-	if err := c.post("/solo/break/skip", nil); err != nil {
+	if err := s.Do("/solo/break/skip", nil); err != nil {
+		s.Close()
 		return err
 	}
-	return afterStart(c, false, "Break skipped — next block started")
+	s.Close()
+	return afterStart(false, "Break skipped — next block started")
 }
 
 func cmdCancel(args []string) error {
 	if len(args) > 0 {
 		return errors.New("usage: junkie cancel")
 	}
-	c, _, err := authed()
+	s, _, err := openDeskSession()
 	if err != nil {
 		return err
 	}
-	desk, err := c.desk()
+	defer s.Close()
+	desk, err := s.Load()
 	if err != nil {
 		return err
 	}
@@ -361,7 +368,7 @@ func cmdCancel(args []string) error {
 	if desk.SoloTimer.Phase != "focus" {
 		return errors.New("only a running focus block can be cancelled — `junkie skip` ends a break")
 	}
-	if err := c.post("/solo/cancel", nil); err != nil {
+	if err := s.Do("/solo/cancel", nil); err != nil {
 		return err
 	}
 	// Ending early keeps nothing: minutes are credited at the focus->break
@@ -374,21 +381,26 @@ func cmdCancel(args []string) error {
 // afterStart re-reads the desk so the confirmation quotes the length the
 // server actually stored (it clamps), then hands over to the countdown when
 // --watch asked for it.
-func afterStart(c *client, watch bool, message string) error {
-	desk, err := c.desk()
+func afterStart(watch bool, message string) error {
+	if watch {
+		return runDashboard(true)
+	}
+	s, _, err := openDeskSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	desk, err := s.Load()
 	if err != nil {
 		return err
 	}
 	if desk.SoloTimer == nil {
 		return errors.New("the server did not start a timer — try `junkie status`")
 	}
-	if watch {
-		return watchTimer(c)
-	}
 	fmt.Printf("%s · %s · ends at %s\n", message,
 		formatDuration(desk.SoloTimer.SecondsLeft),
 		desk.SoloTimer.EndsAt.Local().Format("15:04"))
-	fmt.Println(styleFaint.Render("`junkie watch` to follow it, `junkie status` to check in."))
+	fmt.Println(styleFaint.Render("`junkie watch` to follow it, `junkie` to open the desk."))
 	return nil
 }
 
@@ -396,11 +408,7 @@ func cmdWatch(args []string) error {
 	if len(args) > 0 {
 		return errors.New("usage: junkie watch")
 	}
-	c, _, err := authed()
-	if err != nil {
-		return err
-	}
-	return watchTimer(c)
+	return runDashboard(true)
 }
 
 // optionalMinutes reads the one positional argument these commands take.
