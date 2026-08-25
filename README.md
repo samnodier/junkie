@@ -229,7 +229,7 @@ The countdown fits itself to the window, so a terminal parked down the side of a
 
 Every read command takes `--json`. Piped output is never truncated and `junkie` on its own prints the status instead of opening the full-screen desk, so it stays usable from a script.
 
-`JUNKIE_URL` points a command at another server — a local one, say — without disturbing the login you already have. `JUNKIE_CONFIG` moves the config file.
+`JUNKIE_URL` points a command at another server — a local one, say — without disturbing the login you already have. `JUNKIE_CONFIG` moves the config file, and `JUNKIE_DATA` the guest todos and timer.
 
 ### Not in the terminal
 
@@ -300,6 +300,27 @@ postgres://junkie:junkie@localhost:5432/junkie?sslmode=disable
 ```
 
 Override it with `DATABASE_URL` if needed. Migrations in `migrations/` run automatically at startup.
+
+### Terminal client
+
+The terminal client is a second binary in the same module, so it builds from the same checkout:
+
+```sh
+go build -o /tmp/junkie-dev/bin/junkie ./cmd/junkie-cli
+export PATH=/tmp/junkie-dev/bin:$PATH
+```
+
+Build it *as* `junkie` rather than letting `go build` name it after the directory. The released binary is called `junkie`, and `junkie-cli` is an artefact of the source layout that no user ever sees. Keep it out of the repo root as well — `./junkie` is where the server's own build output lands.
+
+Give it its own config and guest data and it will leave the session and files you use day to day alone:
+
+```sh
+export JUNKIE_URL=http://localhost:8080
+export JUNKIE_CONFIG=/tmp/junkie-dev/config.json
+export JUNKIE_DATA=/tmp/junkie-dev/data
+```
+
+Guest mode talks to no server, so the desk and `junkie focus` work with nothing else running; `JUNKIE_URL` only matters once you sign in. To watch a block turn over without sitting out the clock, rewrite its end time — `endsAt` in `$JUNKIE_DATA/timer.json` for a guest block, or `phase_ends_at` on the open `timer_runs` row for a signed-in one.
 
 ### Tests
 
