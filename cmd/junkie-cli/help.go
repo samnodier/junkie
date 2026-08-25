@@ -44,6 +44,10 @@ func commands() []command {
 			detail: `Asks for your username and password — the same ones you use on the web —
 and stores the session in ~/.config/junkie/config.json (mode 0600).
 
+In a terminal it then opens the desk, signed in. Piped, it prints the
+confirmation and stops, so a script can sign in without hanging in a
+full-screen program.
+
 You stay signed in across terminals and reboots for 30 days from the moment
 you sign in. The session does not renew as you use it, so about once a month
 you will be asked again. Changing your password anywhere ends it early,
@@ -72,11 +76,12 @@ who typed logout should not be left holding a live session on disk.`,
 			run:     cmdFocus,
 			detail: `Starts a private block of MINUTES minutes (5–180, default 50).
 
-The server owns the clock, so the block keeps running whether or not this
-terminal stays open, and the minutes are credited when it completes. A block
-started here shows up on the web mid-countdown, and vice versa.
+Without an account this runs on this machine only. Signed in, the server
+owns the clock, so the block keeps running whether or not this terminal
+stays open, and the minutes are credited when it completes. A block started
+here shows up on the web mid-countdown, and vice versa.
 
-  --watch    stay and draw the countdown full-screen`,
+  --watch    stay in the desk, timer pane filling the window`,
 		},
 		{
 			name: "break", group: groupFocus, args: "[MINUTES]",
@@ -90,7 +95,7 @@ An offered break left untouched for an hour is treated as walked away from:
 the run ends and the next visit starts fresh. The focus minutes were already
 banked at the end of the block, so nothing is lost.
 
-  --watch    stay and draw the countdown full-screen`,
+  --watch    stay in the desk, timer pane filling the window`,
 		},
 		{
 			name: "skip", group: groupFocus,
@@ -109,12 +114,14 @@ nothing. Use it when you're abandoning the session, not when you're done.`,
 		},
 		{
 			name: "watch", group: groupFocus,
-			summary: "the running block, full-screen",
+			summary: "the desk, timer pane filling the window",
 			run:     cmdWatch,
-			detail: `Draws the countdown and nothing else. Sized to the window, so a terminal
-parked down the side of a screen works: it steps down to smaller digits, then
-to a line of text, then to the numbers alone.
+			detail: `The same program as bare ` + "`junkie`" + `, with the countdown taking the
+window. Sized to the terminal, so a strip parked down the side of a screen
+works: it steps down to smaller digits, then to a line of text, then to the
+numbers alone.
 
+No block running is fine — f starts one. Esc returns to the full desk.
 q quits. The block keeps running either way.`,
 		},
 		{
@@ -140,12 +147,16 @@ puts you in straight away.`,
 			name: "dash", aliases: []string{"desk"}, group: groupLooking,
 			summary: "open the desk full-screen (same as bare `junkie`)",
 			run:     cmdDash,
-			detail: `The timer, your todos and your rooms on one screen, kept live.
+			detail: `The timer, your todos and your rooms on one screen, kept live. No account
+is required: without one this is a guest desk on this machine. L signs in
+to sync with the same account the web uses.
 
   f b s c    start focus · take the break · skip it · cancel
   j k        move down and up the list
   space      complete or un-complete
   a e d u    add · edit · remove · undo the last remove
+  w          timer pane fills the window (` + "`junkie watch`" + `)
+  L          sign in (guest)
   y n        answer a room's join prompt
   r q        refresh · quit
 
@@ -257,7 +268,7 @@ func writeOverview(w io.Writer) {
 	fmt.Fprint(w, `
   junkie — shared focus, in the terminal
 
-  junkie                        open the desk full-screen
+  junkie                        open the desk (no account needed)
   junkie help <command>         what that command does
 
 `)
@@ -281,6 +292,7 @@ func writeOverview(w io.Writer) {
 	fmt.Fprint(w, `  Environment
     JUNKIE_URL                 talk to a different server for one command
     JUNKIE_CONFIG              use a different config file
+    JUNKIE_DATA                keep guest todos and timer somewhere else
 
 `)
 }

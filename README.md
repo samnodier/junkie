@@ -144,7 +144,9 @@ Both are the same app pointing at the hosted site; the APK just wraps it so ther
 
 ## Terminal client
 
-junkie also runs in the terminal, against the same account and the same rooms. A block you start here shows up on the web mid-countdown, and one you start on the web can be finished here — the server owns the clock either way, so closing the terminal never loses a block.
+junkie also runs in the terminal. Bare `junkie` opens a full-screen desk you stay in — the countdown, your todos, and (once signed in) your rooms. No account is required: without one it is a guest desk on this machine, the same idea as the browser guest mode. Sign in to sync with the cloud account the web uses.
+
+A block you start while signed in shows up on the web mid-countdown, and one you start on the web can be finished here — the server owns the clock either way, so closing the terminal never loses a block. Guest blocks live in `~/.local/share/junkie/` and likewise survive quitting; they are not copied into an account if you sign in later.
 
 ### Install
 
@@ -164,17 +166,19 @@ That names the binary `junkie-cli`, because `go install` takes the name from the
 
 ### Signing in
 
+You do not have to. `junkie` on its own opens a guest desk. Press `L` there, or run:
+
 ```sh
 junkie login
 ```
 
-It asks for your username and password — the same ones you use on the web — and stores the session in `~/.config/junkie/config.json`, mode `0600`. You stay signed in across terminals and reboots until the session expires **30 days after you signed in**; it does not renew as you use it, so roughly once a month you will be asked to sign in again. `junkie logout` ends it immediately, on the server as well as on disk.
+It asks for your username and password — the same ones you use on the web — and stores the session in `~/.config/junkie/config.json`, mode `0600`. In a terminal it then opens the desk signed in. You stay signed in across terminals and reboots until the session expires **30 days after you signed in**; it does not renew as you use it, so roughly once a month you will be asked to sign in again. `junkie logout` ends it immediately, on the server as well as on disk.
 
 Changing your password anywhere signs the terminal out too, because that ends every other session on the account.
 
 ### The desk
 
-Run `junkie` on its own and you get the desk full-screen: the timer, your todos, and what your rooms are doing, all live.
+Run `junkie` on its own and you get the desk full-screen: a live countdown (the same block digits `junkie watch` used to be), your todos, and — signed in — what your rooms are doing. You stay in this program until you quit. A block ending offers the break on the same screen; it does not drop you back to the shell.
 
 | Key | Does |
 | --- | ---- |
@@ -182,6 +186,8 @@ Run `junkie` on its own and you get the desk full-screen: the timer, your todos,
 | `j` `k` | move down and up the todo list |
 | `space` | complete or un-complete |
 | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
+| `w` | timer pane fills the window (same as `junkie watch`; `esc` returns) |
+| `L` | sign in (guest desk) |
 | `y` / `n` | answer a room's join prompt |
 | `r` / `q` | refresh · quit |
 
@@ -195,7 +201,7 @@ When someone starts a block in one of your rooms, the desk asks whether you want
 | `junkie status` | timer, todo counts and room activity, in one glance |
 | `junkie focus [MINUTES]` | start a private block (5–180, default 50) |
 | `junkie break [MINUTES]` · `junkie skip` · `junkie cancel` | take the offered break, skip it, or end the block early |
-| `junkie watch` | the running block, full-screen |
+| `junkie watch` | the desk, timer pane filling the window |
 | `junkie todos` · `junkie rooms` | list them |
 | `junkie stats` | the work map: a year of focused days |
 | `junkie room new NAME` · `junkie room join CODE` | create or join a room |
@@ -227,7 +233,7 @@ Every read command takes `--json`. Piped output is never truncated and `junkie` 
 
 ### Not in the terminal
 
-Avatars, connections and public profiles, the admin space, Discord linking and password reset all stay on the web, where they belong. Guest mode is browser-only by design.
+Avatars, connections and public profiles, the admin space, Discord linking and password reset all stay on the web, where they belong. Guest data in the terminal is this machine only, and does not merge into an account.
 
 ## Discord bot
 
@@ -253,7 +259,7 @@ Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `
 
 ## Where your data lives
 
-**Guest** — todos, solo timer state, and your work map stay in browser `localStorage` on that device. Nothing reaches the server.
+**Guest** — in the browser, todos, solo timer state, and your work map stay in `localStorage` on that device. In the terminal they live in `~/.local/share/junkie/` (`JUNKIE_DATA` to move them). Nothing reaches the server, and the two guest stores do not share.
 
 **Signed in** — everything lives in PostgreSQL and follows you across devices: account and session, todos, timer runs and focus minutes, rooms and their settings, profile pictures, and connections.
 
