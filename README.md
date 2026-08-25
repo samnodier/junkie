@@ -144,7 +144,7 @@ Both are the same app pointing at the hosted site; the APK just wraps it so ther
 
 ## Terminal client
 
-junkie also runs in the terminal. Bare `junkie` opens a full-screen desk you stay in — the countdown, your todos, and (once signed in) your rooms. No account is required: without one it is a guest desk on this machine, the same idea as the browser guest mode. Sign in to sync with the cloud account the web uses.
+junkie also runs in the terminal. Bare `junkie` opens a full-screen desk you stay in — the countdown, your todos, and (once signed in) your rooms, with `tab` moving the countdown between your own block and each room's. No account is required: without one it is a guest desk on this machine, the same idea as the browser guest mode. Sign in to sync with the cloud account the web uses.
 
 A block you start while signed in shows up on the web mid-countdown, and one you start on the web can be finished here — the server owns the clock either way, so closing the terminal never loses a block. Guest blocks live in `~/.local/share/junkie/` and likewise survive quitting; they are not copied into an account if you sign in later.
 
@@ -186,10 +186,25 @@ Run `junkie` on its own and you get the desk full-screen: a live countdown (the 
 | `j` `k` | move down and up the todo list |
 | `space` | complete or un-complete |
 | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
+| `tab` | show the next block: your own, then each room |
 | `w` | timer pane fills the window (same as `junkie watch`; `esc` returns) |
 | `L` | sign in (guest desk) |
 | `y` / `n` | answer a room's join prompt |
 | `r` / `q` | refresh · quit |
+
+### Two blocks at once
+
+Your own block and a room's block run independently — you can be in both — and the countdown shows one at a time. `tab` moves between them: your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
+
+With a room on screen the timer keys act on that room, and two more apply:
+
+| Key | Does |
+| --- | ---- |
+| `f` / `b` / `s` | start a block · take the break · skip it |
+| `i` | I'm in — join the block, or check in for the next one |
+| `x` | leave the block |
+
+You do not have to reach for `tab` in the first place: `junkie` opens on a room whose block is live rather than on a private timer that is not running, and `junkie CODE` opens straight onto one. Answering `y` to a join prompt also brings that room's block to the front, since you just said you were joining it.
 
 When someone starts a block in one of your rooms, the desk asks whether you want in and counts down the 30 seconds you have to answer. Not answering is an answer: the block starts without you. This only reaches you while the desk is open — when you are away, the Discord bot is what notifies you.
 
@@ -198,10 +213,11 @@ When someone starts a block in one of your rooms, the desk asks whether you want
 | Command | Does |
 | ------- | ---- |
 | `junkie` | open the desk full-screen |
+| `junkie CODE` | open the desk on that room's block |
 | `junkie status` | timer, todo counts and room activity, in one glance |
 | `junkie focus [MINUTES]` | start a private block (5–180, default 50) |
 | `junkie break [MINUTES]` · `junkie skip` · `junkie cancel` | take the offered break, skip it, or end the block early |
-| `junkie watch` | the desk, timer pane filling the window |
+| `junkie watch [CODE]` | the desk, timer pane filling the window — yours, or a room's |
 | `junkie todos` · `junkie rooms` | list them |
 | `junkie stats` | the work map: a year of focused days |
 | `junkie room new NAME` · `junkie room join CODE` | create or join a room |

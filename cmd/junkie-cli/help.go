@@ -121,8 +121,12 @@ window. Sized to the terminal, so a strip parked down the side of a screen
 works: it steps down to smaller digits, then to a line of text, then to the
 numbers alone.
 
-No block running is fine — f starts one. Esc returns to the full desk.
-q quits. The block keeps running either way.`,
+  junkie watch          your own block
+  junkie watch CODE     that room's block
+
+Tab moves between them without leaving the window. No block running is fine
+— f starts one. Esc returns to the full desk. q quits. The block keeps
+running either way.`,
 		},
 		{
 			name: "room", group: groupRooms, args: "<command>",
@@ -151,6 +155,7 @@ puts you in straight away.`,
 is required: without one this is a guest desk on this machine. L signs in
 to sync with the same account the web uses.
 
+  tab        show the next block: your own, then each room
   f b s c    start focus · take the break · skip it · cancel
   j k        move down and up the list
   space      complete or un-complete
@@ -160,9 +165,23 @@ to sync with the same account the web uses.
   y n        answer a room's join prompt
   r q        refresh · quit
 
+The countdown shows one block at a time and tab moves between them — your
+private block first, then each room you are in. The room the pane is
+showing is the one marked in the list below it.
+
+With a room on screen the timer keys act on that room, and two more apply:
+
+  f b s      start a block · take the break · skip it
+  i          I'm in — join the block, or check in for the next one
+  x          leave the block
+
+` + "`junkie CODE`" + ` opens the desk on a room directly, and ` + "`junkie watch CODE`" + ` opens it
+with that room's countdown filling the window.
+
 When someone starts a block in one of your rooms, the desk asks whether you
 want in and counts down the 30 seconds you have to answer. Not answering is
-an answer. This only reaches you while the desk is open.`,
+an answer. This only reaches you while the desk is open. Saying yes also
+puts that room's block on screen.`,
 		},
 		{
 			name: "status", aliases: []string{"st"}, group: groupLooking,
@@ -269,6 +288,7 @@ func writeOverview(w io.Writer) {
   junkie — shared focus, in the terminal
 
   junkie                        open the desk (no account needed)
+  junkie CODE                   open the desk on that room's block
   junkie help <command>         what that command does
 
 `)
