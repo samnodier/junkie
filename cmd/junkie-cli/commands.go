@@ -86,7 +86,7 @@ func cmdLogin(args []string) error {
 	if terminalWidth() == 0 {
 		return nil
 	}
-	return runDashboard(false)
+	return runDashboard(false, "")
 }
 
 // insecureURLWarning flags a plaintext server. The password goes over that
@@ -162,10 +162,11 @@ func cmdWhoami(args []string) error {
 }
 
 func cmdDash(args []string) error {
-	if len(args) > 0 {
-		return errors.New("usage: junkie dash")
+	code, err := optionalRoomCode(args, "usage: junkie dash [CODE]")
+	if err != nil {
+		return err
 	}
-	return runDashboard(false)
+	return runDashboard(false, code)
 }
 
 func cmdStatus(args []string) error {
@@ -386,7 +387,7 @@ func cmdCancel(args []string) error {
 // --watch asked for it.
 func afterStart(watch bool, message string) error {
 	if watch {
-		return runDashboard(true)
+		return runDashboard(true, "")
 	}
 	s, _, err := openDeskSession()
 	if err != nil {
@@ -408,10 +409,29 @@ func afterStart(watch bool, message string) error {
 }
 
 func cmdWatch(args []string) error {
-	if len(args) > 0 {
-		return errors.New("usage: junkie watch")
+	code, err := optionalRoomCode(args, "usage: junkie watch [CODE]")
+	if err != nil {
+		return err
 	}
-	return runDashboard(true)
+	return runDashboard(true, code)
+}
+
+// optionalRoomCode reads the room a desk command should open on. Codes are
+// normalized the way `junkie room` normalizes them, so pasting a room's URL
+// works here too.
+func optionalRoomCode(args []string, usage string) (string, error) {
+	switch len(args) {
+	case 0:
+		return "", nil
+	case 1:
+		code := normalizeCode(args[0])
+		if code == "" {
+			return "", errors.New(usage)
+		}
+		return code, nil
+	default:
+		return "", errors.New(usage)
+	}
 }
 
 // optionalMinutes reads the one positional argument these commands take.

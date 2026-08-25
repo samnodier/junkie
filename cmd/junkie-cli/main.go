@@ -57,6 +57,13 @@ func run(args []string) error {
 
 	cmd, ok := find(name)
 	if !ok {
+		// `junkie ABC-123` opens the desk on that room. Only an argument
+		// shaped like a code is read this way — no command name contains a
+		// dash or a slash — so a mistyped command is still a mistyped
+		// command rather than a room nobody is in.
+		if looksLikeRoomCode(name) && len(rest) == 0 {
+			return cmdDash([]string{name})
+		}
 		writeOverview(os.Stderr)
 		return fmt.Errorf("unknown command %q", name)
 	}
@@ -113,4 +120,18 @@ func flagValue(args []string, name string) ([]string, string) {
 		}
 	}
 	return out, value
+}
+
+// looksLikeRoomCode is deliberately about shape, not validity: whether this
+// argument was meant as a room, not whether the room exists. Being wrong
+// costs a clear "you're not in that room" from the desk command.
+func looksLikeRoomCode(arg string) bool {
+	if strings.Contains(arg, "/r/") {
+		return true
+	}
+	if !strings.Contains(arg, "-") {
+		return false
+	}
+	// Not a flag, and not something with spaces in it.
+	return !strings.HasPrefix(arg, "-") && !strings.ContainsAny(arg, " \t")
 }

@@ -62,6 +62,14 @@ type dashModel struct {
 	desk deskResponse
 	countdown
 
+	// subject is which timer the pane draws — the private block, or a room
+	// by its code. See subject.go: being in a room and in your own block at
+	// once used to mean only ever seeing the latter.
+	subject string
+	// picked records that the user chose the subject themselves, so a
+	// refresh never moves the pane out from under them.
+	picked bool
+
 	refreshing  bool
 	lastRefresh time.Time
 	err         error
@@ -139,8 +147,20 @@ func newDashModel(s store, id identity, desk deskResponse) *dashModel {
 		width:       80,
 		height:      24,
 	}
+	m.subject = openingSubject(desk, "")
 	m.anchor()
 	return m
+}
+
+// openOn puts the desk in front of one room, for `junkie watch CODE` and
+// `junkie dash CODE`. An unknown code is refused by the caller before this
+// is reached, so a subject set here is one the desk knows about.
+func (m *dashModel) openOn(code string) {
+	if code == "" {
+		return
+	}
+	m.picked = true
+	m.selectSubject(code)
 }
 
 func deskRoomCodes(desk deskResponse) []string {
@@ -165,10 +185,11 @@ func sameCodes(a, b []string) bool {
 	return true
 }
 
-// anchor re-bases the countdown whenever a fresh desk arrives.
+// anchor re-bases the countdown whenever a fresh desk arrives, or the
+// subject changes — the digits belong to whichever block the pane is on.
 func (m *dashModel) anchor() {
-	if m.desk.SoloTimer != nil {
-		m.countdown.reset(m.desk.SoloTimer.SecondsLeft)
+	if f := m.currentFace(); f.counting() {
+		m.countdown.reset(f.SecondsLeft)
 	}
 }
 
@@ -283,8 +304,7 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prompt = nil
 			m.note("the lobby closed — you're not in that block")
 		}
-		t := m.desk.SoloTimer
-		expired := t != nil && !t.BreakPending && m.countdown.remaining() <= 0
+		expired := m.currentFace().counting() && m.countdown.remaining() <= 0
 		stale := time.Since(m.lastRefresh) >= dashRefreshInterval
 		if !m.refreshing && (expired || stale) {
 			m.refreshing = true
@@ -302,6 +322,10 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = nil
 		m.desk = msg.desk
+		if !m.picked {
+			m.subject = openingSubject(m.desk, m.subject)
+		}
+		m.settleSubject()
 		m.anchor()
 		m.clampCursor()
 		return m, nil
@@ -410,6 +434,9 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "y", "Y":
 			code := m.prompt.code
 			m.prompt = nil
+			// You said yes to that block, so it becomes the one on screen.
+			m.picked = true
+			m.selectSubject(code)
 			return m, m.do("/r/"+code+"/timer-join", nil, "joined "+code)
 		case "n", "N":
 			m.prompt = nil
@@ -417,10 +444,23 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if room, ok := m.currentRoom(); ok {
+		if handled, model, cmd := m.handleRoomKey(msg, room); handled {
+			return model, cmd
+		}
+	}
 	t := m.desk.SoloTimer
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "tab":
+		m.picked = true
+		m.cycleSubject(1)
+		return m, nil
+	case "shift+tab":
+		m.picked = true
+		m.cycleSubject(-1)
+		return m, nil
 	case "esc":
 		if m.zoom {
 			m.zoom = false
@@ -525,6 +565,64 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.do("/todo/"+id+"/restore", nil, "restored")
 	}
 	return m, nil
+}
+
+// handleRoomKey is what the timer keys mean while a room is the subject.
+// They are the same keys as the private block's, pointed at the room's
+// endpoints — the ones that have no private equivalent (i, x) are the two
+// a shared block adds: getting in, and getting out.
+//
+// It reports whether it took the key, so everything it does not claim —
+// the todo list, tab, quit — still works with a room on screen.
+func (m *dashModel) handleRoomKey(msg tea.KeyMsg, room deskRoom) (bool, tea.Model, tea.Cmd) {
+	t := room.Timer
+	base := "/r/" + room.Code + "/"
+	switch msg.String() {
+	case "f":
+		if t != nil {
+			m.note(room.Code + " already has a block running")
+			return true, m, nil
+		}
+		return true, m, m.do(base+"timer-start", nil, "block started in "+room.Code+" — 30 seconds to join")
+	case "b":
+		if t == nil || !t.BreakPending {
+			m.note("no break is waiting in " + room.Code)
+			return true, m, nil
+		}
+		// No minutes: the server falls back to the room's own break
+		// length, which is the setting the room agreed on.
+		return true, m, m.do(base+"timer-break-length", nil, "break started in "+room.Code)
+	case "s":
+		if t == nil || t.Phase != "break" {
+			m.note("there is no break to skip in " + room.Code)
+			return true, m, nil
+		}
+		return true, m, m.do(base+"timer-skip-break", nil, "break skipped in "+room.Code)
+	case "i":
+		if t == nil {
+			// Not a no-op: with nothing running, joining queues you for
+			// whenever someone does start one.
+			return true, m, m.do(base+"timer-join", nil, "waiting in "+room.Code+" — you're in when it starts")
+		}
+		// Joining during a break is also the check-in, but only for
+		// someone not already in the block; a participant confirming they
+		// are staying has its own endpoint.
+		if t.Participant {
+			if t.Phase != "break" && !t.BreakPending {
+				m.note("you're already in this block")
+				return true, m, nil
+			}
+			return true, m, m.do(base+"timer-checkin", nil, "checked in for the next block")
+		}
+		return true, m, m.do(base+"timer-join", nil, "joining "+room.Code)
+	case "x":
+		if t == nil || !t.Participant {
+			m.note("you're not in a block in " + room.Code)
+			return true, m, nil
+		}
+		return true, m, m.do(base+"timer-leave", nil, "left the block in "+room.Code)
+	}
+	return false, m, nil
 }
 
 // handleEditKey drives the one-line field for adding and editing todos.
@@ -713,7 +811,9 @@ func (m *dashModel) promptBanner() string {
 
 func (m *dashModel) timerHeight() int {
 	if m.zoom {
-		used := lipgloss.Height(m.header()) + 1
+		// Header, the blank line under it, and the footer row that carries
+		// errors and notes.
+		used := lipgloss.Height(m.header()) + 2
 		if m.prompt != nil {
 			used += 2
 		}
@@ -723,7 +823,7 @@ func (m *dashModel) timerHeight() int {
 		}
 		return h
 	}
-	if m.desk.SoloTimer == nil {
+	if m.currentFace() == nil {
 		return 1
 	}
 	switch {
@@ -740,7 +840,7 @@ func (m *dashModel) timerHeight() int {
 
 func (m *dashModel) timerFace() *watchModel {
 	return &watchModel{
-		timer:     m.desk.SoloTimer,
+		timer:     m.currentFace(),
 		countdown: m.countdown,
 		width:     m.width,
 		height:    m.timerHeight(),
@@ -825,7 +925,13 @@ func (m *dashModel) roomBlock(rows int) string {
 		if shown >= rows-1 {
 			break
 		}
-		b.WriteString("  " + roomLine(room, m.width-2) + "\n")
+		// The same cursor the todo list uses, for the same reason: it says
+		// which line the countdown above belongs to.
+		cursor := "  "
+		if room.Code == m.subject {
+			cursor = styleAccent.Render("› ")
+		}
+		b.WriteString(cursor + roomLine(room, m.width-2) + "\n")
 		shown++
 	}
 	if shown == 0 {
@@ -848,25 +954,17 @@ func (m *dashModel) footer() string {
 		return styleWarn.Render(clip(m.status, m.width))
 	}
 	if m.zoom {
-		return styleFaint.Render(clip(zoomKeys(m.width), m.width))
+		// The pane draws its own key line at this size; repeating it here
+		// would be two footers arguing. Errors and notes are handled above.
+		return ""
 	}
 	if m.identity.Guest {
 		return styleFaint.Render(clip(guestDashKeys(m.width), m.width))
 	}
-	return styleFaint.Render(clip(dashKeys(m.width), m.width))
-}
-
-// zoomKeys is the footer while the timer pane fills the window.
-func zoomKeys(width int) string {
-	const full = "esc desk · f focus · b break · s skip · c cancel · q quit"
-	const short = "esc desk · f focus · q quit"
-	if width >= len([]rune(full)) {
-		return full
+	if _, ok := m.currentRoom(); ok {
+		return styleFaint.Render(clip(roomDashKeys(m.width), m.width))
 	}
-	if width >= len([]rune(short)) {
-		return short
-	}
-	return "q quit"
+	return styleFaint.Render(clip(dashKeys(m.width, len(m.desk.Rooms) > 0), m.width))
 }
 
 func guestDashKeys(width int) string {
@@ -887,10 +985,18 @@ func guestDashKeys(width int) string {
 
 // dashKeys names what the keys do, at whatever length fits. The short forms
 // are written out rather than cut mid-word.
-func dashKeys(width int) string {
-	const full = "j/k move · space done · a add · e edit · d remove · f focus · b break · q quit"
-	const medium = "j/k move · space done · a add · f focus · b break · q quit"
-	const short = "j/k · space · a add · f focus · q quit"
+// dashKeys is the footer over the private block. Tab is only named when
+// there is a room to move to — an account with none has nowhere to go, and
+// a key that does nothing is worse than a key nobody was told about.
+func dashKeys(width int, rooms bool) string {
+	full := "j/k move · space done · a add · e edit · d remove · f focus · b break · q quit"
+	medium := "j/k move · space done · a add · f focus · b break · q quit"
+	short := "j/k · space · a add · f focus · q quit"
+	if rooms {
+		full = "j/k move · space done · a add · e edit · d remove · f focus · b break · tab room · q quit"
+		medium = "j/k move · space done · a add · f focus · b break · tab room · q quit"
+		short = "j/k · space · a add · f focus · tab · q quit"
+	}
 	switch {
 	case width >= len([]rune(full)):
 		return full
@@ -910,7 +1016,7 @@ const editKeys = "enter save · esc cancel · ctrl+u clear"
 // runDashboard opens the desk full-screen. zoom is `junkie watch`: the
 // timer pane takes the window, but it is the same program and a run ending
 // does not quit it.
-func runDashboard(zoom bool) error {
+func runDashboard(zoom bool, want string) error {
 	s, id, err := openDeskSession()
 	if errors.Is(err, errSessionExpired) {
 		s, err = openLocalStore()
@@ -927,8 +1033,43 @@ func runDashboard(zoom bool) error {
 	if err != nil {
 		return err
 	}
+	if want != "" && !hasRoom(desk, want) {
+		return fmt.Errorf("you're not in %s — `junkie rooms` lists the ones you are", want)
+	}
 	m := newDashModel(s, id, desk)
+	m.openOn(want)
 	m.zoom = zoom
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
+}
+
+// roomDashKeys is the footer while a room is the subject. The timer keys
+// are the same letters as the private block's — they act on the room
+// instead — plus the two only a shared block has.
+func roomDashKeys(width int) string {
+	const full = "tab room · f start · i I'm in · b break · s skip · x leave · a add · q quit"
+	const medium = "tab room · f start · i I'm in · s skip · x leave · q quit"
+	const short = "tab · f start · i in · x leave · q quit"
+	switch {
+	case width >= len([]rune(full)):
+		return full
+	case width >= len([]rune(medium)):
+		return medium
+	case width >= len([]rune(short)):
+		return short
+	default:
+		return "q quit"
+	}
+}
+
+// hasRoom reports whether a code names a room on this desk. Opening
+// straight onto a room you are not in would show an empty pane and no way
+// to tell why, so the command says so instead.
+func hasRoom(desk deskResponse, code string) bool {
+	for _, room := range desk.Rooms {
+		if room.Code == code {
+			return true
+		}
+	}
+	return false
 }

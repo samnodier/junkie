@@ -13,7 +13,9 @@ import (
 // screen, not a reason to quit.
 
 type watchModel struct {
-	timer *soloTimer
+	// timer is whichever block is being watched, flattened by face: the
+	// pane draws a room's run and a private one the same way.
+	timer *face
 
 	countdown
 
@@ -25,7 +27,7 @@ type watchModel struct {
 	chrome bool
 }
 
-func newWatchModel(t *soloTimer) *watchModel {
+func newWatchModel(t *face) *watchModel {
 	secs := 0
 	if t != nil {
 		secs = t.SecondsLeft
@@ -42,7 +44,7 @@ func newWatchModel(t *soloTimer) *watchModel {
 // remaining is the countdown's single source of truth for the display. A
 // pending break has no deadline — it is an offer — so it counts nothing.
 func (m *watchModel) remaining() int {
-	if m.timer == nil || m.timer.BreakPending {
+	if !m.timer.counting() {
 		return 0
 	}
 	return m.countdown.remaining()
@@ -55,6 +57,15 @@ func (m *watchModel) View() string {
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 		}
 		return msg + "\n"
+	}
+	if m.timer.Phase == "" {
+		// An idle room: there is no countdown to draw, so the pane says
+		// what the room is and what would start it.
+		card := lipgloss.JoinVertical(lipgloss.Center, m.viewIdle()...)
+		if m.chrome {
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
+		}
+		return lipgloss.Place(m.width, 0, lipgloss.Center, lipgloss.Top, card)
 	}
 	tier := tierFor(m.width, m.height)
 	var body []string
@@ -89,6 +100,10 @@ func (m *watchModel) countdownText() string {
 	if m.timer.BreakPending {
 		return fmt.Sprintf("%02d:00", m.timer.BreakMinutes)
 	}
+	if m.timer.Phase == "" {
+		// An idle room has no number at all; the pane says so in words.
+		return ""
+	}
 	return formatDuration(m.remaining())
 }
 
@@ -112,7 +127,11 @@ func (m *watchModel) digits(scale int) []string {
 
 func (m *watchModel) viewFull() []string {
 	colour := m.phaseStyle()
-	body := []string{colour.Bold(true).Render(strings.ToUpper(phaseLabel(m.timer))), ""}
+	var body []string
+	if title := m.titleLine(); title != "" {
+		body = append(body, title)
+	}
+	body = append(body, colour.Bold(true).Render(strings.ToUpper(m.timer.Label)), "")
 
 	if rows := m.digits(2); rows != nil {
 		body = append(body, colour.Render(strings.Join(rows, "\n")))
@@ -124,7 +143,7 @@ func (m *watchModel) viewFull() []string {
 	if m.timer.BreakPending {
 		body = append(body, styleFaint.Render(pendingHint(m.width)))
 	} else {
-		total := phaseSeconds(m.timer)
+		total := m.timer.TotalSeconds
 		barWidth := clamp(m.width-20, 10, 48)
 		body = append(body,
 			colour.Render(progressBar(elapsedFraction(m.remaining(), total), barWidth))+
@@ -133,12 +152,15 @@ func (m *watchModel) viewFull() []string {
 			body = append(body, "", styleFaint.Render("ends at "+m.timer.EndsAt.Local().Format("15:04")))
 		}
 	}
+	if m.timer.Note != "" {
+		body = append(body, "", styleFaint.Render(clip(m.timer.Note, m.width)))
+	}
 
 	if m.err != nil {
 		body = append(body, "", styleDanger.Render(clip("offline: "+m.err.Error(), m.width)))
 	}
 	if m.chrome {
-		body = append(body, "", styleFaint.Render(helpLine(m.width)))
+		body = append(body, "", styleFaint.Render(helpLine(m.width, m.timer.Title != "")))
 	}
 	return body
 }
@@ -148,7 +170,11 @@ func (m *watchModel) viewFull() []string {
 // number is the whole message.
 func (m *watchModel) viewCompact() []string {
 	colour := m.phaseStyle()
-	body := []string{colour.Bold(true).Render(strings.ToUpper(phaseLabel(m.timer))), ""}
+	var body []string
+	if title := m.titleLine(); title != "" {
+		body = append(body, title)
+	}
+	body = append(body, colour.Bold(true).Render(strings.ToUpper(m.timer.Label)), "")
 
 	if rows := m.digits(1); rows != nil {
 		body = append(body, colour.Render(strings.Join(rows, "\n")))
@@ -161,7 +187,7 @@ func (m *watchModel) viewCompact() []string {
 	}
 	barWidth := clamp(m.width-6, 6, 24)
 	return append(body, "",
-		colour.Render(progressBar(elapsedFraction(m.remaining(), phaseSeconds(m.timer)), barWidth)))
+		colour.Render(progressBar(elapsedFraction(m.remaining(), m.timer.TotalSeconds), barWidth)))
 }
 
 // viewMini is two lines of plain text — no glyphs would fit, and a strip
@@ -169,7 +195,7 @@ func (m *watchModel) viewCompact() []string {
 func (m *watchModel) viewMini() []string {
 	colour := m.phaseStyle()
 	return []string{
-		colour.Render(clip(phaseLabel(m.timer), m.width)),
+		colour.Render(clip(m.timer.Label, m.width)),
 		colour.Bold(true).Render(shortenCountdown(m.countdownText(), m.width)),
 	}
 }
@@ -191,9 +217,15 @@ func shortenCountdown(text string, width int) string {
 // helpLine and pendingHint carry the same message at two lengths. Cutting
 // the sentence short mid-word would be worse than saying less, so the short
 // forms are written out rather than truncated.
-func helpLine(width int) string {
-	const full = "esc desk · q quit · the block keeps running either way"
-	const short = "esc desk · q quit"
+func helpLine(width int, room bool) string {
+	full := "esc desk · q quit · the block keeps running either way"
+	short := "esc desk · q quit"
+	if room {
+		// A room's block has somewhere else to be — the next room, or your
+		// own timer — and two actions the private block has no version of.
+		full = "esc desk · tab next · i I'm in · x leave · q quit"
+		short = "esc desk · tab next · q quit"
+	}
 	if width >= len([]rune(full)) {
 		return full
 	}
@@ -223,4 +255,35 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// titleLine names the room a block belongs to. The private block has no
+// title: it is the only one that is nobody else's.
+func (m *watchModel) titleLine() string {
+	if m.timer == nil || m.timer.Title == "" {
+		return ""
+	}
+	label := m.timer.Title
+	if m.timer.Code != "" {
+		label += " · " + m.timer.Code
+	}
+	return styleFaint.Render(clip(label, m.width))
+}
+
+// viewIdle is a room with nothing running. It is deliberately not the
+// "no block running" line the private timer shows — that one is about you,
+// and this one is about a room you can start.
+func (m *watchModel) viewIdle() []string {
+	body := []string{}
+	if title := m.titleLine(); title != "" {
+		body = append(body, title, "")
+	}
+	body = append(body, styleFaint.Render(clip("idle", m.width)))
+	if m.timer.Note != "" {
+		body = append(body, "", styleFaint.Render(clip(m.timer.Note, m.width)))
+	}
+	if m.height > 4 {
+		body = append(body, "", styleFaint.Render(clip("f starts a block here", m.width)))
+	}
+	return body
 }

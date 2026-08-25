@@ -18,7 +18,7 @@ func focusTimer(secondsLeft int) *soloTimer {
 // monotonic time, not on the deadline in wall-clock terms: that is what
 // makes it immune to clock skew between this machine and the server.
 func TestWatchRemainingCountsDownFromServerReading(t *testing.T) {
-	m := newWatchModel(focusTimer(1500))
+	m := newWatchModel(soloFace(focusTimer(1500)))
 	if got := m.remaining(); got != 1500 {
 		t.Errorf("remaining at t=0 is %d, want 1500", got)
 	}
@@ -36,7 +36,7 @@ func TestWatchRemainingCountsDownFromServerReading(t *testing.T) {
 // A pending break is an offer with no deadline; counting it down would be
 // inventing a clock the server does not have.
 func TestWatchPendingBreakHasNoCountdown(t *testing.T) {
-	m := newWatchModel(&soloTimer{Phase: "break", BreakMinutes: 10, BreakPending: true})
+	m := newWatchModel(soloFace(&soloTimer{Phase: "break", BreakMinutes: 10, BreakPending: true}))
 	m.countdown.fetchedAt = time.Now().Add(-time.Hour)
 	if got := m.remaining(); got != 0 {
 		t.Errorf("pending break remaining = %d, want 0", got)
@@ -51,7 +51,7 @@ func TestWatchIdleInvitesAStart(t *testing.T) {
 }
 
 func TestWatchViewShowsCountdown(t *testing.T) {
-	m := newWatchModel(focusTimer(1500))
+	m := newWatchModel(soloFace(focusTimer(1500)))
 	view := m.View()
 	if !strings.Contains(view, "FOCUS") {
 		t.Errorf("view missing the phase:\n%s", view)
@@ -65,7 +65,7 @@ func TestWatchViewShowsCountdown(t *testing.T) {
 }
 
 func TestWatchOfflineIsShown(t *testing.T) {
-	m := newWatchModel(focusTimer(300))
+	m := newWatchModel(soloFace(focusTimer(300)))
 	m.err = errors.New("network down")
 	if !strings.Contains(m.View(), "offline") {
 		t.Error("the view should show the offline state")
@@ -73,8 +73,8 @@ func TestWatchOfflineIsShown(t *testing.T) {
 }
 
 func TestWatchRefreshAdoptsTheNewPhase(t *testing.T) {
-	m := newWatchModel(focusTimer(0))
-	m.timer = &soloTimer{Phase: "break", BreakMinutes: 10, BreakPending: true}
+	m := newWatchModel(soloFace(focusTimer(0)))
+	m.timer = soloFace(&soloTimer{Phase: "break", BreakMinutes: 10, BreakPending: true})
 	if !strings.Contains(m.View(), "BREAK READY") {
 		t.Errorf("view should show the break offer:\n%s", m.View())
 	}

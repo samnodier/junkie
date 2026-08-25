@@ -88,18 +88,18 @@ func TestDashNarrowDropsTheBar(t *testing.T) {
 }
 
 func TestDashKeys(t *testing.T) {
-	if !strings.Contains(dashKeys(100), "d remove") {
+	if !strings.Contains(dashKeys(100, false), "d remove") {
 		t.Error("a wide footer should name every key")
 	}
-	if got := dashKeys(60); strings.Contains(got, "d remove") || !strings.Contains(got, "a add") {
+	if got := dashKeys(60, false); strings.Contains(got, "d remove") || !strings.Contains(got, "a add") {
 		t.Errorf("a medium footer should shorten, got %q", got)
 	}
-	if got := dashKeys(10); got != "q quit" {
+	if got := dashKeys(10, false); got != "q quit" {
 		t.Errorf("a narrow footer = %q", got)
 	}
 	// Whatever the width, the footer must fit the window it is drawn in.
 	for _, width := range []int{10, 20, 40, 60, 80, 100, 200} {
-		if got := len([]rune(dashKeys(width))); got > width && width >= 10 {
+		if got := len([]rune(dashKeys(width, true))); got > width && width >= 10 {
 			t.Errorf("width %d: hints are %d wide", width, got)
 		}
 	}
