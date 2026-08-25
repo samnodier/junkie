@@ -44,8 +44,16 @@ type sockets struct {
 // connection, because a server that is asleep (Render's free tier) must not
 // hold up the screen.
 func openSockets(c *client, rooms []string) *sockets {
+	return openSocketsOnto(c, rooms, make(chan signal, 32))
+}
+
+// openSocketsOnto is the same subscription, writing onto a channel the
+// caller already owns. The cloud store keeps one events pipe for the life
+// of the desk so a room-list change can tear the sockets down without
+// orphaning the listener waiting on the other side.
+func openSocketsOnto(c *client, rooms []string, events chan signal) *sockets {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &sockets{events: make(chan signal, 32), cancel: cancel}
+	s := &sockets{events: events, cancel: cancel}
 
 	s.listen(ctx, c, "/ws/me", "")
 	for _, code := range rooms {
