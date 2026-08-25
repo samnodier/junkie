@@ -612,6 +612,31 @@ func TestDashSurvivesARefreshFailure(t *testing.T) {
 	}
 }
 
+func TestDashGuestOpensLogin(t *testing.T) {
+	t.Setenv("JUNKIE_CONFIG", t.TempDir()+"/config.json")
+	m := dashAt(80, 24)
+	m.identity.Guest = true
+	m.user = "guest"
+	press(m, "L")
+	if m.login == nil {
+		t.Fatal("L should open sign-in for a guest")
+	}
+	if !strings.Contains(m.View(), "sign in") {
+		t.Errorf("expected the sign-in screen:\n%s", m.View())
+	}
+	press(m, "q", "u", "i", "t")
+	if m.login == nil {
+		t.Fatal("typing q on the sign-in screen should not quit")
+	}
+	if got := string(m.login.username); got != "quit" {
+		t.Errorf("typed %q", got)
+	}
+	press(m, "esc")
+	if m.login != nil {
+		t.Fatal("esc should close sign-in")
+	}
+}
+
 func TestDashRefreshesWhenTheClockRunsOut(t *testing.T) {
 	m := dashAt(80, 24)
 	m.desk.SoloTimer.SecondsLeft = 0

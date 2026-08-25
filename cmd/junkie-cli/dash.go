@@ -87,6 +87,8 @@ type dashModel struct {
 	// to the desk; a run ending does not.
 	zoom bool
 
+	login *loginForm
+
 	width, height int
 }
 
@@ -307,6 +309,9 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case signal:
 		return m.handleSignal(msg)
 
+	case loginResultMsg:
+		return m.handleLogin(msg)
+
 	case actionMsg:
 		if msg.err != nil {
 			m.note(msg.err.Error())
@@ -389,6 +394,9 @@ func bell() tea.Cmd {
 }
 
 func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.login != nil {
+		return m.handleLoginKey(msg)
+	}
 	// While a line is being typed, every key belongs to it — otherwise a
 	// todo containing "q" would quit the program mid-word.
 	if m.editing != nil {
@@ -421,6 +429,14 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "w":
 		m.zoom = !m.zoom
+		return m, nil
+	case "L":
+		if !m.identity.Guest {
+			m.note("already signed in")
+			return m, nil
+		}
+		cfg, _ := loadConfig()
+		m.login = newLoginForm(firstNonEmpty(m.identity.BaseURL, cfg.BaseURL), cfg.Username)
 		return m, nil
 	case "r":
 		if m.refreshing {
@@ -545,7 +561,62 @@ func (m *dashModel) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *dashModel) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.login.busy {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.login = nil
+		return m, nil
+	case "enter":
+		return m, m.login.submit()
+	case "tab", "down":
+		m.login.field = (m.login.field + 1) % 2
+		return m, nil
+	case "shift+tab", "up":
+		m.login.field = (m.login.field + 1) % 2
+		return m, nil
+	}
+	switch msg.Type {
+	case tea.KeyBackspace:
+		m.login.backspace()
+	case tea.KeySpace:
+		m.login.insert([]rune{' '})
+	case tea.KeyRunes:
+		m.login.insert(msg.Runes)
+	}
+	return m, nil
+}
+
+func (m *dashModel) handleLogin(msg loginResultMsg) (tea.Model, tea.Cmd) {
+	if m.login != nil {
+		m.login.busy = false
+	}
+	if msg.err != nil {
+		if m.login != nil {
+			m.login.err = msg.err.Error()
+		}
+		return m, nil
+	}
+	if m.store != nil {
+		m.store.Close()
+	}
+	m.store = msg.store
+	m.identity = msg.id
+	m.user = msg.id.User
+	m.userID = msg.id.UserID
+	m.login = nil
+	m.note("signed in as " + msg.id.User)
+	m.refreshing = true
+	m.lastRefresh = time.Now()
+	return m, tea.Batch(m.refresh(), listenFor(m.store))
+}
+
 func (m *dashModel) View() string {
+	if m.login != nil {
+		return m.login.View(m.width, m.height)
+	}
 	var b strings.Builder
 	b.WriteString(m.header())
 	b.WriteString("\n")
@@ -764,7 +835,7 @@ func (m *dashModel) roomBlock(rows int) string {
 }
 
 func (m *dashModel) footer() string {
-	if m.err != nil {
+	if m.err != nil && m.login == nil {
 		return styleDanger.Render(clip("offline: "+m.err.Error(), m.width))
 	}
 	if m.editing != nil {
@@ -778,6 +849,9 @@ func (m *dashModel) footer() string {
 	}
 	if m.zoom {
 		return styleFaint.Render(clip(zoomKeys(m.width), m.width))
+	}
+	if m.identity.Guest {
+		return styleFaint.Render(clip(guestDashKeys(m.width), m.width))
 	}
 	return styleFaint.Render(clip(dashKeys(m.width), m.width))
 }
@@ -793,6 +867,22 @@ func zoomKeys(width int) string {
 		return short
 	}
 	return "q quit"
+}
+
+func guestDashKeys(width int) string {
+	const full = "j/k move · space done · a add · f focus · L sign in · q quit"
+	const medium = "j/k move · a add · f focus · L sign in · q quit"
+	const short = "f focus · L sign in · q quit"
+	switch {
+	case width >= len([]rune(full)):
+		return full
+	case width >= len([]rune(medium)):
+		return medium
+	case width >= len([]rune(short)):
+		return short
+	default:
+		return "q quit"
+	}
 }
 
 // dashKeys names what the keys do, at whatever length fits. The short forms

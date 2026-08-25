@@ -83,7 +83,10 @@ func cmdLogin(args []string) error {
 
 	path, _ := configPath()
 	fmt.Printf("Signed in as %s. Session stored in %s\n", username, path)
-	return nil
+	if terminalWidth() == 0 {
+		return nil
+	}
+	return runDashboard(false)
 }
 
 // insecureURLWarning flags a plaintext server. The password goes over that
