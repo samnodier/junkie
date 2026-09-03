@@ -6,6 +6,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import TempRoomModal from './TempRoomModal.vue';
+import RoomCodeInput from './RoomCodeInput.vue';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -130,7 +131,7 @@ onUnmounted(() => {
         <summary><span class="label">Join room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
         <form class="room-join" method="post" action="/rooms/join">
           <input type="hidden" name="next" :value="next">
-          <input class="room-code-input" name="code" placeholder="Code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
+          <RoomCodeInput />
           <button type="submit" class="btn-primary btn-compact">Join</button>
         </form>
       </details>
@@ -153,7 +154,7 @@ onUnmounted(() => {
         <summary><span class="label">Join room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
         <form class="room-join" method="post" action="/rooms/join-intent">
           <input type="hidden" name="next" :value="next">
-          <input class="room-code-input" name="code" placeholder="Code or link" required aria-label="Room code" autocapitalize="characters" spellcheck="false">
+          <RoomCodeInput />
           <button type="submit" class="btn-primary btn-compact">Join</button>
         </form>
       </details>
