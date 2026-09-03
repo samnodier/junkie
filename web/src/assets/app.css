@@ -145,21 +145,77 @@ body.embed-mode {
     0 2px 6px rgba(0, 0, 0, 0.55),
     0 0 16px rgba(0, 0, 0, 0.35);
 }
-/* The room code under the ring. Sized to be read off a stream at a distance
-   rather than to match the app's small print. */
-.embed-code {
-  margin: 0;
-  font-size: var(--fs-body);
-  letter-spacing: 0.04em;
-}
+/* An overlay is read at whatever size the browser source ends up scaled to,
+   which is small — the app's own type scale disappears there. So everything
+   on this page is sized as a fraction of the ring instead: one number to
+   change, and the proportions hold at any source size.
+
+   --ring is narrower than the .room-focus-ring clamp it mirrors, to leave the
+   corner clear for the head count on a source only as wide as the timer. */
+/* Two rows: the head count owns the top of the source, the timer column takes
+   what's left and centres in it. A grid rather than absolute positioning
+   because the caption is now nearly as wide as the ring, and a corner floated
+   over it collided the moment the source got narrow.
+
+   The ring is capped against the height as well as the width, since the whole
+   column — count, caption, ring, code — has to fit a box whose proportions
+   are whatever the browser source was dragged to. */
 .embed-stage {
+  --ring: clamp(150px, min(62vw, 56vh), 320px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100dvh;
+  padding: var(--sp-4);
+}
+.embed-column {
+  grid-row: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-4);
-  min-height: 100dvh;
-  padding: var(--sp-4);
+  gap: calc(var(--ring) * 0.06);
+}
+/* Body-scoped to outrank .circle-timer.running, which ties on specificity and
+   is declared further down — the same reason the caption rule below is. */
+body.embed-mode .embed-stage .circle-timer {
+  width: var(--ring);
+}
+/* The room code under the ring, and the phase above it: both close to the
+   ring's own width, which is the size that survives being scaled down. */
+.embed-code {
+  margin: 0;
+  font-size: calc(var(--ring) * 0.115);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.embed-people {
+  grid-row: 1;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--ring) * 0.04);
+}
+.embed-people-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: calc(var(--ring) * 0.085);
+  line-height: 1;
+}
+.embed-people-count svg {
+  width: 1em;
+  height: 1em;
+}
+/* The stack's own sizing is desk-sized; scale it with everything else. */
+.embed-people .participant-avatar {
+  width: calc(var(--ring) * 0.11);
+  height: calc(var(--ring) * 0.11);
+  font-size: calc(var(--ring) * 0.045);
+}
+.embed-people .participant-avatars-stack .participant-avatar {
+  margin-left: calc(var(--ring) * -0.03);
 }
 /* Body-scoped so it outranks .label-accent, which is declared further down:
    the accent green a label normally carries is too quiet against footage,
@@ -167,6 +223,11 @@ body.embed-mode {
 body.embed-mode .embed-caption {
   margin: 0;
   color: var(--ink);
+  font-size: calc(var(--ring) * 0.135);
+  /* The label's 0.14em tracking is meant for 10px type; at this size it
+     would push the line past the ring. */
+  letter-spacing: 0.06em;
+  line-height: 1;
 }
 /* The end-of-phase chime control (components/SoundPref.vue). The picker only
    appears once the manifest carries more than one sound, so this row is often

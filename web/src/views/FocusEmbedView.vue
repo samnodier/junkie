@@ -140,26 +140,36 @@ onUnmounted(() => {
 
 <template>
   <main v-if="loaded && !gone" class="embed-stage" :data-room-sync="code">
-    <p class="label label-accent embed-caption">{{ caption }}</p>
-    <RingCountdown
-      v-if="counting"
-      :key="`${timer.runId}-${phase}`"
-      :ends-at="endsAt"
-      :total-seconds="totalSeconds"
-      :ring-class="ringClass"
-      :aria-label="caption"
-      @expired="expired"
-    />
-    <div v-else class="circle-timer room-focus-ring" role="img" :aria-label="caption">
-      <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
-        <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
-        <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
-      </svg>
-      <div class="circle-timer-core">
-        <div class="circle-timer-countdown">{{ stillRing }}</div>
-      </div>
+    <!-- Corner count, so the head count reads even at the size a browser
+         source gets scaled to; the stack keeps its own +N overflow. -->
+    <div v-if="heads.length" class="embed-people">
+      <span class="embed-people-count">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        {{ heads.length }}
+      </span>
+      <ParticipantStack :members="heads" />
     </div>
-    <ParticipantStack v-if="heads.length" :members="heads" />
-    <p v-if="showCode" class="embed-code mono">{{ code }}</p>
+    <div class="embed-column">
+      <p class="label label-accent embed-caption">{{ caption }}</p>
+      <RingCountdown
+        v-if="counting"
+        :key="`${timer.runId}-${phase}`"
+        :ends-at="endsAt"
+        :total-seconds="totalSeconds"
+        :ring-class="ringClass"
+        :aria-label="caption"
+        @expired="expired"
+      />
+      <div v-else class="circle-timer room-focus-ring" role="img" :aria-label="caption">
+        <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
+          <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
+        </svg>
+        <div class="circle-timer-core">
+          <div class="circle-timer-countdown">{{ stillRing }}</div>
+        </div>
+      </div>
+      <p v-if="showCode" class="embed-code mono">{{ code }}</p>
+    </div>
   </main>
 </template>
