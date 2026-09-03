@@ -131,6 +131,17 @@ body.embed-mode {
 /* Footage underneath can be any brightness, and the dark palette's near-white
    ink plus a shadow is the combination that survives both. The view pins
    data-theme to dark for the same reason. */
+/* ?theme=light: dark ink for a pale scene, and the rim flips with it — a dark
+   rim under dark text just muddies it. */
+[data-theme="light"] body.embed-mode {
+  text-shadow:
+    1px 0 0 rgba(255, 255, 255, 0.6),
+    -1px 0 0 rgba(255, 255, 255, 0.6),
+    0 1px 0 rgba(255, 255, 255, 0.6),
+    0 -1px 0 rgba(255, 255, 255, 0.6),
+    0 2px 6px rgba(255, 255, 255, 0.6),
+    0 0 16px rgba(255, 255, 255, 0.45);
+}
 body.embed-mode {
   min-height: 100dvh;
   /* Four hairline offsets make a dark rim around the glyphs and the last two
@@ -152,23 +163,17 @@ body.embed-mode {
 
    --ring is narrower than the .room-focus-ring clamp it mirrors, to leave the
    corner clear for the head count on a source only as wide as the timer. */
-/* Two rows: the head count owns the top of the source, the timer column takes
-   what's left and centres in it. A grid rather than absolute positioning
-   because the caption is now nearly as wide as the ring, and a corner floated
-   over it collided the moment the source got narrow.
-
-   The ring is capped against the height as well as the width, since the whole
-   column — count, caption, ring, code — has to fit a box whose proportions
-   are whatever the browser source was dragged to. */
+/* One centred column: phase, ring, who's here, code. The ring is capped
+   against the height as well as the width, since the column has to fit a box
+   whose proportions are whatever the browser source was dragged to. */
 .embed-stage {
   --ring: clamp(150px, min(62vw, 56vh), 320px);
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
   min-height: 100dvh;
   padding: var(--sp-4);
 }
 .embed-column {
-  grid-row: 2;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -188,34 +193,15 @@ body.embed-mode .embed-stage .circle-timer {
   letter-spacing: 0.02em;
   line-height: 1;
 }
-.embed-people {
-  grid-row: 1;
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: calc(var(--ring) * 0.04);
+/* The stack's own sizing is desk-sized — a 32px face disappears once the
+   source is scaled into a corner, so it scales with everything else here. */
+.embed-column .participant-avatar {
+  width: calc(var(--ring) * 0.13);
+  height: calc(var(--ring) * 0.13);
+  font-size: calc(var(--ring) * 0.055);
 }
-.embed-people-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3em;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-size: calc(var(--ring) * 0.085);
-  line-height: 1;
-}
-.embed-people-count svg {
-  width: 1em;
-  height: 1em;
-}
-/* The stack's own sizing is desk-sized; scale it with everything else. */
-.embed-people .participant-avatar {
-  width: calc(var(--ring) * 0.11);
-  height: calc(var(--ring) * 0.11);
-  font-size: calc(var(--ring) * 0.045);
-}
-.embed-people .participant-avatars-stack .participant-avatar {
-  margin-left: calc(var(--ring) * -0.03);
+.embed-column .participant-avatars-stack .participant-avatar {
+  margin-left: calc(var(--ring) * -0.035);
 }
 /* Body-scoped so it outranks .label-accent, which is declared further down:
    the accent green a label normally carries is too quiet against footage,
@@ -228,6 +214,16 @@ body.embed-mode .embed-caption {
      would push the line past the ring. */
   letter-spacing: 0.06em;
   line-height: 1;
+  font-weight: 700;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  /* Set here rather than by the mono face's own space, which at this size
+     left the session count adrift from the separator. */
+  gap: 0.2em;
+}
+.embed-caption-sep {
+  opacity: 0.65;
 }
 /* The end-of-phase chime control (components/SoundPref.vue). The picker only
    appears once the manifest carries more than one sound, so this row is often

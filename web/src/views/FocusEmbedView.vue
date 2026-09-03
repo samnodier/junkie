@@ -26,6 +26,10 @@ const code = String(route.params.code || '');
 // once, and the address ate the line without earning it.
 // ?code=0 takes it off, for a scene you'd rather not be joined in.
 const showCode = computed(() => String(route.query.code ?? '') !== '0');
+// ?theme=light puts dark text on the overlay, for a scene whose background is
+// pale. Read once at load rather than watched: a browser source is configured
+// by its URL and reloaded, not toggled.
+const lightOverlay = String(route.query.theme || '') === 'light';
 
 const room = ref(null);
 const timer = ref(null);
@@ -53,14 +57,22 @@ const totalSeconds = computed(() => {
 });
 
 // The heading above the ring, kept to what reads at a glance over video.
+// Split into its two halves rather than one string: at this size the gap
+// around the separator is set in CSS, not by however wide a space happens to
+// be in the mono face.
 const caption = computed(() => {
   const t = timer.value;
-  if (!t) return 'Ready';
-  if (t.phase === 'lobby') return 'Starting';
-  if (t.phase === 'focus') return `Focus · ${t.currentSession}/${t.totalSessions}`;
-  if (t.breakPending || t.paused) return 'Break ready';
-  return 'Break';
+  if (!t) return { label: 'Ready', detail: '' };
+  if (t.phase === 'lobby') return { label: 'Starting', detail: '' };
+  if (t.phase === 'focus') {
+    return { label: 'Focus', detail: `${t.currentSession}/${t.totalSessions}` };
+  }
+  if (t.breakPending || t.paused) return { label: 'Break ready', detail: '' };
+  return { label: 'Break', detail: '' };
 });
+const captionText = computed(() =>
+  caption.value.detail ? `${caption.value.label} ${caption.value.detail}` : caption.value.label
+);
 
 // A pending or paused break has no deadline to count down, so the ring would
 // read 00:00; show the length that's waiting instead.
@@ -112,10 +124,11 @@ onMounted(async () => {
   // Transparent from the html element down, and no app chrome: both are body
   // classes so they can't be undone by a parent layout this view doesn't have.
   document.body.classList.add('embed-mode', 'focus-room-open');
-  // Pin the dark palette: its near-white ink is what reads over video, and a
-  // browser source's storage is its own, so whatever theme the host picked in
-  // their real browser is neither here nor relevant.
-  document.documentElement.setAttribute('data-theme', 'dark');
+  // Pin the palette rather than inheriting one: a browser source's storage is
+  // its own, so whatever theme the host picked in their real browser is
+  // neither here nor relevant. Dark by default, because near-white text is
+  // what reads over most footage.
+  document.documentElement.setAttribute('data-theme', lightOverlay ? 'light' : 'dark');
   await refresh();
   socket = connectSignals(`/ws/f/${encodeURIComponent(code)}`, (type) => {
     if (type === 'deleted') {
@@ -140,27 +153,22 @@ onUnmounted(() => {
 
 <template>
   <main v-if="loaded && !gone" class="embed-stage" :data-room-sync="code">
-    <!-- Corner count, so the head count reads even at the size a browser
-         source gets scaled to; the stack keeps its own +N overflow. -->
-    <div v-if="heads.length" class="embed-people">
-      <span class="embed-people-count">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        {{ heads.length }}
-      </span>
-      <ParticipantStack :members="heads" />
-    </div>
     <div class="embed-column">
-      <p class="label label-accent embed-caption">{{ caption }}</p>
+      <p class="label label-accent embed-caption" :aria-label="captionText">
+        <span aria-hidden="true">{{ caption.label }}</span>
+        <span v-if="caption.detail" class="embed-caption-sep" aria-hidden="true">·</span>
+        <span v-if="caption.detail" aria-hidden="true">{{ caption.detail }}</span>
+      </p>
       <RingCountdown
         v-if="counting"
         :key="`${timer.runId}-${phase}`"
         :ends-at="endsAt"
         :total-seconds="totalSeconds"
         :ring-class="ringClass"
-        :aria-label="caption"
+        :aria-label="captionText"
         @expired="expired"
       />
-      <div v-else class="circle-timer room-focus-ring" role="img" :aria-label="caption">
+      <div v-else class="circle-timer room-focus-ring" role="img" :aria-label="captionText">
         <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
           <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
           <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
@@ -169,6 +177,7 @@ onUnmounted(() => {
           <div class="circle-timer-countdown">{{ stillRing }}</div>
         </div>
       </div>
+      <ParticipantStack v-if="heads.length" :members="heads" />
       <p v-if="showCode" class="embed-code mono">{{ code }}</p>
     </div>
   </main>
