@@ -21,12 +21,11 @@ import ParticipantStack from '@/components/ParticipantStack.vue';
 const route = useRoute();
 const code = String(route.params.code || '');
 
-// What a viewer has to type to get in, shown on the overlay because that's
-// the whole point of streaming it. Built from the host the overlay was loaded
-// from, so it reads as the real address rather than a hardcoded one.
-const joinURL = computed(() => `${location.host}/f/${code}`);
-// ?join=0 takes it off, for a scene where you'd rather not be joined.
-const showJoin = computed(() => String(route.query.join ?? '') !== '0');
+// The code alone, shown on the overlay because that's the whole point of
+// streaming it. Just the code: where to type it is something a stream says
+// once, and the address ate the line without earning it.
+// ?code=0 takes it off, for a scene you'd rather not be joined in.
+const showCode = computed(() => String(route.query.code ?? '') !== '0');
 
 const room = ref(null);
 const timer = ref(null);
@@ -161,6 +160,6 @@ onUnmounted(() => {
       </div>
     </div>
     <ParticipantStack v-if="heads.length" :members="heads" />
-    <p v-if="showJoin" class="embed-join mono">{{ joinURL }}</p>
+    <p v-if="showCode" class="embed-code mono">{{ code }}</p>
   </main>
 </template>
