@@ -145,6 +145,13 @@ body.embed-mode {
     0 2px 6px rgba(0, 0, 0, 0.55),
     0 0 16px rgba(0, 0, 0, 0.35);
 }
+/* The join address under the ring. Sized to be read off a stream at a
+   distance rather than to match the app's small print. */
+.embed-join {
+  margin: 0;
+  font-size: var(--fs-body);
+  letter-spacing: 0.04em;
+}
 .embed-stage {
   display: flex;
   flex-direction: column;
