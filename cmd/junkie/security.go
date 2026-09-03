@@ -189,10 +189,13 @@ func securityHeaders(next http.Handler) http.Handler {
 		// Nothing here uses these, so deny them outright: an injected script or
 		// an embedded frame cannot then prompt for them in junkie's name.
 		// Notifications and service workers are deliberately absent -- the
-		// timer relies on both. autoplay is denied because nothing plays sound
-		// today; the ambient-sound player on the backlog would need it dropped.
+		// timer relies on both. So is autoplay, now that a phase transition can
+		// play a chime: the sound fires on a timer, not on the click that would
+		// grant transient activation, so denying autoplay would reject it.
+		// Scoped to 'self' rather than dropped, so an embedded frame still
+		// can't make noise.
 		h.Set("Permissions-Policy",
-			"accelerometer=(), autoplay=(), camera=(), display-capture=(), "+
+			"accelerometer=(), autoplay=(self), camera=(), display-capture=(), "+
 				"encrypted-media=(), geolocation=(), gyroscope=(), magnetometer=(), "+
 				"microphone=(), midi=(), payment=(), usb=()")
 		h.Set("Content-Security-Policy",

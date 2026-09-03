@@ -9,6 +9,8 @@
 //
 // Desktop browsers with no active worker (private windows, a first load before
 // install finishes) fall back to the constructor, which works fine there.
+import { playPhaseSound } from '@/lib/sound';
+
 const ROOM_INVITE_KEY = 'junkie:roomInviteNotifications';
 const ICON = '/assets/icon.svg';
 const BADGE = '/assets/icon-192.png';
@@ -84,6 +86,11 @@ export function notify(title, body, url) {
 }
 
 export function onTimerEnd(phase) {
+  // Every phase turn in the app funnels through here -- rooms, the focus
+  // room, solo, and the guest desk -- so the optional chime hangs off it
+  // rather than being wired into each of them. It's a no-op unless the
+  // viewer switched it on. See lib/sound.js.
+  playPhaseSound();
   if (phase === 'break') {
     notify("Break's over", 'Ready for your next focus block');
   } else {

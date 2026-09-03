@@ -8,6 +8,7 @@ import { useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import AppShell from '@/components/AppShell.vue';
 import HeatmapChart from '@/components/HeatmapChart.vue';
+import SoundPref from '@/components/SoundPref.vue';
 import { buildGuestHeatmap } from '@/lib/guestActivity';
 import { useConnectLink } from '@/composables/connectLink';
 
@@ -176,6 +177,10 @@ onMounted(async () => {
             <span aria-hidden="true"></span>
           </label>
         </div>
+        <!-- Same per-browser setting the room settings and the temporary-room
+             popup carry; here so it can be changed while a block is running,
+             which the room's settings drawer hides. -->
+        <SoundPref row-class="profile-preference" />
         <div class="profile-preference profile-avatar-pref">
           <div>
             <strong>Profile picture</strong>

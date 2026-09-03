@@ -21,6 +21,7 @@ import TodoGroups from '@/components/TodoGroups.vue';
 import JoinPromptModal from '@/components/JoinPromptModal.vue';
 import StartConfirmModal from '@/components/StartConfirmModal.vue';
 import PipTimer from '@/components/PipTimer.vue';
+import SoundPref from '@/components/SoundPref.vue';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -340,6 +341,9 @@ onUnmounted(() => {
                   </div>
                   <button type="submit" class="btn-primary btn-compact">Save</button>
                 </form>
+                <!-- Outside the form above: this one is a per-browser setting
+                     that saves itself, not part of the room's timer settings. -->
+                <SoundPref />
               </details>
               <details class="room-details panel" data-room-section="share" :open="sections.share.value" @toggle="toggleSection('share', $event.target.open)">
                 <summary><span class="label">Share room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>

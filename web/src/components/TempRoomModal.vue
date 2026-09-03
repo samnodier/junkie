@@ -3,6 +3,7 @@
 // auto-run-breaks toggle. Submitting native-posts to /rooms with ephemeral=1,
 // so the server creates the room and redirects to its /f/{code} screen.
 import { onMounted, onUnmounted, ref } from 'vue';
+import SoundPref from '@/components/SoundPref.vue';
 
 const emit = defineEmits(['close']);
 const firstField = ref(null);
@@ -50,6 +51,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <span aria-hidden="true"></span>
             </label>
           </div>
+          <!-- Client-side setting: no name attributes inside, so nothing here
+               is posted with the room. -->
+          <SoundPref />
           <div class="join-prompt-actions">
             <button type="submit" class="btn-primary">Create &amp; get link</button>
             <button type="button" class="btn-ghost" @click="emit('close')">Cancel</button>

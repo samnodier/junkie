@@ -256,6 +256,8 @@ func main() {
 	mux.HandleFunc("GET /assets/icon-maskable-512.png", a.serveStaticAsset("icon-maskable-512.png", "image/png"))
 	mux.HandleFunc("GET /assets/apple-touch-icon.png", a.serveStaticAsset("apple-touch-icon.png", "image/png"))
 	mux.HandleFunc("GET /assets/og-image.png", a.serveStaticAsset("og-image.png", "image/png"))
+	// Phase-end notification sounds plus the manifest listing them; see sounds.go.
+	mux.HandleFunc("GET /assets/sounds/{name}", a.soundAsset)
 	// Browsers and link scrapers request /favicon.ico by convention even when
 	// the page declares an SVG icon; without this it fell through to the
 	// /{username} route and 404d.
