@@ -306,6 +306,7 @@ func main() {
 	mux.HandleFunc("GET /api/rooms", a.requireAuth(a.apiRooms))
 	mux.HandleFunc("GET /api/room/{code}", a.requireAuth(a.apiRoom))
 	mux.HandleFunc("GET /api/room/{code}/members", a.requireAuth(a.apiRoomMembers))
+	mux.HandleFunc("GET /api/room/{code}/embed", a.apiFocusEmbed)
 	mux.HandleFunc("GET /api/public-profile/{username}", a.requireAuth(a.apiPublicProfile))
 	mux.HandleFunc("GET /privacy", a.spaPage)
 	mux.HandleFunc("GET /terms", a.spaPage)
@@ -338,8 +339,12 @@ func main() {
 	mux.HandleFunc("GET /r/", a.requireAuth(a.roomPage))
 	mux.HandleFunc("POST /r/", a.requireAuth(a.roomAction))
 	mux.HandleFunc("GET /f/{code}", a.requireAuth(a.focusRoomPage))
+	// The OBS overlay twin of the screen above. Deliberately unauthenticated
+	// and read-only, and temporary rooms only — see focusembed.go.
+	mux.HandleFunc("GET /f/{code}/embed", a.focusEmbedPage)
 	mux.HandleFunc("POST /f/{code}/join", a.requireAuth(a.enterFocusRoom))
 	mux.HandleFunc("GET /ws/r/", a.requireAuth(a.roomWS))
+	mux.HandleFunc("GET /ws/f/", a.focusEmbedWS)
 	mux.HandleFunc("GET /ws/me", a.requireAuth(a.userWS))
 	mux.HandleFunc("GET /admin", a.requireAdmin(a.spaPage))
 	mux.HandleFunc("GET /api/admin", a.requireAuth(a.apiAdmin))

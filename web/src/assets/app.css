@@ -117,6 +117,50 @@ body.focus-active {
 body.focus-room-open {
   background-image: none;
 }
+/* OBS overlay mode (/f/{code}/embed, see views/FocusEmbedView.vue). The page
+   is composited onto a video scene, so the canvas has to be genuinely
+   transparent: no background colour and no grid, on html as well as body,
+   since the body's colour is what paints the canvas. Everything else about
+   the ring stays as it is on the real screen, so the overlay and the room
+   look like the same timer. */
+html:has(body.embed-mode),
+body.embed-mode {
+  background-color: transparent;
+  background-image: none;
+}
+/* Footage underneath can be any brightness, and the dark palette's near-white
+   ink plus a shadow is the combination that survives both. The view pins
+   data-theme to dark for the same reason. */
+body.embed-mode {
+  min-height: 100dvh;
+  /* Four hairline offsets make a dark rim around the glyphs and the last two
+     drop a soft shadow under them. A plain shadow was enough over dark
+     footage and vanished over light, and an overlay doesn't get to choose
+     what it sits on. */
+  text-shadow:
+    1px 0 0 rgba(0, 0, 0, 0.5),
+    -1px 0 0 rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(0, 0, 0, 0.5),
+    0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.55),
+    0 0 16px rgba(0, 0, 0, 0.35);
+}
+.embed-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  min-height: 100dvh;
+  padding: var(--sp-4);
+}
+/* Body-scoped so it outranks .label-accent, which is declared further down:
+   the accent green a label normally carries is too quiet against footage,
+   and the ink colour is what stays readable over anything. */
+body.embed-mode .embed-caption {
+  margin: 0;
+  color: var(--ink);
+}
 /* The end-of-phase chime control (components/SoundPref.vue). The picker only
    appears once the manifest carries more than one sound, so this row is often
    just the Test button. */

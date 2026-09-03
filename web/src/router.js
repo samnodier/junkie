@@ -88,6 +88,15 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // The OBS overlay twin of the route above. Deliberately unguarded: a
+    // browser source has no session to offer, and the Go handler behind it
+    // serves temporary rooms only, read-only. Declared after /f/:code so the
+    // more specific path wins vue-router's scoring either way.
+    path: '/f/:code/embed',
+    name: 'focus-embed',
+    component: () => import('./views/FocusEmbedView.vue'),
+  },
+  {
     path: '/r/:code/members',
     name: 'room-members',
     component: () => import('./views/RoomMembersView.vue'),

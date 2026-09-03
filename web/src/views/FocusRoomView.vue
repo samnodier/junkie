@@ -26,7 +26,9 @@ const auth = useAuthStore();
 const room = useRoomStore();
 const wakeLock = useWakeLock();
 
-const copied = ref(false);
+// Which link was just copied ('' | 'invite' | 'obs'), so the two buttons in
+// the bar can each own their own feedback.
+const copied = ref('');
 
 const timer = computed(() => room.timer);
 const phase = computed(() => timer.value?.phase || 'idle');
@@ -35,6 +37,10 @@ const focusing = computed(() => phase.value === 'focus');
 // and the pre-start waiting room so latecomers can still hop in.
 const showLink = computed(() => room.loaded && !focusing.value);
 const shareURL = computed(() => `${location.origin}/f/${room.code}`);
+// The overlay twin of this screen: no chrome, transparent background, and no
+// login, so it can go straight into an OBS browser source. Share the plain
+// link above with people; this one is for your own scene.
+const embedURL = computed(() => `${shareURL.value}/embed`);
 
 // Heads shown at the bottom: the run's participants once a run exists, else the
 // people parked in the waiting room before anyone has started.
@@ -61,12 +67,12 @@ const totalSeconds = computed(() => {
 });
 
 let copyTimer = null;
-async function copyLink() {
+async function copyLink(which) {
   try {
-    await navigator.clipboard.writeText(shareURL.value);
-    copied.value = true;
+    await navigator.clipboard.writeText(which === 'obs' ? embedURL.value : shareURL.value);
+    copied.value = which;
     clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => (copied.value = false), 2000);
+    copyTimer = setTimeout(() => (copied.value = ''), 2000);
   } catch {
     /* clipboard denied: nothing to show */
   }
@@ -151,12 +157,25 @@ onUnmounted(() => {
           v-if="showLink"
           type="button"
           class="focus-room-share"
-          :class="{ 'is-copied': copied }"
-          @click="copyLink"
+          :class="{ 'is-copied': copied === 'invite' }"
+          @click="copyLink('invite')"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           <span class="mono focus-room-share-url">{{ shareURL.replace(/^https?:\/\//, '') }}</span>
-          <span class="focus-room-share-feedback">{{ copied ? 'COPIED ✓' : 'Copy invite' }}</span>
+          <span class="focus-room-share-feedback">{{ copied === 'invite' ? 'COPIED ✓' : 'Copy invite' }}</span>
+        </button>
+        <!-- The overlay link is no use to guests, so it only shows for whoever
+             opened the room — the one person who might be streaming it. -->
+        <button
+          v-if="showLink && room.isCreator"
+          type="button"
+          class="focus-room-share focus-room-embed"
+          :class="{ 'is-copied': copied === 'obs' }"
+          :title="embedURL"
+          @click="copyLink('obs')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>
+          <span class="focus-room-share-feedback">{{ copied === 'obs' ? 'COPIED ✓' : 'Copy OBS overlay link' }}</span>
         </button>
       </div>
 
