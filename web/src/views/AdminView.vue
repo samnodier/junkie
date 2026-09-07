@@ -6,11 +6,13 @@ import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import AppShell from '@/components/AppShell.vue';
+import EventLog from '@/components/EventLog.vue';
 import ForbiddenView from './ForbiddenView.vue';
 
 const route = useRoute();
 const auth = useAuthStore();
 const data = ref(null);
+const events = ref(null);
 const forbidden = ref('');
 const error = ref(String(route.query.error || ''));
 
@@ -22,7 +24,12 @@ async function load() {
       forbidden.value = body.error;
       return;
     }
-    if (res.ok) data.value = body;
+    if (!res.ok) return;
+    data.value = body;
+    // Loaded after the page's own data so a slow or failing log never holds
+    // up the tables above it.
+    const logRes = await fetch('/api/admin/events', { credentials: 'same-origin' });
+    if (logRes.ok) events.value = await logRes.json();
   } catch {
     /* leave the page blank; a reload retries */
   }
@@ -96,6 +103,14 @@ onMounted(load);
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="panel admin-section">
+        <div class="panel-title">
+          <div><p class="eyebrow">Everything that happened</p><h2>Log</h2></div>
+          <span v-if="events" class="muted">kept {{ events.retentionDays }} days</span>
+        </div>
+        <EventLog v-if="events" :events="events.events" />
       </section>
 
       <section class="panel admin-section">

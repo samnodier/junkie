@@ -403,6 +403,9 @@ func main() {
 	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
 	mux.HandleFunc("POST /admin/users/{id}/reset-link", a.requireAdminMutation(a.adminCreateResetLink))
 	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
+	mux.HandleFunc("GET /api/admin/events", a.requireAuth(a.apiAdminEvents))
+	mux.HandleFunc("GET /api/room/{code}/events", a.requireAuth(a.apiRoomEvents))
+	mux.HandleFunc("GET /r/{code}/history", a.requireAuth(a.spaPage))
 	mux.HandleFunc("GET /api/admin/users/{id}", a.requireAuth(a.apiAdminUser))
 	mux.HandleFunc("GET /api/admin/rooms/{id}", a.requireAuth(a.apiAdminRoom))
 	mux.HandleFunc("POST /admin/rooms/{id}/room-role", a.requireAdminMutation(a.adminSetRoomRole))
@@ -413,6 +416,7 @@ func main() {
 	go a.sweepInactiveTodos(ctx)
 	go a.sweepAbandonedEphemeralRooms(ctx)
 	go a.sweepStaleRoomWaiting(ctx)
+	go a.sweepEventLog(ctx)
 	go a.refreshDiscordLive(ctx)
 
 	// Reject state-changing requests from other origins (CSRF). Requests
@@ -1210,6 +1214,9 @@ func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 	for range 5 {
 		code = randomCode()
 		err = a.db.QueryRow(r.Context(), `INSERT INTO rooms (code, name, creator_id) VALUES ($1, $2, $3) RETURNING id`, code, name, u.ID).Scan(&roomID)
+		if err == nil {
+			a.logEvent(r.Context(), u.ID, eventRoomCreated, "room", roomID, roomID, map[string]string{"room": code, "name": name})
+		}
 		if err == nil || !isUniqueViolation(err) {
 			break
 		}
@@ -1528,19 +1535,26 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			requireCheckin = v == "1"
 		}
 		_ = a.applyRoomSettings(r.Context(), rm.ID, focus, breaks, sessions, autoRoll, requireCheckin)
+		a.logRoomEvent(r.Context(), u.ID, eventRoomSettings, rm, "", map[string]string{
+			"timer": fmt.Sprintf("%d/%d/%d", focus, breaks, sessions),
+		})
 	case "remove-member":
-		if err := a.removeRoomMember(r.Context(), rm, u.ID, r.FormValue("user_id")); err != nil {
+		removedID := r.FormValue("user_id")
+		if err := a.removeRoomMember(r.Context(), rm, u.ID, removedID); err != nil {
 			membersRedirect(w, r, rm.Code, err.Error())
 			return
 		}
+		a.logRoomEvent(r.Context(), u.ID, eventRoomMemberRemoved, rm, removedID, nil)
 		a.hub.broadcast(code, "members")
 		membersRedirect(w, r, rm.Code, "")
 		return
 	case "transfer-ownership":
-		if err := a.startOwnershipTransfer(r.Context(), rm, u.ID, r.FormValue("user_id")); err != nil {
+		heirID := r.FormValue("user_id")
+		if err := a.startOwnershipTransfer(r.Context(), rm, u.ID, heirID); err != nil {
 			membersRedirect(w, r, rm.Code, err.Error())
 			return
 		}
+		a.logRoomEvent(r.Context(), u.ID, eventRoomTransferStart, rm, heirID, nil)
 		membersRedirect(w, r, rm.Code, "")
 		return
 	case "cancel-transfer":
@@ -1548,6 +1562,7 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			membersRedirect(w, r, rm.Code, err.Error())
 			return
 		}
+		a.logRoomEvent(r.Context(), u.ID, eventRoomTransferUndo, rm, rm.PendingOwnerID, nil)
 		membersRedirect(w, r, rm.Code, "")
 		return
 	case "make-admin", "remove-admin":
@@ -1562,10 +1577,16 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		if action == "remove-admin" {
 			role = roomRoleMember
 		}
-		if err := a.setRoomMemberRole(r.Context(), rm, r.FormValue("user_id"), role); err != nil {
+		targetID := r.FormValue("user_id")
+		if err := a.setRoomMemberRole(r.Context(), rm, targetID, role); err != nil {
 			membersRedirect(w, r, rm.Code, err.Error())
 			return
 		}
+		event := eventRoomAdminAdded
+		if action == "remove-admin" {
+			event = eventRoomAdminRemoved
+		}
+		a.logRoomEvent(r.Context(), u.ID, event, rm, targetID, nil)
 		a.hub.broadcast(code, "members")
 		membersRedirect(w, r, rm.Code, "")
 		return
@@ -1574,6 +1595,9 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "only the creator can delete this room", http.StatusForbidden)
 			return
 		}
+		// Logged before the delete: the row's room_id cascades away with the
+		// room, so it is recorded as a user-targeted event instead.
+		a.logEvent(r.Context(), u.ID, eventRoomDeleted, "user", u.ID, "", map[string]string{"room": rm.Code, "name": rm.Name})
 		_, _ = a.db.Exec(r.Context(), `DELETE FROM rooms WHERE id = $1`, rm.ID)
 		a.hub.broadcast(code, "deleted")
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
@@ -2930,6 +2954,7 @@ func (a *app) settleOwnershipTransfer(ctx context.Context, rm room) room {
 	// surprise nobody asked for.
 	_, _ = a.db.Exec(ctx, `UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3`, roomRoleAdmin, rm.ID, previous)
 	rm.CreatorID, rm.PendingOwnerID, rm.OwnershipTransferAt = rm.PendingOwnerID, "", time.Time{}
+	a.logRoomEvent(ctx, previous, eventRoomTransferred, rm, rm.CreatorID, nil)
 	a.hub.broadcast(rm.Code, "members")
 	return rm
 }
@@ -3047,6 +3072,7 @@ func (a *app) handOverRoomNow(ctx context.Context, rm room, actorID, targetID st
 	// The new owner's role row is now redundant but harmless; clearing it
 	// keeps "creator implies admin" the only rule that grants them anything.
 	_, _ = a.db.Exec(ctx, `UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3`, roomRoleMember, rm.ID, targetID)
+	a.logRoomEvent(ctx, actorID, eventRoomTransferred, rm, targetID, map[string]string{"reason": "account deletion"})
 	a.hub.broadcast(rm.Code, "members")
 	return nil
 }
@@ -3111,8 +3137,18 @@ func (a *app) isRoomMember(ctx context.Context, roomID, userID string) bool {
 	return err == nil && exists
 }
 
+// addRoomMember is every join path's single entry point -- web, Discord and
+// the terminal client all land here -- which is why the event is logged from
+// inside it rather than at each caller. ON CONFLICT DO NOTHING means someone
+// re-opening a room they are already in inserts nothing, and so logs nothing.
 func (a *app) addRoomMember(ctx context.Context, roomID, userID string) {
-	_, _ = a.db.Exec(ctx, `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, userID)
+	tag, err := a.db.Exec(ctx, `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, userID)
+	if err != nil || tag.RowsAffected() == 0 {
+		return
+	}
+	var code string
+	_ = a.db.QueryRow(ctx, `SELECT code FROM rooms WHERE id = $1`, roomID).Scan(&code)
+	a.logEvent(ctx, userID, eventRoomJoined, "user", userID, roomID, map[string]string{"room": code})
 }
 
 // Room-level roles (migration 018). These are not the site-wide users.role

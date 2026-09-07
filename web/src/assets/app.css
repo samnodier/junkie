@@ -1441,6 +1441,49 @@ span.room-member-locked {
 .connection-head:last-child {
   margin-bottom: 0;
 }
+/* The event log. Monospace and one line per event on purpose: it is meant to
+   be read the way a terminal is, not parsed out of a table. The line scrolls
+   sideways rather than wrapping, so the timestamp column stays aligned. */
+.event-log {
+  display: grid;
+  gap: var(--sp-2);
+}
+.event-log-filter input {
+  max-width: 28rem;
+}
+.event-log-count {
+  font-size: var(--fs-small);
+}
+.event-log-lines {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: var(--sp-3);
+}
+.event-log-line {
+  display: flex;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.event-log-at {
+  color: var(--muted);
+}
+.event-log-action {
+  color: var(--accent);
+}
+.event-log-room {
+  color: var(--warn);
+}
+.event-log-detail,
+.event-log-target {
+  color: var(--muted);
+}
+
 /* Rooms standing between an account and its deletion. */
 .profile-owned-rooms {
   display: grid;

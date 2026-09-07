@@ -181,7 +181,11 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
         </template>
         <p v-else class="muted">No one else has joined this room yet.</p>
       </div>
-      <p class="muted"><a :href="`/r/${data.room.code}`">Back to {{ data.room.name }}</a></p>
+      <p class="muted">
+        <a :href="`/r/${data.room.code}`">Back to {{ data.room.name }}</a>
+        <!-- Only this room's admins can read it, so only they are shown it. -->
+        <template v-if="canAdmin"> · <a :href="`/r/${data.room.code}/history`">Room history</a></template>
+      </p>
     </section>
   </AppShell>
 </template>

@@ -109,6 +109,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/r/:code/history',
+    name: 'room-history',
+    component: () => import('./views/RoomHistoryView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/admin/users/:id',
     name: 'admin-user',
     component: () => import('./views/AdminUserView.vue'),

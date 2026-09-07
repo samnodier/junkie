@@ -665,6 +665,10 @@ func (a *app) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.createSession(w, r, id)
+	// No IP address: this is the log's highest-volume row and its only
+	// PII-adjacent one, and the security value is in knowing that a sign-in
+	// happened, not in keeping a location history to have to disclose.
+	a.logEvent(r.Context(), id, eventSignedIn, "user", id, "", nil)
 	writeJSON(w, map[string]string{"next": next})
 }
 
@@ -705,6 +709,9 @@ func (a *app) apiSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = a.db.QueryRow(ctx, `INSERT INTO users (username, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id`, username, displayName, string(hash)).Scan(&id)
+	if err == nil {
+		a.logEvent(ctx, id, eventAccountCreated, "user", id, "", map[string]string{"username": username})
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusConflict, "That username is already taken.")
 		return
