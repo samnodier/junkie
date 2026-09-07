@@ -72,6 +72,19 @@ async function transfer(member) {
   busy.value = '';
 }
 
+async function remove(member) {
+  if (busy.value) return;
+  // Removing someone is the one control here that acts on another person, so
+  // it asks first -- the role buttons are all trivially reversible, this one
+  // takes them out of a run in progress.
+  if (!confirm(`Remove ${member.user.displayName} from this room?`)) return;
+  busy.value = member.user.id;
+  if (await postForm(`/r/${encodeURIComponent(code)}/remove-member`, { user_id: member.user.id })) {
+    await load();
+  }
+  busy.value = '';
+}
+
 async function cancelTransfer() {
   if (busy.value) return;
   busy.value = 'transfer';
@@ -156,6 +169,13 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
                   @click="transfer(m)"
                 >Transfer ownership</button>
               </template>
+              <button
+                v-if="!m.self && !pendingFor(m)"
+                type="button"
+                class="btn-danger btn-compact"
+                :disabled="busy === m.user.id"
+                @click="remove(m)"
+              >Remove</button>
             </div>
           </article>
         </template>

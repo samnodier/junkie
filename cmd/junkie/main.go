@@ -1415,6 +1415,14 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			requireCheckin = v == "1"
 		}
 		_ = a.applyRoomSettings(r.Context(), rm.ID, focus, breaks, sessions, autoRoll, requireCheckin)
+	case "remove-member":
+		if err := a.removeRoomMember(r.Context(), rm, u.ID, r.FormValue("user_id")); err != nil {
+			membersRedirect(w, r, rm.Code, err.Error())
+			return
+		}
+		a.hub.broadcast(code, "members")
+		membersRedirect(w, r, rm.Code, "")
+		return
 	case "transfer-ownership":
 		if err := a.startOwnershipTransfer(r.Context(), rm, u.ID, r.FormValue("user_id")); err != nil {
 			membersRedirect(w, r, rm.Code, err.Error())
@@ -2852,6 +2860,49 @@ func (a *app) cancelOwnershipTransfer(ctx context.Context, rm room, actorID stri
 	if tag.RowsAffected() == 0 {
 		return errors.New("that transfer has already gone through")
 	}
+	return nil
+}
+
+// removeRoomMember drops someone from a room. It is the one room-admin power
+// that acts on another person, so the guards are the point: the creator can't
+// be removed (the room would be left with no owner), and you can't remove
+// yourself -- leaving is its own action and shouldn't be reachable through a
+// control meant for moderating other people.
+//
+// Membership is all that goes. Their todos, their history and their account
+// are untouched, and rejoining with the room's code puts them back exactly
+// where they were, as a plain member.
+func (a *app) removeRoomMember(ctx context.Context, rm room, actorID, targetID string) error {
+	if !a.canAdminRoom(ctx, rm, actorID) {
+		return errors.New("only the room's admins can remove someone")
+	}
+	if targetID == "" {
+		return errors.New("choose someone to remove")
+	}
+	if targetID == actorID {
+		return errors.New("to leave the room yourself, use Leave room")
+	}
+	if targetID == rm.CreatorID {
+		return errors.New("the room's owner can't be removed")
+	}
+	// Take them out of any run in progress first, reusing the path a member
+	// leaving on their own takes -- which also ends the run if they were the
+	// last one in it. Doing this before the membership row goes means the
+	// timer never holds a participant who is no longer in the room.
+	if _, err := a.leaveTimer(ctx, rm, targetID); err != nil {
+		return err
+	}
+	tag, err := a.db.Exec(ctx, `DELETE FROM room_members WHERE room_id = $1 AND user_id = $2`, rm.ID, targetID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("that person isn't in this room")
+	}
+	// A pending handover to the person who just left can never complete.
+	_, _ = a.db.Exec(ctx, `
+		UPDATE rooms SET pending_owner_id = NULL, ownership_transfer_at = NULL
+		WHERE id = $1 AND pending_owner_id = $2`, rm.ID, targetID)
 	return nil
 }
 
