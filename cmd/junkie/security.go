@@ -218,7 +218,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		// audio file. The room-sound upload is the one route that needs more,
 		// and it applies its own, smaller limit -- so the exemption is named
 		// here rather than the global cap being raised for everything.
-		if isRoomSoundUpload(r) {
+		if carriesRoomSound(r) {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRoomSoundBytes+4096)
 		} else {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
@@ -227,11 +227,16 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// isRoomSoundUpload matches POST /r/{code}/sound, the only path allowed past
-// the global request-body cap.
-func isRoomSoundUpload(r *http.Request) bool {
+// carriesRoomSound matches the two paths that may carry an audio file, and
+// so the only two allowed past the global request-body cap: setting an
+// existing room's sound, and creating a temporary room with one already
+// chosen. Both apply maxRoomSoundBytes themselves.
+func carriesRoomSound(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false
+	}
+	if r.URL.Path == "/rooms" {
+		return true
 	}
 	rest, ok := strings.CutPrefix(r.URL.Path, "/r/")
 	if !ok {

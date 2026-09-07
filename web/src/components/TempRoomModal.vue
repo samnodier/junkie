@@ -16,6 +16,28 @@ onMounted(() => {
   firstField.value?.focus();
 });
 onUnmounted(() => window.removeEventListener('keydown', onKey));
+
+// The room's own sound, chosen before the room exists. Duration is checked
+// here because this is where it's cheap to know; the server enforces size and
+// file type when the room is created.
+const soundName = ref('');
+async function pickSound(event) {
+  const file = event.target.files?.[0];
+  soundName.value = file ? file.name : '';
+  if (!file || typeof AudioContext === 'undefined') return;
+  try {
+    const ctx = new AudioContext();
+    const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
+    ctx.close();
+    if (buffer.duration > 15) {
+      alert(`That clip is ${Math.round(buffer.duration)} seconds — the limit is 15.`);
+      event.target.value = '';
+      soundName.value = '';
+    }
+  } catch {
+    /* undecodable here; the server has the final say */
+  }
+}
 </script>
 
 <template>
@@ -24,7 +46,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       <div class="join-prompt-card panel temp-room-card" role="dialog" aria-labelledby="temp-room-title">
         <h2 id="temp-room-title">Start a temporary focus room</h2>
         <p class="muted temp-room-blurb">A throwaway room for a single block. Share the link, focus together, and it disappears when you're done.</p>
-        <form class="stack temp-room-form" method="post" action="/rooms">
+        <!-- multipart because the room can be created with its own sound
+             already attached; the server parses either encoding. -->
+        <form class="stack temp-room-form" method="post" action="/rooms" enctype="multipart/form-data">
           <input type="hidden" name="ephemeral" value="1">
           <div class="temp-room-fields">
             <label>Focus<input ref="firstField" type="number" name="focus_minutes" min="5" max="180" value="25" inputmode="numeric"></label>
@@ -51,9 +75,26 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <span aria-hidden="true"></span>
             </label>
           </div>
-          <!-- Client-side setting: no name attributes inside, so nothing here
-               is posted with the room. -->
+          <!-- The chime toggle is a per-device setting and posts nothing.
+               The room's own sound, below it, is the one field here that does
+               travel with the form. -->
           <SoundPref />
+          <div class="settings-auto-roll">
+            <div>
+              <strong>This room's sound</strong>
+              <p class="muted">Optional. Plays at the end of each block for anyone who has the chime switched on. Up to 15 seconds, 512 KB — an MP3 or OGG is much smaller than a WAV.</p>
+            </div>
+            <label class="btn-ghost btn-compact sound-pref-upload">
+              {{ soundName || 'Choose a file' }}
+              <input
+                type="file"
+                name="sound"
+                accept="audio/mpeg,audio/ogg,audio/wav,.mp3,.ogg,.wav"
+                class="visually-hidden"
+                @change="pickSound"
+              >
+            </label>
+          </div>
           <div class="join-prompt-actions">
             <button type="submit" class="btn-primary">Create &amp; get link</button>
             <button type="button" class="btn-ghost" @click="emit('close')">Cancel</button>

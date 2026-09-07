@@ -1195,6 +1195,13 @@ func (a *app) userAtRoomCap(ctx context.Context, userID string) bool {
 }
 
 func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
+	// A temporary room can carry a sound chosen in the same popup, so this
+	// form may arrive as multipart. Parsing it here (and ignoring the error
+	// for the ordinary url-encoded case) keeps every FormValue below working
+	// either way.
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		_ = r.ParseMultipartForm(maxRoomSoundBytes + 4096)
+	}
 	u, _ := a.currentUser(r)
 	if !a.limiter.allow("createroom:"+u.ID, 20, time.Hour) {
 		http.Redirect(w, r, "/?error="+url.QueryEscape("Too many rooms created; try again later."), http.StatusSeeOther)
@@ -1268,7 +1275,41 @@ func (a *app) createEphemeralRoom(w http.ResponseWriter, r *http.Request, u user
 		return
 	}
 	_, _ = a.db.Exec(r.Context(), `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, u.ID)
+	// A sound chosen in the creation popup, attached now that the room it
+	// belongs to exists. A rejected file doesn't cost you the room: the room
+	// is already made, so the error is carried to it rather than thrown away
+	// along with everything else that was filled in.
+	if soundErr := a.attachCreationSound(r, room{ID: roomID, Code: code}); soundErr != "" {
+		http.Redirect(w, r, "/f/"+code+"?error="+url.QueryEscape(soundErr), http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/f/"+code, http.StatusSeeOther)
+}
+
+// attachCreationSound stores a sound uploaded alongside a new room, returning
+// a message when there was one and it couldn't be used. No file at all is not
+// an error -- most rooms won't carry one.
+func (a *app) attachCreationSound(r *http.Request, rm room) string {
+	if r.MultipartForm == nil {
+		return ""
+	}
+	file, header, err := r.FormFile("sound")
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxRoomSoundBytes+1))
+	if err != nil {
+		return "Could not read that sound file."
+	}
+	name := ""
+	if header != nil {
+		name = header.Filename
+	}
+	if err := a.setRoomSound(r.Context(), rm, data, name); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func (a *app) joinRoom(w http.ResponseWriter, r *http.Request) {
@@ -1526,7 +1567,28 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		}
 	case "settings":
 		if a.roomRunActive(r.Context(), rm.ID) {
-			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Timer settings can't change while a run is active."), http.StatusSeeOther)
+			// A temporary room is the one place a run's length can still be
+			// changed while it runs. You set twelve sessions, you're four in,
+			// you want ten -- and until now the only ways out were to sit
+			// through all twelve or restart and lose the count. The rest of
+			// the settings still can't move mid-run: changing a block's
+			// length under people who are inside one is a different thing.
+			if !rm.Ephemeral {
+				http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Timer settings can't change while a run is active."), http.StatusSeeOther)
+				return
+			}
+			sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, rm.AutoSessions)
+			applied, err := a.retargetRunSessions(r.Context(), rm, sessions)
+			if err != nil {
+				http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+				return
+			}
+			a.logRoomEvent(r.Context(), u.ID, eventRoomSettings, rm, "", map[string]string{
+				"sessions": fmt.Sprintf("%d", applied),
+			})
+			a.hub.broadcast(code, "settings")
+			a.hub.broadcast(code, "timer-phase")
+			http.Redirect(w, r, "/r/"+code, http.StatusSeeOther)
 			return
 		}
 		focus := clampInt(r.FormValue("focus_minutes"), 5, 180, rm.FocusMinutes)
@@ -2068,8 +2130,13 @@ func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end
 	}
 	// One row per participant per overlapping claim (NULLs for participants
 	// with none), ordered so each user's claims arrive sorted by start.
+	//
+	// Each participant's window begins at the later of the session's start
+	// and when they joined it, so somebody who walked in halfway through a
+	// temporary room's session is credited for the half they were present
+	// for, not the whole thing.
 	rows, err := tx.Query(ctx, `
-		SELECT tp.user_id, fc.started_at, fc.ended_at
+		SELECT tp.user_id, GREATEST($2, tp.joined_at), fc.started_at, fc.ended_at
 		FROM timer_participants tp
 		LEFT JOIN focus_credits fc ON fc.user_id = tp.user_id
 			AND fc.ended_at > $2 AND fc.started_at < $3
@@ -2080,16 +2147,19 @@ func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end
 	}
 	credited := map[string]time.Duration{} // unclaimed focus time per user
 	cursor := map[string]time.Time{}       // sweep position per user
+	from := map[string]time.Time{}         // when each user's window opens
 	for rows.Next() {
 		var userID string
+		var joinedAt time.Time
 		var claimStart, claimEnd *time.Time
-		if err = rows.Scan(&userID, &claimStart, &claimEnd); err != nil {
+		if err = rows.Scan(&userID, &joinedAt, &claimStart, &claimEnd); err != nil {
 			rows.Close()
 			return err
 		}
 		if _, seen := credited[userID]; !seen {
 			credited[userID] = 0
-			cursor[userID] = start
+			cursor[userID] = joinedAt
+			from[userID] = joinedAt
 		}
 		if claimStart == nil {
 			continue
@@ -2126,9 +2196,12 @@ func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end
 			return err
 		}
 	}
+	// The claim each participant records is their own window, not the
+	// session's, so a later overlapping run subtracts only what they were
+	// actually credited here.
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO focus_credits (user_id, started_at, ended_at)
-		SELECT user_id, $2, $3 FROM timer_participants WHERE timer_run_id = $1`, runID, start, end); err != nil {
+		SELECT user_id, GREATEST($2, joined_at), $3 FROM timer_participants WHERE timer_run_id = $1`, runID, start, end); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `DELETE FROM focus_credits WHERE ended_at < now() - interval '2 days'`)
@@ -2158,6 +2231,38 @@ func (a *app) roomRunActive(ctx context.Context, roomID string) bool {
 	var active bool
 	err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM timer_runs WHERE room_id = $1 AND ended_at IS NULL AND phase <> 'ended')`, roomID).Scan(&active)
 	return err == nil && active
+}
+
+// retargetRunSessions changes how many sessions a live run is aiming for.
+//
+// The session in progress always finishes on the old plan -- people are
+// inside it -- so only the target moves. Aiming at or below the session
+// already running means "stop after this one", which is what someone lowering
+// the number mid-run actually wants; the run then ends the way it always does
+// when the last session completes, rather than being cut short here.
+func (a *app) retargetRunSessions(ctx context.Context, rm room, sessions int) (int, error) {
+	var current, total int
+	var runID string
+	if err := a.db.QueryRow(ctx, `
+		SELECT id, current_session, total_sessions FROM timer_runs
+		WHERE room_id = $1 AND ended_at IS NULL AND phase <> 'ended'`, rm.ID).
+		Scan(&runID, &current, &total); err != nil {
+		return 0, errors.New("There's no run to change.")
+	}
+	if sessions < current {
+		sessions = current
+	}
+	if sessions == total {
+		return total, nil
+	}
+	if _, err := a.db.Exec(ctx,
+		`UPDATE timer_runs SET total_sessions = $1 WHERE id = $2`, sessions, runID); err != nil {
+		return 0, errors.New("Could not change the number of sessions.")
+	}
+	// The room's own setting follows, so the next run starts from the number
+	// that was actually wanted rather than the one that was abandoned.
+	_, _ = a.db.Exec(ctx, `UPDATE rooms SET auto_sessions = $1, updated_at = now() WHERE id = $2`, sessions, rm.ID)
+	return sessions, nil
 }
 
 // applyRoomSettings persists a room's timer configuration. Shared by the web
@@ -2237,11 +2342,22 @@ func (a *app) joinTimer(ctx context.Context, rm room, userID string) (*timerRun,
 	if timer == nil {
 		return wait(joinedQueuedStart)
 	}
-	if timer.Phase == "focus" {
+	// A normal room's focus session is closed: joining mid-block would drop
+	// somebody into a stretch of quiet the room agreed to together, so they
+	// wait for the break.
+	//
+	// A temporary room is the opposite case. It exists to be shared while it
+	// runs -- typically on a stream, with its code on screen -- and making a
+	// viewer wait out a 50 minute block before they can join is the difference
+	// between them joining and them not. They come in immediately and are
+	// credited only from the moment they arrived (see creditFocusSession).
+	if timer.Phase == "focus" && !rm.Ephemeral {
 		return wait(joinedQueuedBreak)
 	}
 	// Joining the lobby claims a seat in session 1; joining during a break
 	// claims the next session — either way the join is also the check-in.
+	// Walking into a temporary room's live focus session claims that session,
+	// which is the one they are now in.
 	confirmFor := timer.CurrentSession
 	if timer.Phase == "break" {
 		confirmFor++

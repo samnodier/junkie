@@ -276,12 +276,14 @@ func TestSoundChangesAreRateLimited(t *testing.T) {
 }
 
 // Only the sound upload may exceed the global request-body cap.
-func TestOnlyTheSoundUploadIsExemptFromTheBodyCap(t *testing.T) {
+func TestOnlySoundCarryingPathsAreExemptFromTheBodyCap(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string
 		want         bool
 	}{
 		{http.MethodPost, "/r/ABC123/sound", true},
+		{http.MethodPost, "/rooms", true}, // creation can carry one too
+		{http.MethodGet, "/rooms", false},
 		{http.MethodGet, "/r/ABC123/sound", false},
 		{http.MethodPost, "/r/ABC123/todos", false},
 		{http.MethodPost, "/r/ABC123/sound/extra", false},
@@ -290,8 +292,8 @@ func TestOnlyTheSoundUploadIsExemptFromTheBodyCap(t *testing.T) {
 		{http.MethodPost, "/r/ABC123", false},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
-		if got := isRoomSoundUpload(req); got != tc.want {
-			t.Errorf("isRoomSoundUpload(%s %s) = %v, want %v", tc.method, tc.path, got, tc.want)
+		if got := carriesRoomSound(req); got != tc.want {
+			t.Errorf("carriesRoomSound(%s %s) = %v, want %v", tc.method, tc.path, got, tc.want)
 		}
 	}
 }
