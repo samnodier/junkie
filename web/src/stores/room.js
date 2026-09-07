@@ -18,6 +18,7 @@ export const useRoomStore = defineStore('room', {
     invite: null, // {name, code} when the viewer isn't a member
     room: null,
     isCreator: false,
+    viewerAdmin: false,
     memberCount: 0,
     timer: null,
     waiting: false,
@@ -50,6 +51,7 @@ export const useRoomStore = defineStore('room', {
         this.invite = null;
         this.room = data.room;
         this.isCreator = data.isCreator;
+        this.viewerAdmin = Boolean(data.viewerAdmin);
         this.memberCount = data.memberCount;
         this.timer = data.timer;
         this.waiting = data.waiting;

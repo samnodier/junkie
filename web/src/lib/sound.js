@@ -7,6 +7,11 @@
 //
 // The catalogue comes from the server (/assets/sounds/sounds.json), so adding
 // a sound is a file plus a line of JSON; nothing here enumerates them.
+//
+// A room can also carry its own uploaded sound. That arrives through the same
+// manifest, as one more entry, which is why nothing below needs a special
+// case for it -- and why the room decides *which* sounds are on offer while
+// this file still decides, per browser, whether any noise is made at all.
 const ENABLED_KEY = 'junkie:phaseSound';
 const CHOICE_KEY = 'junkie:phaseSoundId';
 const MANIFEST_URL = '/assets/sounds/sounds.json';
@@ -49,20 +54,51 @@ export function setSoundChoice(id) {
   primeSound();
 }
 
-// The manifest is fetched once per page. A failed fetch clears the cache so a
-// later call retries rather than being stuck with an empty catalogue.
-let manifest = null;
+// The manifest is fetched once per page, per source. A failed fetch clears
+// that entry so a later call retries rather than being stuck with an empty
+// catalogue.
+//
+// Keyed by URL because a room page asks for its own manifest (the built-in
+// sounds plus that room's) while the profile page asks for the plain one.
+const manifests = new Map();
+
+// setSoundSource points later loads at a room's catalogue. Passing no code
+// goes back to the built-in list.
+let manifestURL = MANIFEST_URL;
+export function setSoundSource(roomCode) {
+  const next = roomCode ? `/r/${encodeURIComponent(roomCode)}/sounds.json` : MANIFEST_URL;
+  if (next === manifestURL) return;
+  manifestURL = next;
+  // The chosen sound may not exist in the new catalogue; element() already
+  // falls back, but drop the prepared audio so it isn't the wrong one.
+  audio = null;
+  loadedFile = '';
+}
+
 export function loadSounds() {
-  if (!manifest) {
-    manifest = fetch(MANIFEST_URL, { credentials: 'same-origin' })
-      .then((res) => (res.ok ? res.json() : []))
-      .then((list) => (Array.isArray(list) ? list : []))
-      .catch(() => {
-        manifest = null;
-        return [];
-      });
+  const url = manifestURL;
+  if (!manifests.has(url)) {
+    manifests.set(
+      url,
+      fetch(url, { credentials: 'same-origin' })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((list) => (Array.isArray(list) ? list : []))
+        .catch(() => {
+          manifests.delete(url);
+          return [];
+        }),
+    );
   }
-  return manifest;
+  return manifests.get(url);
+}
+
+// soundURL resolves a catalogue entry to something playable. A room's own
+// sound carries an absolute url; the built-ins carry a filename under
+// /assets/sounds.
+export function soundURL(pick) {
+  if (!pick) return '';
+  if (pick.url) return pick.url;
+  return pick.file ? `/assets/sounds/${encodeURIComponent(pick.file)}` : '';
 }
 
 // One <audio> element, rebuilt only when the chosen sound changes. Holding it
@@ -74,11 +110,12 @@ let loadedFile = '';
 async function element() {
   const list = await loadSounds();
   const pick = list.find((s) => s?.id === soundChoice()) || list[0];
-  if (!pick?.file || typeof Audio === 'undefined') return null;
-  if (!audio || loadedFile !== pick.file) {
-    audio = new Audio(`/assets/sounds/${encodeURIComponent(pick.file)}`);
+  const src = soundURL(pick);
+  if (!src || typeof Audio === 'undefined') return null;
+  if (!audio || loadedFile !== src) {
+    audio = new Audio(src);
     audio.preload = 'auto';
-    loadedFile = pick.file;
+    loadedFile = src;
   }
   return audio;
 }

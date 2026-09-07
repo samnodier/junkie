@@ -343,7 +343,7 @@ onUnmounted(() => {
                 </form>
                 <!-- Outside the form above: this one is a per-browser setting
                      that saves itself, not part of the room's timer settings. -->
-                <SoundPref />
+                <SoundPref :room-code="room.code" :can-upload="room.viewerAdmin" />
               </details>
               <details class="room-details panel" data-room-section="share" :open="sections.share.value" @toggle="toggleSection('share', $event.target.open)">
                 <summary><span class="label">Share room</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>

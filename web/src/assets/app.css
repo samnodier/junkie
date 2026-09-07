@@ -1441,6 +1441,17 @@ span.room-member-locked {
 .connection-head:last-child {
   margin-bottom: 0;
 }
+/* The file behind the chosen sound, under the picker. */
+.sound-pref-filename {
+  margin: 0;
+  font-size: var(--fs-small);
+}
+.sound-pref-upload {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
 /* The event log. Monospace and one line per event on purpose: it is meant to
    be read the way a terminal is, not parsed out of a table. The line scrolls
    sideways rather than wrapping, so the timestamp column stays aligned. */

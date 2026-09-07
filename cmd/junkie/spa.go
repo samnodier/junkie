@@ -441,7 +441,12 @@ func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 			"ephemeral":      rm.Ephemeral,
 			"requireCheckin": rm.RequireCheckin,
 		},
-		"isCreator":   rm.CreatorID == u.ID,
+		"isCreator": rm.CreatorID == u.ID,
+		// Room admin, for the controls that need it -- the sound, and the
+		// link into the room's history. Room settings deliberately do not:
+		// any member can change the timer, so a room can organise itself
+		// when nobody with a badge is around.
+		"viewerAdmin": a.canAdminRoom(r.Context(), rm, u.ID),
 		"memberCount": memberCount,
 		"timer":       apiRoomTimer(timer),
 		"waiting":     waiting,

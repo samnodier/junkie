@@ -214,7 +214,29 @@ func securityHeaders(next http.Handler) http.Handler {
 		if isSecureRequest(r) {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		// Every request is capped at maxRequestBody, which is far below any
+		// audio file. The room-sound upload is the one route that needs more,
+		// and it applies its own, smaller limit -- so the exemption is named
+		// here rather than the global cap being raised for everything.
+		if isRoomSoundUpload(r) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRoomSoundBytes+4096)
+		} else {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isRoomSoundUpload matches POST /r/{code}/sound, the only path allowed past
+// the global request-body cap.
+func isRoomSoundUpload(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	rest, ok := strings.CutPrefix(r.URL.Path, "/r/")
+	if !ok {
+		return false
+	}
+	code, action, found := strings.Cut(rest, "/")
+	return found && action == "sound" && code != "" && !strings.Contains(code, "/")
 }

@@ -406,6 +406,12 @@ func main() {
 	mux.HandleFunc("GET /api/admin/events", a.requireAuth(a.apiAdminEvents))
 	mux.HandleFunc("GET /api/room/{code}/events", a.requireAuth(a.apiRoomEvents))
 	mux.HandleFunc("GET /r/{code}/history", a.requireAuth(a.spaPage))
+	mux.HandleFunc("POST /r/{code}/sound", a.requireAuth(a.uploadRoomSound))
+	// Not requireAuth: a temporary room's sound has to reach an OBS browser
+	// source, which carries no cookies. serveRoomSound enforces membership
+	// itself for every other room.
+	mux.HandleFunc("GET /r/{code}/sound", a.serveRoomSound)
+	mux.HandleFunc("GET /r/{code}/sounds.json", a.roomSoundsManifest)
 	mux.HandleFunc("GET /api/admin/users/{id}", a.requireAuth(a.apiAdminUser))
 	mux.HandleFunc("GET /api/admin/rooms/{id}", a.requireAuth(a.apiAdminRoom))
 	mux.HandleFunc("POST /admin/rooms/{id}/room-role", a.requireAdminMutation(a.adminSetRoomRole))
