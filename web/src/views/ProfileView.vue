@@ -67,6 +67,9 @@ async function submitAvatar() {
   }
 }
 
+// Rooms this account can't simply take with it when it goes.
+const ownedRooms = computed(() => profile.value?.ownedRooms || []);
+
 function confirmDelete(event) {
   if (!confirm('Permanently delete your account and all its data? This cannot be undone.')) {
     event.preventDefault();
@@ -257,7 +260,29 @@ onMounted(async () => {
         <div class="profile-preference profile-danger">
           <div>
             <strong>Delete account</strong>
-            <p class="muted">Permanently deletes your account, any rooms you created, your todos, and your activity history. This cannot be undone.</p>
+            <p class="muted">Permanently deletes your account, your todos, and your activity history. This cannot be undone. Rooms you're the only member of go with it; anything with other people in it you deal with below.</p>
+          </div>
+        </div>
+        <!-- Rooms other people are in can't just vanish with the account, so
+             each one is handed over or deleted deliberately first. -->
+        <div v-if="ownedRooms.length" class="profile-owned-rooms">
+          <p class="muted">You own {{ ownedRooms.length === 1 ? 'a room' : 'rooms' }} other people are in. Hand each one over, or delete it, before deleting your account.</p>
+          <div v-for="r in ownedRooms" :key="r.code" class="profile-owned-room">
+            <div>
+              <strong>{{ r.name }}</strong>
+              <span class="mono muted">{{ r.code }}</span>
+            </div>
+            <form method="post" action="/profile/rooms/hand-over" class="inline-form">
+              <input type="hidden" name="code" :value="r.code">
+              <label class="visually-hidden" :for="`hand-over-${r.code}`">Hand {{ r.name }} to</label>
+              <select :id="`hand-over-${r.code}`" name="user_id">
+                <option v-for="c in r.candidates" :key="c.id" :value="c.id">
+                  {{ c.displayName }}{{ c.admin ? ' (admin)' : '' }}
+                </option>
+              </select>
+              <button type="submit" class="btn-ghost btn-compact">Hand over</button>
+            </form>
+            <a :href="`/r/${r.code}`" class="muted">Open the room to delete it instead</a>
           </div>
         </div>
         <form class="profile-delete-form" method="post" action="/profile/delete" @submit="confirmDelete">

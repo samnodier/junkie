@@ -1441,6 +1441,30 @@ span.room-member-locked {
 .connection-head:last-child {
   margin-bottom: 0;
 }
+/* Rooms standing between an account and its deletion. */
+.profile-owned-rooms {
+  display: grid;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.profile-owned-room {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.profile-owned-room .inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.profile-owned-room select {
+  width: auto;
+  min-width: 12rem;
+}
 .member-actions {
   display: flex;
   flex-wrap: wrap;

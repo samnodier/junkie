@@ -175,10 +175,29 @@ func (a *app) apiProfile(w http.ResponseWriter, r *http.Request) {
 	rooms, _ := a.roomsForUser(r.Context(), u.ID)
 	heat, _ := a.activity(r.Context(), u.ID)
 	discordUsername, discordLinked := a.discordLinkForUser(r.Context(), u.ID)
+	// Rooms that stand between this account and being deleted, each with the
+	// people it could be handed to. Admins come first in the roster, so the
+	// natural pick is already at the top of the list.
+	owned, _ := a.roomsNeedingDisposition(r.Context(), u.ID)
+	ownedOut := make([]map[string]any, 0, len(owned))
+	for _, o := range owned {
+		candidates := make([]map[string]any, 0, len(o.Members))
+		for _, m := range o.Members {
+			candidates = append(candidates, map[string]any{
+				"id":          m.User.ID,
+				"displayName": m.User.DisplayName,
+				"admin":       m.IsAdmin(),
+			})
+		}
+		ownedOut = append(ownedOut, map[string]any{
+			"code": o.Room.Code, "name": o.Room.Name, "candidates": candidates,
+		})
+	}
 	writeJSON(w, map[string]any{
 		"roomsCount": len(rooms),
 		"heatmap":    heatmapJSON(heat),
 		"discord":    map[string]any{"linked": discordLinked, "username": discordUsername},
+		"ownedRooms": ownedOut,
 	})
 }
 

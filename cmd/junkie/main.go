@@ -304,6 +304,7 @@ func main() {
 	mux.HandleFunc("POST /profile/username", a.requireAuth(a.changeUsername))
 	mux.HandleFunc("POST /profile/avatar", a.requireAuth(a.uploadAvatar))
 	mux.HandleFunc("POST /profile/avatar/remove", a.requireAuth(a.removeAvatar))
+	mux.HandleFunc("POST /profile/rooms/hand-over", a.requireAuth(a.handOverRoom))
 	mux.HandleFunc("GET /avatar/{id}", a.requireAuth(a.serveAvatar))
 	mux.HandleFunc("POST /profile/connect-link", a.requireAuth(a.createConnectLink))
 	mux.HandleFunc("GET /connections", a.spaPage)
@@ -565,6 +566,23 @@ func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		fail("The owner account can't be deleted here. Reassign JUNKIE_OWNER_USERNAME first.")
 		return
 	}
+	// Rooms this user owns that other people are in have to be dealt with
+	// first -- handed over or deleted on purpose. Letting the account cascade
+	// take them meant one person closing their account could vaporise a room
+	// full of other people's work, silently.
+	//
+	// Checked before the password is asked for, not after: it's a fact about
+	// the account that their own profile page already shows them, and being
+	// told to sort the rooms out only after typing a password would be a
+	// pointless second trip.
+	if pending, err := a.roomsNeedingDisposition(r.Context(), u.ID); err != nil {
+		fail("Could not check your rooms.")
+		return
+	} else if len(pending) > 0 {
+		fail(fmt.Sprintf("You still own %s with other people in %s. Hand each one over or delete it first.",
+			pluralize(len(pending), "room", "rooms"), pluralize(len(pending), "it", "them")))
+		return
+	}
 	password := r.FormValue("password")
 	tx, err := a.db.Begin(r.Context())
 	if err != nil {
@@ -697,6 +715,34 @@ func (a *app) uploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/profile?notice="+url.QueryEscape("Profile picture updated."), http.StatusSeeOther)
+}
+
+// pluralize picks the singular or plural wording for n.
+func pluralize(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// handOverRoom is the profile page's "give this room to someone else", used
+// to clear the way for deleting an account. It hands over immediately; see
+// handOverRoomNow for why there is no undo window on this path.
+func (a *app) handOverRoom(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	fail := func(msg string) {
+		http.Redirect(w, r, "/profile?error="+url.QueryEscape(msg), http.StatusSeeOther)
+	}
+	rm, ok := a.findRoom(r.Context(), r.FormValue("code"))
+	if !ok {
+		fail("No room found with that code.")
+		return
+	}
+	if err := a.handOverRoomNow(r.Context(), rm, u.ID, r.FormValue("user_id")); err != nil {
+		fail(err.Error())
+		return
+	}
+	http.Redirect(w, r, "/profile?notice="+url.QueryEscape(fmt.Sprintf("%s is now someone else's room.", rm.Name)), http.StatusSeeOther)
 }
 
 func (a *app) removeAvatar(w http.ResponseWriter, r *http.Request) {
@@ -2860,6 +2906,81 @@ func (a *app) cancelOwnershipTransfer(ctx context.Context, rm room, actorID stri
 	if tag.RowsAffected() == 0 {
 		return errors.New("that transfer has already gone through")
 	}
+	return nil
+}
+
+// ownedRoom is a room the account-deletion flow has to ask about: one this
+// user owns that other people are also in.
+type ownedRoom struct {
+	Room    room
+	Members []roomMember // everyone except the owner, admins first
+}
+
+// roomsNeedingDisposition lists the rooms that stand between this user and
+// deleting their account. Rooms they are alone in are absent: nothing is lost
+// by those going with the account, so they are never worth a question.
+func (a *app) roomsNeedingDisposition(ctx context.Context, userID string) ([]ownedRoom, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT r.id, r.code, r.name, r.creator_id
+		FROM rooms r
+		WHERE r.creator_id = $1
+		  AND EXISTS (SELECT 1 FROM room_members m WHERE m.room_id = r.id AND m.user_id <> $1)
+		ORDER BY r.created_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var owned []ownedRoom
+	for rows.Next() {
+		var o ownedRoom
+		if err := rows.Scan(&o.Room.ID, &o.Room.Code, &o.Room.Name, &o.Room.CreatorID); err != nil {
+			return nil, err
+		}
+		owned = append(owned, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, o := range owned {
+		roster, err := a.roomRoster(ctx, o.Room)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range roster {
+			if m.User.ID != userID {
+				owned[i].Members = append(owned[i].Members, m)
+			}
+		}
+	}
+	return owned, nil
+}
+
+// handOverRoomNow changes a room's owner immediately, with no undo window.
+//
+// The window exists so a stray click can be taken back, and that reasoning
+// does not carry here: this runs while its owner is closing their account, so
+// there would be nobody left to take it back, and a room left pointing at a
+// deleted user is exactly the outcome the whole disposition step is for.
+func (a *app) handOverRoomNow(ctx context.Context, rm room, actorID, targetID string) error {
+	if rm.CreatorID != actorID {
+		return errors.New("only the room's owner can hand it over")
+	}
+	if targetID == "" || targetID == actorID {
+		return errors.New("choose someone to hand the room to")
+	}
+	if !a.isRoomMember(ctx, rm.ID, targetID) {
+		return errors.New("choose someone who is in the room")
+	}
+	if _, err := a.db.Exec(ctx, `
+		UPDATE rooms
+		SET creator_id = $1, pending_owner_id = NULL, ownership_transfer_at = NULL, updated_at = now()
+		WHERE id = $2 AND creator_id = $3`, targetID, rm.ID, actorID); err != nil {
+		return err
+	}
+	// The new owner's role row is now redundant but harmless; clearing it
+	// keeps "creator implies admin" the only rule that grants them anything.
+	_, _ = a.db.Exec(ctx, `UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3`, roomRoleMember, rm.ID, targetID)
+	a.hub.broadcast(rm.Code, "members")
 	return nil
 }
 

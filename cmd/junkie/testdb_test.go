@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Database-backed tests run against a throwaway `junkie_test` database, never
@@ -84,6 +85,11 @@ func (a *app) asUser(u user) *app {
 	return a
 }
 
+// testUserPassword is what every user makeUser creates signs in with, so
+// tests that exercise a password-confirmed path (deleting an account) go
+// through the real bcrypt check rather than around it.
+const testUserPassword = "test-password"
+
 // makeUser inserts a user with a unique name and removes it when the test
 // ends -- which cascades to their rooms, memberships, todos and activity, so
 // tests leave the database as they found it.
@@ -91,11 +97,15 @@ func makeUser(t *testing.T, a *app, displayName string) user {
 	t.Helper()
 	ctx := context.Background()
 	username := fmt.Sprintf("t%d%s", rand.Int63(), "u")
+	hash, err := bcrypt.GenerateFromPassword([]byte(testUserPassword), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var u user
 	u.Username, u.DisplayName, u.Role = username, displayName, "user"
 	if err := a.db.QueryRow(ctx,
-		`INSERT INTO users (username, password_hash, display_name) VALUES ($1, 'x', $2) RETURNING id`,
-		username, displayName).Scan(&u.ID); err != nil {
+		`INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id`,
+		username, string(hash), displayName).Scan(&u.ID); err != nil {
 		t.Fatalf("make user: %v", err)
 	}
 	t.Cleanup(func() {
