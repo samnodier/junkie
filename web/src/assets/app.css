@@ -1446,6 +1446,53 @@ span.room-member-locked {
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
+/* The pending-transfer countdown, which doubles as its own undo. It sits
+   faintly red to read as live rather than decorative, and swaps the time for
+   the undo affordance under the cursor -- one control, so there is no second
+   button to mis-click next to the one that started the transfer. */
+.transfer-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 3px var(--sp-3);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.transfer-countdown svg {
+  width: 13px;
+  height: 13px;
+}
+.transfer-countdown-undo {
+  display: none;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.transfer-countdown:hover,
+.transfer-countdown:focus-visible {
+  color: var(--accent-ink);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.transfer-countdown:hover .transfer-countdown-time,
+.transfer-countdown:focus-visible .transfer-countdown-time {
+  display: none;
+}
+.transfer-countdown:hover .transfer-countdown-undo,
+.transfer-countdown:focus-visible .transfer-countdown-undo {
+  display: inline-flex;
+}
+.transfer-countdown[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
 .profile-username-form {
   display: flex;
   align-items: end;

@@ -454,14 +454,26 @@ func (a *app) apiRoomMembers(w http.ResponseWriter, r *http.Request) {
 			"creator":   m.Creator,
 		})
 	}
-	// Deliberately no focus stats, activity or last-seen: a room admin manages
-	// the room, and never gets a window onto what its members are doing.
-	writeJSON(w, map[string]any{
+	payload := map[string]any{
 		"room":        map[string]string{"code": rm.Code, "name": rm.Name},
 		"members":     out,
 		"viewerAdmin": viewerAdmin,
 		"viewerOwner": rm.CreatorID == u.ID,
-	})
+		// Temporary rooms can't change hands, so their page shouldn't offer it.
+		"canTransfer": rm.CreatorID == u.ID && !rm.Ephemeral,
+	}
+	// A pending transfer is shown to the owner who started it and to nobody
+	// else: the recipient finds out when the room is theirs, so a handover
+	// that gets taken back within the window was never visible to them.
+	if rm.CreatorID == u.ID && !rm.OwnershipTransferAt.IsZero() {
+		payload["pendingTransfer"] = map[string]any{
+			"userId":    rm.PendingOwnerID,
+			"settlesAt": rm.OwnershipTransferAt.UTC().Format(time.RFC3339),
+		}
+	}
+	// Deliberately no focus stats, activity or last-seen: a room admin manages
+	// the room, and never gets a window onto what its members are doing.
+	writeJSON(w, payload)
 }
 
 // apiConnections lists the caller's connections with their heatmaps, newest

@@ -94,6 +94,12 @@ type room struct {
 	// didn't. Nobody is exempt after session 1 — presence is proven by
 	// actions (starting, joining, checking in), never by role.
 	RequireCheckin bool
+
+	// PendingOwnerID and OwnershipTransferAt hold an ownership transfer that
+	// has been started but not yet settled. Both are zero for the vast
+	// majority of rooms; settleOwnershipTransfer applies them on read.
+	PendingOwnerID      string
+	OwnershipTransferAt time.Time
 }
 
 type todo struct {
@@ -1409,6 +1415,20 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			requireCheckin = v == "1"
 		}
 		_ = a.applyRoomSettings(r.Context(), rm.ID, focus, breaks, sessions, autoRoll, requireCheckin)
+	case "transfer-ownership":
+		if err := a.startOwnershipTransfer(r.Context(), rm, u.ID, r.FormValue("user_id")); err != nil {
+			membersRedirect(w, r, rm.Code, err.Error())
+			return
+		}
+		membersRedirect(w, r, rm.Code, "")
+		return
+	case "cancel-transfer":
+		if err := a.cancelOwnershipTransfer(r.Context(), rm, u.ID); err != nil {
+			membersRedirect(w, r, rm.Code, err.Error())
+			return
+		}
+		membersRedirect(w, r, rm.Code, "")
+		return
 	case "make-admin", "remove-admin":
 		// Room-admin rights are handed out by people who already hold them --
 		// the creator, or an existing admin -- exactly like a Discord or
@@ -2737,8 +2757,113 @@ func (a *app) findRoom(ctx context.Context, code string) (room, bool) {
 		return room{}, false
 	}
 	var rm room
-	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral, &rm.RequireCheckin)
-	return rm, err == nil
+	var pendingOwner *string
+	var transferAt *time.Time
+	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin, pending_owner_id, ownership_transfer_at FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral, &rm.RequireCheckin, &pendingOwner, &transferAt)
+	if err != nil {
+		return room{}, false
+	}
+	if pendingOwner != nil {
+		rm.PendingOwnerID = *pendingOwner
+	}
+	if transferAt != nil {
+		rm.OwnershipTransferAt = *transferAt
+	}
+	// Settling here, on the read, is what makes the window survive a sleeping
+	// instance: a room whose deadline passed while nobody was looking hands
+	// over the moment someone next opens it, rather than waiting for a timer
+	// that died with the process.
+	return a.settleOwnershipTransfer(ctx, rm), true
+}
+
+// ownershipTransferWindow is how long a transfer can be taken back. Short
+// enough that the new owner isn't left waiting, long enough to undo the click
+// you didn't mean to make.
+const ownershipTransferWindow = 10 * time.Minute
+
+// settleOwnershipTransfer applies a due transfer and returns the room as it
+// now stands. A transfer that is still within its window, or whose target has
+// since left or deleted their account, is left alone -- the latter clears
+// itself so the room doesn't carry a transfer that can never complete.
+func (a *app) settleOwnershipTransfer(ctx context.Context, rm room) room {
+	if rm.OwnershipTransferAt.IsZero() || time.Now().Before(rm.OwnershipTransferAt) {
+		return rm
+	}
+	if rm.PendingOwnerID == "" || !a.isRoomMember(ctx, rm.ID, rm.PendingOwnerID) {
+		_, _ = a.db.Exec(ctx, `UPDATE rooms SET pending_owner_id = NULL, ownership_transfer_at = NULL WHERE id = $1`, rm.ID)
+		rm.PendingOwnerID, rm.OwnershipTransferAt = "", time.Time{}
+		return rm
+	}
+	previous := rm.CreatorID
+	// One statement, guarded on the deadline still being the one we read, so
+	// two concurrent readers can't both believe they performed the handover.
+	tag, err := a.db.Exec(ctx, `
+		UPDATE rooms
+		SET creator_id = pending_owner_id, pending_owner_id = NULL, ownership_transfer_at = NULL, updated_at = now()
+		WHERE id = $1 AND ownership_transfer_at = $2`, rm.ID, rm.OwnershipTransferAt)
+	if err != nil || tag.RowsAffected() == 0 {
+		return rm
+	}
+	// The outgoing owner stays in the room as an admin: they were its
+	// authority a moment ago, and dropping them to a plain member would be a
+	// surprise nobody asked for.
+	_, _ = a.db.Exec(ctx, `UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3`, roomRoleAdmin, rm.ID, previous)
+	rm.CreatorID, rm.PendingOwnerID, rm.OwnershipTransferAt = rm.PendingOwnerID, "", time.Time{}
+	a.hub.broadcast(rm.Code, "members")
+	return rm
+}
+
+// startOwnershipTransfer records a handover for later. Only the current owner
+// may start one, only onto an existing room admin -- which is what keeps
+// ownership off every row of the roster -- and never on a temporary room,
+// which will not outlive the window.
+func (a *app) startOwnershipTransfer(ctx context.Context, rm room, actorID, targetID string) error {
+	if rm.CreatorID != actorID {
+		return errors.New("only the room's owner can transfer it")
+	}
+	if rm.Ephemeral {
+		return errors.New("a temporary room can't change hands — it disappears when its run ends")
+	}
+	if targetID == "" || targetID == rm.CreatorID {
+		return errors.New("choose someone else to hand the room to")
+	}
+	if memberRole := a.roomMemberRole(ctx, rm.ID, targetID); memberRole != roomRoleAdmin {
+		return errors.New("make them an admin first, then hand the room over")
+	}
+	_, err := a.db.Exec(ctx, `
+		UPDATE rooms SET pending_owner_id = $1, ownership_transfer_at = now() + $2::interval WHERE id = $3`,
+		targetID, ownershipTransferWindow.String(), rm.ID)
+	return err
+}
+
+// cancelOwnershipTransfer takes back a transfer that hasn't settled yet. Only
+// the owner who started it can: the recipient is never shown the pending
+// handover, so there is nothing for them to accept or refuse.
+func (a *app) cancelOwnershipTransfer(ctx context.Context, rm room, actorID string) error {
+	if rm.CreatorID != actorID {
+		return errors.New("only the room's owner can cancel a transfer")
+	}
+	tag, err := a.db.Exec(ctx, `
+		UPDATE rooms SET pending_owner_id = NULL, ownership_transfer_at = NULL
+		WHERE id = $1 AND ownership_transfer_at IS NOT NULL`, rm.ID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("that transfer has already gone through")
+	}
+	return nil
+}
+
+// roomMemberRole reads a member's stored role, or "" when they aren't in the
+// room at all.
+func (a *app) roomMemberRole(ctx context.Context, roomID, userID string) string {
+	var role string
+	if err := a.db.QueryRow(ctx,
+		`SELECT role FROM room_members WHERE room_id = $1 AND user_id = $2`, roomID, userID).Scan(&role); err != nil {
+		return ""
+	}
+	return role
 }
 
 func (a *app) isRoomMember(ctx context.Context, roomID, userID string) bool {
