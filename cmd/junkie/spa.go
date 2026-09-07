@@ -392,6 +392,13 @@ func (a *app) apiAdmin(w http.ResponseWriter, r *http.Request) {
 // state — the JSON twin of roomPage.
 func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
+	// The heaviest read in the app -- timer, participants and every todo in
+	// the room -- and clients refetch it on every broadcast, so it is the one
+	// worth a ceiling. Well above what a member in a busy room produces.
+	if !a.limiter.allow("roomread:"+u.ID, maxRoomReadsPerMinute, time.Minute) {
+		writeJSONError(w, http.StatusTooManyRequests, "Too many requests — slow down.")
+		return
+	}
 	rm, ok := a.findRoom(r.Context(), r.PathValue("code"))
 	if !ok {
 		writeJSONError(w, http.StatusNotFound, "room not found")

@@ -219,11 +219,56 @@ type hub struct {
 	rooms map[string]map[*websocket.Conn]struct{}
 }
 
+// Connection-pool sizing, chosen rather than inherited.
+//
+// pgxpool's default MaxConns is max(4, NumCPU), which on a small shared
+// instance means about four -- and every viewer in a room competes for them
+// on each phase change, since a broadcast makes every client refetch at once.
+// That queueing, not memory, is what puts a ceiling on how many people a room
+// can hold. Raising it is the cheapest headroom available; raising it too far
+// just moves the exhaustion to the database's own connection limit, which is
+// the scarcer resource on a managed free tier.
+const (
+	defaultMaxConns = 12
+	// Managed Postgres closes idle connections out from under a pool, so
+	// retire them on our own schedule instead of discovering it mid-query.
+	poolMaxConnLifetime = 30 * time.Minute
+	poolMaxConnIdleTime = 5 * time.Minute
+)
+
+// openPool builds the database pool with limits that are set on purpose.
+// DATABASE_MAX_CONNS overrides the default, so the ceiling can be raised on a
+// bigger instance without a deploy.
+func openPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	// A URL that already carries pool_max_conns means someone chose a number
+	// there; don't overrule it.
+	if !strings.Contains(databaseURL, "pool_max_conns") {
+		cfg.MaxConns = int32(intFromEnv("DATABASE_MAX_CONNS", defaultMaxConns, 1, 200))
+	}
+	cfg.MaxConnLifetime = poolMaxConnLifetime
+	cfg.MaxConnIdleTime = poolMaxConnIdleTime
+	return pgxpool.NewWithConfig(ctx, cfg)
+}
+
+// intFromEnv reads a bounded integer from the environment, falling back to
+// fallback when unset, unparseable, or out of range.
+func intFromEnv(name string, fallback, min, max int) int {
+	v, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || v < min || v > max {
+		return fallback
+	}
+	return v
+}
+
 func main() {
 	ctx := context.Background()
 	databaseURL := getenv("DATABASE_URL", "postgres://junkie:junkie@localhost:5432/junkie?sslmode=disable")
 
-	db, err := pgxpool.New(ctx, databaseURL)
+	db, err := openPool(ctx, databaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1421,6 +1466,14 @@ func membersRedirect(w http.ResponseWriter, r *http.Request, code, errMsg string
 	http.Redirect(w, r, dest, http.StatusSeeOther)
 }
 
+// Room traffic ceilings. Both are per signed-in user and deliberately
+// generous: a busy room legitimately produces a burst of reads, because every
+// member refetches whenever anyone changes anything.
+const (
+	maxRoomActionsPerMinute = 60
+	maxRoomReadsPerMinute   = 120
+)
+
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/r/"), "/")
@@ -1436,6 +1489,15 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if !a.isRoomMember(r.Context(), rm.ID, u.ID) {
 		http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
+		return
+	}
+	// Every room mutation funnels through here, and each one broadcasts to
+	// every other member -- so an unbounded caller costs the whole room, not
+	// just themselves. The ceiling is far above what tapping the interface
+	// can produce (a todo, a check-in, a pause is one call), and low enough
+	// that a script can't drive the fan-out.
+	if !a.limiter.allow("roomaction:"+u.ID, maxRoomActionsPerMinute, time.Minute) {
+		http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("You're doing that too quickly — give it a moment."), http.StatusSeeOther)
 		return
 	}
 	switch action {
