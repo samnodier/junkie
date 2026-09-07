@@ -1334,7 +1334,10 @@ func (a *app) joinRoom(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, back+"?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
 		return
 	}
-	a.addRoomMember(r.Context(), rm.ID, u.ID)
+	if err := a.addRoomMember(r.Context(), rm.ID, u.ID); err != nil {
+		http.Redirect(w, r, back+"?error="+url.QueryEscape(capitalizeFirst(err.Error())+"."), http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
 }
 
@@ -1364,7 +1367,10 @@ func (a *app) joinRoomIntent(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
 			return
 		}
-		a.addRoomMember(r.Context(), rm.ID, u.ID)
+		if err := a.addRoomMember(r.Context(), rm.ID, u.ID); err != nil {
+			http.Redirect(w, r, back+"?error="+url.QueryEscape(capitalizeFirst(err.Error())+"."), http.StatusSeeOther)
+			return
+		}
 		http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
 		return
 	}
@@ -1387,7 +1393,10 @@ func (a *app) joinRoomConfirmPost(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape("No room found with that code."), http.StatusSeeOther)
 		return
 	}
-	a.addRoomMember(r.Context(), rm.ID, u.ID)
+	if err := a.addRoomMember(r.Context(), rm.ID, u.ID); err != nil {
+		http.Redirect(w, r, "/dashboard?error="+url.QueryEscape(capitalizeFirst(err.Error())+"."), http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/r/"+rm.Code, http.StatusSeeOther)
 }
 
@@ -1436,7 +1445,10 @@ func (a *app) enterFocusRoom(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "room not found")
 		return
 	}
-	a.addRoomMember(r.Context(), rm.ID, u.ID)
+	if err := a.addRoomMember(r.Context(), rm.ID, u.ID); err != nil {
+		writeJSONError(w, http.StatusConflict, capitalizeFirst(err.Error())+".")
+		return
+	}
 	if timer, outcome, err := a.joinTimer(r.Context(), rm, u.ID); err != nil {
 		log.Printf("enter focus room %s: %v", rm.Code, err)
 	} else if outcome == joinedNow && timer != nil {
@@ -1842,7 +1854,10 @@ func (a *app) roomWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	a.hub.join(code, c)
+	if !a.hub.join(code, c) {
+		c.Close(websocket.StatusTryAgainLater, "room is at capacity")
+		return
+	}
 	defer a.hub.leave(code, c)
 	for {
 		_, _, err := c.Read(r.Context())
@@ -1863,7 +1878,10 @@ func (a *app) userWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channel := userChannel(u.ID)
-	a.hub.join(channel, c)
+	if !a.hub.join(channel, c) {
+		c.Close(websocket.StatusTryAgainLater, "too many open connections")
+		return
+	}
 	defer a.hub.leave(channel, c)
 	for {
 		_, _, err := c.Read(r.Context())
@@ -3259,18 +3277,49 @@ func (a *app) isRoomMember(ctx context.Context, roomID, userID string) bool {
 	return err == nil && exists
 }
 
+// maxRoomMembers is how many people one room may hold.
+//
+// The ceiling isn't storage or memory -- it's the database. Every change in a
+// room broadcasts to every member, and each of them refetches, so a room's
+// cost at rest is small and its cost per event is linear in its size. A
+// hundred is far above any real room here and low enough that a full one
+// can't exhaust the connection pool on a small instance. Raise it once the
+// refetch is no longer per-event.
+const maxRoomMembers = 100
+
+// errRoomFull is returned by addRoomMember when the room is at capacity.
+var errRoomFull = fmt.Errorf("this room is full (%d people)", maxRoomMembers)
+
 // addRoomMember is every join path's single entry point -- web, Discord and
-// the terminal client all land here -- which is why the event is logged from
-// inside it rather than at each caller. ON CONFLICT DO NOTHING means someone
-// re-opening a room they are already in inserts nothing, and so logs nothing.
-func (a *app) addRoomMember(ctx context.Context, roomID, userID string) {
-	tag, err := a.db.Exec(ctx, `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, userID)
-	if err != nil || tag.RowsAffected() == 0 {
-		return
+// the terminal client all land here -- which is why the cap is enforced and
+// the event logged from inside it rather than at each caller. ON CONFLICT DO
+// NOTHING means someone re-opening a room they are already in inserts
+// nothing, and so logs nothing.
+//
+// The insert selects its own row count against the cap, so two people
+// arriving at once can't both pass a check-then-insert and land the room one
+// over.
+func (a *app) addRoomMember(ctx context.Context, roomID, userID string) error {
+	tag, err := a.db.Exec(ctx, `
+		INSERT INTO room_members (room_id, user_id)
+		SELECT $1, $2
+		WHERE (SELECT count(*) FROM room_members WHERE room_id = $1) < $3
+		ON CONFLICT DO NOTHING`, roomID, userID, maxRoomMembers)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		// Either they were already in, or the room is full. Only the second
+		// is worth telling anyone about.
+		if a.isRoomMember(ctx, roomID, userID) {
+			return nil
+		}
+		return errRoomFull
 	}
 	var code string
 	_ = a.db.QueryRow(ctx, `SELECT code FROM rooms WHERE id = $1`, roomID).Scan(&code)
 	a.logEvent(ctx, userID, eventRoomJoined, "user", userID, roomID, map[string]string{"room": code})
+	return nil
 }
 
 // Room-level roles (migration 018). These are not the site-wide users.role
@@ -3507,13 +3556,31 @@ func serveStatic(w http.ResponseWriter, r *http.Request, contentType string, dat
 	_, _ = w.Write(data)
 }
 
-func (h *hub) join(code string, c *websocket.Conn) {
+// maxRoomConnections is how many live sockets one channel may hold.
+//
+// Separate from maxRoomMembers, and deliberately larger: members and
+// connections are different numbers. One person can have the room open on a
+// laptop and a phone, and a temporary room's public overlay adds sockets that
+// belong to no member at all. The ceiling is here so a channel can't grow
+// without bound -- each connection is a goroutine and a broadcast target --
+// not to ration ordinary use.
+const maxRoomConnections = 300
+
+// join adds a connection to a channel, reporting whether there was room. A
+// refused connection is closed by the caller rather than silently kept out of
+// the broadcast set, which would leave it looking connected and never
+// updating.
+func (h *hub) join(code string, c *websocket.Conn) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.rooms[code] == nil {
 		h.rooms[code] = map[*websocket.Conn]struct{}{}
 	}
+	if len(h.rooms[code]) >= maxRoomConnections {
+		return false
+	}
 	h.rooms[code][c] = struct{}{}
+	return true
 }
 
 func (h *hub) leave(code string, c *websocket.Conn) {

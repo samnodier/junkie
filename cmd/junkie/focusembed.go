@@ -97,7 +97,10 @@ func (a *app) focusEmbedWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	a.hub.join(rm.Code, c)
+	if !a.hub.join(rm.Code, c) {
+		c.Close(websocket.StatusTryAgainLater, "room is at capacity")
+		return
+	}
 	defer a.hub.leave(rm.Code, c)
 	for {
 		// Read-only: incoming frames are discarded, they exist only to keep

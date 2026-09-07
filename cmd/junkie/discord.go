@@ -1090,7 +1090,10 @@ func (b *discordBot) handleStart(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 	if !a.isRoomMember(ctx, rm.ID, u.ID) {
-		a.addRoomMember(ctx, rm.ID, u.ID)
+		if err := a.addRoomMember(ctx, rm.ID, u.ID); err != nil {
+			b.ephemeral(s, i, capitalizeFirst(err.Error())+".")
+			return
+		}
 	}
 	_, created, err := a.startRoomTimerAndSchedule(ctx, rm, u.ID, rm.FocusMinutes, u.DisplayName)
 	if errors.Is(err, errTooManyRooms) {
@@ -1125,7 +1128,10 @@ func (b *discordBot) handleJoin(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 	if !a.isRoomMember(ctx, rm.ID, u.ID) {
-		a.addRoomMember(ctx, rm.ID, u.ID)
+		if err := a.addRoomMember(ctx, rm.ID, u.ID); err != nil {
+			b.ephemeral(s, i, capitalizeFirst(err.Error())+".")
+			return
+		}
 	}
 	timer, outcome, err := a.joinTimer(ctx, rm, u.ID)
 	if err != nil {
