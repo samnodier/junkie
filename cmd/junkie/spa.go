@@ -364,6 +364,7 @@ func (a *app) apiAdmin(w http.ResponseWriter, r *http.Request) {
 			"id": u.ID, "username": u.Username, "role": u.Role,
 			"joinedAt": u.JoinedAt.Format("2006-01-02"), "joined": u.JoinedAt.Format("Jan 2, 2006"),
 			"roomsCount": u.RoomsCount, "focusMinutes": u.FocusMinutes,
+			"focusTime": formatFocusDuration(u.FocusMinutes),
 		}
 		if u.LastActivityAt != nil {
 			row["lastActivity"] = u.LastActivityAt.Format("Jan 2, 2006")
@@ -383,7 +384,8 @@ func (a *app) apiAdmin(w http.ResponseWriter, r *http.Request) {
 			"users": data.Overview.Users, "rooms": data.Overview.Rooms,
 			"activeRoomTimers": data.Overview.ActiveRoomTimers, "totalFocusMinutes": data.Overview.TotalFocusMinutes,
 		},
-		"users": users, "rooms": rooms, "isOwner": data.IsOwner,
+		"totalFocusTime": formatFocusDuration(data.Overview.TotalFocusMinutes),
+		"users":          users, "rooms": rooms, "isOwner": data.IsOwner,
 	})
 }
 

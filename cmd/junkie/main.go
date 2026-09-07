@@ -403,6 +403,11 @@ func main() {
 	mux.HandleFunc("POST /admin/users/{id}/role", a.requireAdminMutation(a.adminChangeRole))
 	mux.HandleFunc("POST /admin/users/{id}/reset-link", a.requireAdminMutation(a.adminCreateResetLink))
 	mux.HandleFunc("POST /admin/rooms/{id}/delete", a.requireAdminMutation(a.adminDeleteRoom))
+	mux.HandleFunc("GET /api/admin/users/{id}", a.requireAuth(a.apiAdminUser))
+	mux.HandleFunc("GET /api/admin/rooms/{id}", a.requireAuth(a.apiAdminRoom))
+	mux.HandleFunc("POST /admin/rooms/{id}/room-role", a.requireAdminMutation(a.adminSetRoomRole))
+	mux.HandleFunc("GET /admin/users/{id}", a.requireAdmin(a.spaPage))
+	mux.HandleFunc("GET /admin/rooms/{id}", a.requireAdmin(a.spaPage))
 
 	go a.sweepExpiredSessions(ctx)
 	go a.sweepInactiveTodos(ctx)

@@ -55,6 +55,41 @@ type adminPageData struct {
 	IsOwner  bool
 }
 
+// formatFocusDuration renders accumulated focus time for the admin space.
+//
+// Hours, because minutes stopped being readable the moment the numbers got
+// real -- "72,431" tells you nothing at a glance. Anything under an hour
+// stays in minutes rather than rounding to "0 h", which would read as no
+// activity at all rather than a little.
+func formatFocusDuration(minutes int) string {
+	if minutes < 60 {
+		return fmt.Sprintf("%d min", minutes)
+	}
+	hours := float64(minutes) / 60
+	if hours < 10 {
+		// One decimal is worth keeping while the number is small: 1.5 h and
+		// 1 h are meaningfully different, 340 h and 341 h are not.
+		return fmt.Sprintf("%.1f h", hours)
+	}
+	return fmt.Sprintf("%s h", withThousands(int(hours+0.5)))
+}
+
+// withThousands groups an integer with commas.
+func withThousands(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var out []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, c)
+	}
+	return string(out)
+}
+
 func validRole(role string) bool {
 	return role == roleUser || role == roleAdmin || role == roleOwner
 }
@@ -337,4 +372,162 @@ func (a *app) adminDeleteRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	a.hub.broadcast(code, "deleted")
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// apiAdminUser is one person's detail page in the admin space.
+//
+// It exists so the role change lives somewhere deliberate. Promote used to be
+// a button in a table row, one click from granting somebody this entire space
+// -- every user, every room, every reset link. Behind a page you had to open
+// first, it reads as the decision it is.
+func (a *app) apiAdminUser(w http.ResponseWriter, r *http.Request) {
+	actor, _ := a.currentUser(r)
+	if !canAccessAdmin(actor.Role) {
+		writeJSONError(w, http.StatusForbidden, "This space is limited to platform administrators.")
+		return
+	}
+	var (
+		u          user
+		joinedAt   time.Time
+		focus      int
+		lastActive *time.Time
+	)
+	err := a.db.QueryRow(r.Context(), `
+		SELECT u.id, u.username, u.display_name, u.role, u.avatar IS NOT NULL,
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint, u.created_at,
+			COALESCE((SELECT SUM(focus_minutes)::int FROM activity WHERE user_id = u.id), 0),
+			(SELECT MAX(activity_date) FROM activity WHERE user_id = u.id)
+		FROM users u WHERE u.id = $1`, r.PathValue("id")).
+		Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.HasAvatar, &u.AvatarVersion,
+			&joinedAt, &focus, &lastActive)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Rooms they are in, and what they are in them. No timer state and no
+	// door into the room: this page describes, it does not join.
+	rows, err := a.db.Query(r.Context(), `
+		SELECT r.id, r.code, r.name, m.role, r.creator_id = u.id
+		FROM room_members m
+		JOIN rooms r ON r.id = m.room_id
+		JOIN users u ON u.id = m.user_id
+		WHERE m.user_id = $1
+		ORDER BY r.created_at DESC`, u.ID)
+	rooms := []map[string]any{}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id, code, name, role string
+			var creator bool
+			if rows.Scan(&id, &code, &name, &role, &creator) == nil {
+				rooms = append(rooms, map[string]any{
+					"id": id, "code": code, "name": name,
+					"admin": creator || role == roomRoleAdmin, "creator": creator,
+				})
+			}
+		}
+	}
+
+	payload := map[string]any{
+		"user": map[string]any{
+			"id": u.ID, "username": u.Username, "displayName": u.DisplayName,
+			"role": u.Role, "hasAvatar": u.HasAvatar, "avatarVersion": u.AvatarVersion,
+		},
+		"joined":       joinedAt.Format("Jan 2, 2006"),
+		"focusMinutes": focus,
+		"focusTime":    formatFocusDuration(focus),
+		"rooms":        rooms,
+		// Only the owner may change roles, and never the owner's own.
+		"canChangeRole": actor.Role == roleOwner && u.Role != roleOwner,
+		"isOwner":       actor.Role == roleOwner,
+	}
+	if lastActive != nil {
+		payload["lastActivity"] = lastActive.Format("Jan 2, 2006")
+	}
+	writeJSON(w, payload)
+}
+
+// apiAdminRoom is one room's detail page: who is in it and what they are in
+// it, so room admins can be marked and unmarked from the admin space.
+//
+// Read-only about the room itself. There is deliberately no way to join from
+// here: staff access is for keeping the service working, not for turning up
+// in other people's rooms.
+func (a *app) apiAdminRoom(w http.ResponseWriter, r *http.Request) {
+	actor, _ := a.currentUser(r)
+	if !canAccessAdmin(actor.Role) {
+		writeJSONError(w, http.StatusForbidden, "This space is limited to platform administrators.")
+		return
+	}
+	var (
+		rm        room
+		createdAt time.Time
+		creator   string
+	)
+	err := a.db.QueryRow(r.Context(), `
+		SELECT r.id, r.code, r.name, r.creator_id, r.focus_minutes, r.break_minutes,
+			r.auto_sessions, r.auto_roll, r.ephemeral, r.require_checkin, r.created_at,
+			COALESCE(u.display_name, '')
+		FROM rooms r LEFT JOIN users u ON u.id = r.creator_id
+		WHERE r.id = $1`, r.PathValue("id")).
+		Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes,
+			&rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral, &rm.RequireCheckin, &createdAt, &creator)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	roster, _ := a.roomRoster(r.Context(), rm)
+	members := make([]map[string]any, 0, len(roster))
+	for _, m := range roster {
+		members = append(members, map[string]any{
+			"id": m.User.ID, "username": m.User.Username, "displayName": m.User.DisplayName,
+			"hasAvatar": m.User.HasAvatar, "avatarVersion": m.User.AvatarVersion,
+			"admin": m.IsAdmin(), "creator": m.Creator,
+		})
+	}
+	active := a.roomRunActive(r.Context(), rm.ID)
+	writeJSON(w, map[string]any{
+		"room": map[string]any{
+			"id": rm.ID, "code": rm.Code, "name": rm.Name, "creator": creator,
+			"creatorId": rm.CreatorID, "ephemeral": rm.Ephemeral,
+			"focusMinutes": rm.FocusMinutes, "breakMinutes": rm.BreakMinutes,
+			"autoSessions": rm.AutoSessions, "autoRoll": rm.AutoRoll,
+			"requireCheckin": rm.RequireCheckin,
+			"created":        createdAt.Format("Jan 2, 2006"),
+			"active":         active,
+		},
+		"members": members,
+		"isOwner": actor.Role == roleOwner,
+	})
+}
+
+// adminSetRoomRole marks or unmarks a room admin from the admin space.
+//
+// It goes through setRoomMemberRole but not canAdminRoom: staff authority is
+// its own thing and does not come from being in the room. Audited, because
+// this is one person changing another's standing somewhere they aren't.
+func (a *app) adminSetRoomRole(w http.ResponseWriter, r *http.Request) {
+	actor, _ := a.currentUser(r)
+	roomID := r.PathValue("id")
+	var rm room
+	if err := a.db.QueryRow(r.Context(),
+		`SELECT id, code, name, creator_id FROM rooms WHERE id = $1`, roomID).
+		Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	targetID, role := r.FormValue("user_id"), r.FormValue("role")
+	if err := a.setRoomMemberRole(r.Context(), rm, targetID, role); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	metadata, _ := json.Marshal(map[string]string{"room": rm.Code, "role": role, "user": targetID})
+	if _, err := a.db.Exec(r.Context(), `
+		INSERT INTO admin_audit_log (actor_user_id, action, target_type, target_id, metadata)
+		VALUES ($1, 'room.role_changed', 'room', $2, $3::jsonb)`, actor.ID, rm.ID, metadata); err != nil {
+		log.Printf("admin: audit room role change: %v", err)
+	}
+	a.hub.broadcast(rm.Code, "members")
+	w.WriteHeader(http.StatusNoContent)
 }

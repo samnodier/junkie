@@ -28,33 +28,6 @@ async function load() {
   }
 }
 
-// Owner-issued password reset link, shown once with a copy button; the
-// server audits the issuance and the link expires like any reset token.
-const resetLink = ref(null);
-const resetCopied = ref(false);
-async function createResetLink(user) {
-  if (!confirm(`Create a password reset link for ${user.username}? It works once and expires in 30 minutes.`)) return;
-  try {
-    const res = await fetch(`/admin/users/${user.id}/reset-link`, { method: 'POST', credentials: 'same-origin' });
-    const body = await res.json();
-    if (!res.ok) {
-      error.value = body.error || 'Could not create a reset link.';
-      return;
-    }
-    resetLink.value = body;
-    resetCopied.value = false;
-  } catch {
-    error.value = 'Could not create a reset link.';
-  }
-}
-async function copyResetLink() {
-  try {
-    await navigator.clipboard.writeText(resetLink.value.url);
-    resetCopied.value = true;
-  } catch {
-    /* the link stays visible for manual copying */
-  }
-}
 
 async function post(url, fields = {}, confirmMsg = '') {
   if (confirmMsg && !confirm(confirmMsg)) return;
@@ -92,7 +65,7 @@ onMounted(load);
         <article class="panel"><span class="label">Users</span><strong>{{ data.overview.users }}</strong></article>
         <article class="panel"><span class="label">Rooms</span><strong>{{ data.overview.rooms }}</strong></article>
         <article class="panel"><span class="label">Active room timers</span><strong>{{ data.overview.activeRoomTimers }}</strong></article>
-        <article class="panel"><span class="label">Total focus minutes</span><strong>{{ data.overview.totalFocusMinutes }}</strong></article>
+        <article class="panel"><span class="label">Total focus</span><strong>{{ data.totalFocusTime }}</strong></article>
       </section>
 
       <section class="panel admin-section">
@@ -100,27 +73,22 @@ onMounted(load);
           <div><p class="eyebrow">Accounts</p><h2>Users</h2></div>
           <span class="role-badge" :class="`role-${auth.user.role}`">{{ auth.user.role }}</span>
         </div>
-        <p v-if="resetLink" class="notice-ok admin-reset-link" role="status">
-          Reset link for <strong>{{ resetLink.username }}</strong> (works once, expires in {{ resetLink.expiresMinutes }} min) — send it to them yourself; it won't be shown again:
-          <span class="mono">{{ resetLink.url }}</span>
-          <button type="button" class="btn-ghost btn-compact" @click="copyResetLink">{{ resetCopied ? 'Copied!' : 'Copy link' }}</button>
-        </p>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Joined</th><th scope="col">Rooms</th><template v-if="data.isOwner"><th scope="col">Focus summary</th><th scope="col">Role action</th></template></tr></thead>
+            <thead><tr><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Joined</th><th scope="col">Rooms</th><template v-if="data.isOwner"><th scope="col">Focus summary</th><th scope="col"></th></template></tr></thead>
             <tbody>
               <tr v-for="u in data.users" :key="u.id">
-                <td><strong>{{ u.username }}</strong></td>
+                <td><RouterLink :to="`/admin/users/${u.id}`"><strong>{{ u.username }}</strong></RouterLink></td>
                 <td><span class="role-badge" :class="`role-${u.role}`">{{ u.role }}</span></td>
                 <td><time :datetime="u.joinedAt">{{ u.joined }}</time></td>
                 <td>{{ u.roomsCount }}</td>
                 <template v-if="data.isOwner">
-                  <td>{{ u.focusMinutes }} min · {{ u.lastActivity ? `last ${u.lastActivity}` : 'no activity' }}</td>
+                  <td>{{ u.focusTime }} · {{ u.lastActivity ? `last ${u.lastActivity}` : 'no activity' }}</td>
                   <td>
-                    <button v-if="u.role === 'user'" type="button" class="btn-ghost btn-compact" @click="post(`/admin/users/${u.id}/role`, { role: 'admin' }, `Promote ${u.username} to admin?`)">Promote</button>
-                    <button v-else-if="u.role === 'admin'" type="button" class="btn-ghost btn-compact" @click="post(`/admin/users/${u.id}/role`, { role: 'user' }, `Demote ${u.username} to user?`)">Demote</button>
-                    <span v-else class="muted">Protected</span>
-                    <button v-if="u.role !== 'owner'" type="button" class="btn-ghost btn-compact" @click="createResetLink(u)">Reset link</button>
+                    <!-- Role changes and reset links live on the person's own
+                         page. Promoting grants this entire space, which is too
+                         much to sit one click away in a list. -->
+                    <RouterLink :to="`/admin/users/${u.id}`" class="btn-ghost btn-compact">Open</RouterLink>
                   </td>
                 </template>
               </tr>
@@ -137,7 +105,7 @@ onMounted(load);
             <thead><tr><th scope="col">Room</th><th scope="col">Code</th><th scope="col">Creator</th><th scope="col">Members</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Action</th></tr></thead>
             <tbody>
               <tr v-for="r in data.rooms" :key="r.id">
-                <td><strong>{{ r.name }}</strong></td>
+                <td><RouterLink :to="`/admin/rooms/${r.id}`"><strong>{{ r.name }}</strong></RouterLink></td>
                 <td><span class="mono">{{ r.code }}</span></td>
                 <td>{{ r.creator }}</td>
                 <td>{{ r.membersCount }}</td>
