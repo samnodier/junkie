@@ -1436,6 +1436,16 @@ span.room-member-locked {
 .public-profile-page .connection-head {
   margin-bottom: 0;
 }
+/* Room members. A row with no role buttons -- everyone's view when they
+   aren't an admin -- shouldn't keep the gap the head reserves for them. */
+.connection-head:last-child {
+  margin-bottom: 0;
+}
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
 .profile-username-form {
   display: flex;
   align-items: end;

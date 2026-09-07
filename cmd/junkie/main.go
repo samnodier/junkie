@@ -448,7 +448,15 @@ func (a *app) sweepInactiveTodos(ctx context.Context) {
 }
 
 func (a *app) migrate(ctx context.Context) error {
-	entries, err := os.ReadDir("migrations")
+	return a.migrateFrom(ctx, "migrations")
+}
+
+// migrateFrom applies every .sql file in dir in filename order. Split from
+// migrate so tests can point at the repo's migrations from inside the package
+// directory; every file re-runs on every boot, so each one has to be
+// idempotent.
+func (a *app) migrateFrom(ctx context.Context, dir string) error {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
@@ -456,7 +464,7 @@ func (a *app) migrate(ctx context.Context) error {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
 			continue
 		}
-		sql, err := os.ReadFile("migrations/" + entry.Name())
+		sql, err := os.ReadFile(dir + "/" + entry.Name())
 		if err != nil {
 			return err
 		}
@@ -1350,6 +1358,17 @@ func (a *app) sweepStaleRoomWaiting(ctx context.Context) {
 	}
 }
 
+// membersRedirect returns to the room's member list, carrying an error for
+// postForm.js to toast. Role changes all land back on the same page, so the
+// caller never has to decide where to go.
+func membersRedirect(w http.ResponseWriter, r *http.Request, code, errMsg string) {
+	dest := "/r/" + code + "/members"
+	if errMsg != "" {
+		dest += "?error=" + url.QueryEscape(errMsg)
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
 func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/r/"), "/")
@@ -1390,6 +1409,25 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			requireCheckin = v == "1"
 		}
 		_ = a.applyRoomSettings(r.Context(), rm.ID, focus, breaks, sessions, autoRoll, requireCheckin)
+	case "make-admin", "remove-admin":
+		// Room-admin rights are handed out by people who already hold them --
+		// the creator, or an existing admin -- exactly like a Discord or
+		// WhatsApp group. Members see no buttons at all.
+		if !a.canAdminRoom(r.Context(), rm, u.ID) {
+			membersRedirect(w, r, rm.Code, "Only the room's admins can change roles.")
+			return
+		}
+		role := roomRoleAdmin
+		if action == "remove-admin" {
+			role = roomRoleMember
+		}
+		if err := a.setRoomMemberRole(r.Context(), rm, r.FormValue("user_id"), role); err != nil {
+			membersRedirect(w, r, rm.Code, err.Error())
+			return
+		}
+		a.hub.broadcast(code, "members")
+		membersRedirect(w, r, rm.Code, "")
+		return
 	case "delete":
 		if rm.CreatorID != u.ID {
 			http.Error(w, "only the creator can delete this room", http.StatusForbidden)
@@ -2533,26 +2571,87 @@ func (a *app) roomMemberCount(ctx context.Context, roomID string) (int, error) {
 // roomMemberUsers lists the users belonging to a room, alphabetically by
 // display name.
 func (a *app) roomMemberUsers(ctx context.Context, roomID string) ([]user, error) {
+	roster, err := a.roomRoster(ctx, room{ID: roomID})
+	if err != nil {
+		return nil, err
+	}
+	members := make([]user, 0, len(roster))
+	for _, m := range roster {
+		members = append(members, m.User)
+	}
+	return members, nil
+}
+
+// roomMember is a roster row: who they are, and what they may do in this room.
+type roomMember struct {
+	User user
+	// Role is the stored room_members.role. The creator's row usually reads
+	// "member" -- Creator is what actually confers their authority, so never
+	// infer rights from Role alone; use IsAdmin.
+	Role    string
+	Creator bool
+}
+
+// IsAdmin reports whether this member holds room-admin rights. It is the same
+// rule canAdminRoomAs applies, read from a roster row instead of a lookup: the
+// creator always, anyone else only by role.
+func (m roomMember) IsAdmin() bool {
+	return m.Creator || m.Role == roomRoleAdmin
+}
+
+// roomRoster lists a room's members with their roles, creator first, then
+// admins, then everyone else alphabetically -- the order the members page
+// reads top to bottom, so the people who can act on the room are together.
+func (a *app) roomRoster(ctx context.Context, rm room) ([]roomMember, error) {
+	creatorID := rm.CreatorID
+	if creatorID == "" {
+		// Callers that only have a room id (roomMemberUsers) still get a
+		// correct roster; one extra read is cheaper than a wrong Creator flag.
+		_ = a.db.QueryRow(ctx, `SELECT creator_id FROM rooms WHERE id = $1`, rm.ID).Scan(&creatorID)
+	}
 	rows, err := a.db.Query(ctx, `
 		SELECT u.id, u.username, u.display_name, u.avatar IS NOT NULL,
-			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
+			COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint, rm.role
 		FROM room_members rm
 		JOIN users u ON u.id = rm.user_id
 		WHERE rm.room_id = $1
-		ORDER BY u.display_name`, roomID)
+		ORDER BY (u.id = $2) DESC, (rm.role = 'admin') DESC, u.display_name`, rm.ID, creatorID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var members []user
+	var members []roomMember
 	for rows.Next() {
-		var m user
-		if err := rows.Scan(&m.ID, &m.Username, &m.DisplayName, &m.HasAvatar, &m.AvatarVersion); err != nil {
+		var m roomMember
+		if err := rows.Scan(&m.User.ID, &m.User.Username, &m.User.DisplayName,
+			&m.User.HasAvatar, &m.User.AvatarVersion, &m.Role); err != nil {
 			return nil, err
 		}
+		m.Creator = m.User.ID == creatorID && creatorID != ""
 		members = append(members, m)
 	}
 	return members, rows.Err()
+}
+
+// setRoomMemberRole promotes or demotes a member. The creator is refused
+// outright: their authority comes from rooms.creator_id, so a role row could
+// only ever disagree with it.
+func (a *app) setRoomMemberRole(ctx context.Context, rm room, targetID, role string) error {
+	if targetID == rm.CreatorID {
+		return errors.New("the room's creator is always an admin")
+	}
+	if role != roomRoleMember && role != roomRoleAdmin {
+		return errors.New("unknown room role")
+	}
+	tag, err := a.db.Exec(ctx,
+		`UPDATE room_members SET role = $1 WHERE room_id = $2 AND user_id = $3`, role, rm.ID, targetID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("that person isn't in this room")
+	}
+	return nil
 }
 
 // roomMembersPage serves /r/{code}/members: the room roster. Each member's

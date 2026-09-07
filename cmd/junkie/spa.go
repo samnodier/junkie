@@ -442,18 +442,25 @@ func (a *app) apiRoomMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusForbidden, "room membership required")
 		return
 	}
-	members, _ := a.roomMemberUsers(r.Context(), rm.ID)
-	out := make([]map[string]any, 0, len(members))
-	for _, m := range members {
+	roster, _ := a.roomRoster(r.Context(), rm)
+	viewerAdmin := a.canAdminRoom(r.Context(), rm, u.ID)
+	out := make([]map[string]any, 0, len(roster))
+	for _, m := range roster {
 		out = append(out, map[string]any{
-			"user":      apiUsers([]user{m})[0],
-			"self":      m.ID == u.ID,
-			"connected": m.ID != u.ID && a.areConnected(r.Context(), u.ID, m.ID),
+			"user":      apiUsers([]user{m.User})[0],
+			"self":      m.User.ID == u.ID,
+			"connected": m.User.ID != u.ID && a.areConnected(r.Context(), u.ID, m.User.ID),
+			"admin":     m.IsAdmin(),
+			"creator":   m.Creator,
 		})
 	}
+	// Deliberately no focus stats, activity or last-seen: a room admin manages
+	// the room, and never gets a window onto what its members are doing.
 	writeJSON(w, map[string]any{
-		"room":    map[string]string{"code": rm.Code, "name": rm.Name},
-		"members": out,
+		"room":        map[string]string{"code": rm.Code, "name": rm.Name},
+		"members":     out,
+		"viewerAdmin": viewerAdmin,
+		"viewerOwner": rm.CreatorID == u.ID,
 	})
 }
 
