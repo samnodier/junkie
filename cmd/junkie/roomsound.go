@@ -279,3 +279,17 @@ func (a *app) roomSoundsManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, sounds)
 }
+
+// roomSoundLabel describes a room's sound for a one-line summary: the stored
+// filename, or the built-in chime when the room hasn't chosen one.
+func (a *app) roomSoundLabel(ctx context.Context, rm room) string {
+	var name *string
+	if err := a.db.QueryRow(ctx,
+		`SELECT sound_name FROM rooms WHERE id = $1 AND sound IS NOT NULL`, rm.ID).Scan(&name); err != nil {
+		return "the built-in chime"
+	}
+	if name == nil || *name == "" {
+		return "a custom sound"
+	}
+	return "`" + *name + "`"
+}

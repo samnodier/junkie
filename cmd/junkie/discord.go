@@ -102,6 +102,23 @@ var discordCommands = []*discordgo.ApplicationCommand{
 						Description: "Start each break automatically instead of waiting for someone to start it",
 						Required:    false,
 					},
+					// Two options rather than one, because Discord's options
+					// are strictly typed: an option is either an attachment or
+					// a string, with no union, so the server never gets the
+					// chance to work out which kind of thing was given. One
+					// handler sits behind both.
+					{
+						Type:        discordgo.ApplicationCommandOptionAttachment,
+						Name:        "sound-file",
+						Description: "Upload this room's end-of-block sound (max 15s, 512 KB; MP3 or OGG)",
+						Required:    false,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "sound-url",
+						Description: "Link to this room's end-of-block sound; it's downloaded once, not linked to",
+						Required:    false,
+					},
 				},
 			},
 			{
@@ -988,8 +1005,20 @@ func (b *discordBot) handleConfig(s *discordgo.Session, i *discordgo.Interaction
 	// No options at all: show the current settings rather than erroring, so
 	// `/junkie config` is a safe way to check where things stand.
 	if len(opts) == 0 {
-		b.ephemeral(s, i, fmt.Sprintf("**%s** settings: %d min focus, %d min break, %d session(s) · check-in %s · auto-breaks %s.\nChange them with e.g. `/junkie config timer:30/5/3 checkin:On`.",
-			rm.Name, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, onOff(rm.RequireCheckin), onOff(rm.AutoRoll)))
+		b.ephemeral(s, i, fmt.Sprintf("**%s** settings: %d min focus, %d min break, %d session(s) · check-in %s · auto-breaks %s · sound %s.\nChange them with e.g. `/junkie config timer:30/5/3 checkin:On`.",
+			rm.Name, rm.FocusMinutes, rm.BreakMinutes, rm.AutoSessions, onOff(rm.RequireCheckin), onOff(rm.AutoRoll),
+			a.roomSoundLabel(ctx, rm)))
+		return
+	}
+	// The sound is the one setting that isn't open to every member: it plays
+	// in other people's rooms. Handled before the timer options so a command
+	// carrying only a sound doesn't fall through to the run-active check.
+	if _, ok := opts["sound-file"]; ok {
+		b.handleConfigSound(s, i, rm, u, opts)
+		return
+	}
+	if _, ok := opts["sound-url"]; ok {
+		b.handleConfigSound(s, i, rm, u, opts)
 		return
 	}
 	if a.roomRunActive(ctx, rm.ID) {
@@ -1634,9 +1663,93 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie deregister` — disconnect this server from its room\n"+
 		"`/junkie channel [#channel]` — move the bot's notifications to another channel\n"+
 		"`/junkie config` — change room settings (or run it bare to see them): `timer:30/5/3`, `checkin:On/Off`, `auto-breaks:On/Off`\n"+
+		"`/junkie config sound-file:` or `sound-url:` — set the room's end-of-block sound (admins only; max 15s, 512 KB)\n"+
 		"`/junkie start` — start a focus run\n"+
 		"`/junkie join` — join now, or be queued in for the next break/run (in a check-in room, tapping Join each break is how you stay in)\n"+
 		"`/junkie leave` — leave the run (or cancel a queued join)\n"+
 		"`/junkie status` — where the timer is right now\n"+
 		"`/junkie stats [day|week|month|year|alltime|map]` — your focus stats, or your year as a heatmap picture")
+}
+
+// handleConfigSound sets a room's end-of-block sound from Discord, whether it
+// arrived as an attachment or a link.
+//
+// Both options land here so there is one validator, one set of limits and one
+// audit line however the bytes were supplied; only the way the bytes are
+// obtained differs.
+func (b *discordBot) handleConfigSound(s *discordgo.Session, i *discordgo.InteractionCreate, rm room, u user, opts map[string]*discordgo.ApplicationCommandInteractionDataOption) {
+	a := b.app
+	ctx := context.Background()
+	// Unlike the timer settings, which any member may change, the sound is a
+	// room-admin power: it plays in everybody else's ears.
+	if !a.canAdminRoom(ctx, rm, u.ID) {
+		b.ephemeral(s, i, "Only this room's admins can change its sound.")
+		return
+	}
+	if !a.limiter.allow("soundcooldown:"+rm.ID, 1, soundChangeCooldown) {
+		b.ephemeral(s, i, "That was just changed — give it a moment before changing it again.")
+		return
+	}
+	if !a.limiter.allow("sound:"+rm.ID, maxSoundChangesPerHr, time.Hour) {
+		b.ephemeral(s, i, "This room's sound has been changed too many times. Try again later.")
+		return
+	}
+
+	var (
+		data []byte
+		name string
+		err  error
+	)
+	if opt, ok := opts["sound-file"]; ok {
+		attachment := attachmentFor(i, opt)
+		if attachment == nil {
+			b.ephemeral(s, i, "Couldn't read that attachment — try again.")
+			return
+		}
+		if attachment.Size > maxRoomSoundBytes {
+			b.ephemeral(s, i, fmt.Sprintf("That file is %d KB — the limit is %d KB. An MP3 or OGG of the same clip is usually far smaller than a WAV.",
+				attachment.Size/1024, maxRoomSoundBytes/1024))
+			return
+		}
+		// Discord's CDN is a public host like any other, so it goes through
+		// the same guarded fetch rather than a second, laxer path.
+		data, name, err = fetchSoundFromURL(ctx, attachment.URL)
+		if attachment.Filename != "" {
+			name = attachment.Filename
+		}
+	} else {
+		data, name, err = fetchSoundFromURL(ctx, opts["sound-url"].StringValue())
+	}
+	if err != nil {
+		b.ephemeral(s, i, capitalizeFirst(err.Error())+".")
+		return
+	}
+	if err := a.setRoomSound(ctx, rm, data, name); err != nil {
+		b.ephemeral(s, i, err.Error())
+		return
+	}
+	a.logRoomEvent(ctx, u.ID, eventRoomSound, rm, "", map[string]string{"file": sanitizeSoundName(name), "via": "discord"})
+	a.hub.broadcast(rm.Code, "settings")
+	b.reply(s, i, fmt.Sprintf("**%s** now ends its blocks with `%s`. It plays only for people who have the chime switched on in their own browser.",
+		rm.Name, sanitizeSoundName(name)), nil)
+}
+
+// attachmentFor resolves an attachment option to the uploaded file. Discord
+// sends the id in the option and the file itself in the interaction's
+// resolved data.
+func attachmentFor(i *discordgo.InteractionCreate, opt *discordgo.ApplicationCommandInteractionDataOption) *discordgo.MessageAttachment {
+	data := i.ApplicationCommandData()
+	if data.Resolved == nil || data.Resolved.Attachments == nil {
+		return nil
+	}
+	return data.Resolved.Attachments[opt.Value.(string)]
+}
+
+// capitalizeFirst upper-cases the first letter, so an error written as a
+// fragment reads as a sentence in a reply.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
