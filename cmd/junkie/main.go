@@ -3404,10 +3404,22 @@ func (a *app) personalTodos(ctx context.Context, userID string) ([]todo, error) 
 	return todos, nil
 }
 
+// maxRoomTodosServed bounds one room payload.
+//
+// Finished todos are already swept after a day, so a room's list is bounded
+// by a day's activity rather than by all its history -- but "a day's
+// activity" has no ceiling of its own, and this payload is fetched by every
+// member on every change. The limit is far above what a room of the size we
+// allow produces, and it means no single room can make the response
+// arbitrarily large.
+const maxRoomTodosServed = 500
+
 func (a *app) roomTodos(ctx context.Context, roomID string) ([]todo, error) {
 	rows, err := a.db.Query(ctx, `SELECT t.id, t.text, t.done, t.removed, u.display_name, t.user_id, t.created_at,
 			u.avatar IS NOT NULL, COALESCE(EXTRACT(EPOCH FROM u.avatar_updated_at), 0)::bigint
-		FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1 ORDER BY t.removed, t.done, t.created_at DESC`, roomID)
+		FROM todos t JOIN users u ON u.id = t.user_id WHERE t.room_id = $1
+		ORDER BY t.removed, t.done, t.created_at DESC
+		LIMIT $2`, roomID, maxRoomTodosServed)
 	if err != nil {
 		return nil, err
 	}

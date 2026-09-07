@@ -1441,6 +1441,43 @@ span.room-member-locked {
 .connection-head:last-child {
   margin-bottom: 0;
 }
+/* Room todos, grouped per person. The point of the collapsed rows is that
+   the list's length tracks the number of people, not the number of todos, so
+   a large room stays scrollable. */
+.todo-people {
+  display: grid;
+  gap: var(--sp-1);
+}
+.todo-person-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--sp-2);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.todo-person-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 0.7rem;
+}
+.todo-person-name {
+  font-weight: 600;
+}
+.todo-person-count,
+.todo-group-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+}
+.todo-person .todo-list {
+  padding-left: var(--sp-5);
+}
+
 /* The file behind the chosen sound, under the picker. */
 .sound-pref-filename {
   margin: 0;

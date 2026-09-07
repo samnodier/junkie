@@ -232,3 +232,27 @@ func TestTemporaryRoomCanBeCreatedWithItsOwnSound(t *testing.T) {
 		t.Errorf("stored name = %q, want %q", name, "startup.wav")
 	}
 }
+
+// The room payload is bounded, so no single room can make it arbitrarily
+// large however much its members have written.
+func TestRoomTodosAreBounded(t *testing.T) {
+	a := newTestApp(t)
+	owner := makeUser(t, a, "Owner")
+	rm := makeRoom(t, a, owner)
+	ctx := context.Background()
+
+	// A few past the limit is enough to prove the LIMIT is applied.
+	if _, err := a.db.Exec(ctx, `
+		INSERT INTO todos (user_id, room_id, text)
+		SELECT $1, $2, 'task ' || g FROM generate_series(1, $3) g`,
+		owner.ID, rm.ID, maxRoomTodosServed+25); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := a.roomTodos(ctx, rm.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != maxRoomTodosServed {
+		t.Errorf("served %d todos, want the cap of %d", len(todos), maxRoomTodosServed)
+	}
+}

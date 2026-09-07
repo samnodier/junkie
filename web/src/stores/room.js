@@ -28,11 +28,35 @@ export const useRoomStore = defineStore('room', {
     joinPrompt: null,
     socket: null,
     refreshTimer: null,
+    _refreshQueued: null,
     lastPhase: '',
   }),
   actions: {
+    // Coalesce a burst of refreshes into one fetch.
+    //
+    // Every change in a room broadcasts to every member, and each of them
+    // answers by refetching the whole room -- timer, participants and all its
+    // todos. In a small room that is invisible; in a large one, one person
+    // ticking a checkbox becomes one request per member, and several people
+    // acting at once multiplies it. Waiting a moment turns a burst into a
+    // single fetch that already reflects all of it.
+    //
+    // The delay is short enough to read as immediate and long enough to catch
+    // a flurry of socket events arriving together.
+    scheduleRefresh() {
+      if (this._refreshQueued) return;
+      this._refreshQueued = setTimeout(() => {
+        this._refreshQueued = null;
+        this.refresh();
+      }, 250);
+    },
     async refresh() {
       if (!this.code) return;
+      // An explicit refresh satisfies any queued one.
+      if (this._refreshQueued) {
+        clearTimeout(this._refreshQueued);
+        this._refreshQueued = null;
+      }
       try {
         const res = await fetch(`/api/room/${encodeURIComponent(this.code)}`, {
           credentials: 'same-origin',
@@ -124,7 +148,7 @@ export const useRoomStore = defineStore('room', {
             const short = text.length > 60 ? text.slice(0, 57) + '…' : text;
             toasts.show(`${event?.actor || 'Someone'} completed: ${short}`);
           }
-          this.refresh();
+          this.scheduleRefresh();
           return;
         }
         if (type === 'timer-lobby') {
@@ -155,7 +179,7 @@ export const useRoomStore = defineStore('room', {
           this.refresh();
           return;
         }
-        this.refresh();
+        this.scheduleRefresh();
       });
 
       this._onVisible = () => {
@@ -177,6 +201,8 @@ export const useRoomStore = defineStore('room', {
       this.socket = null;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
       this.refreshTimer = null;
+      if (this._refreshQueued) clearTimeout(this._refreshQueued);
+      this._refreshQueued = null;
       if (this._onVisible) {
         document.removeEventListener('visibilitychange', this._onVisible);
         window.removeEventListener('focus', this._onVisible);
