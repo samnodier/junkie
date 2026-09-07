@@ -2652,6 +2652,54 @@ func (a *app) addRoomMember(ctx context.Context, roomID, userID string) {
 	_, _ = a.db.Exec(ctx, `INSERT INTO room_members (room_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, roomID, userID)
 }
 
+// Room-level roles (migration 018). These are not the site-wide users.role
+// values from 005: a room admin's authority stops at the edge of one room.
+const (
+	roomRoleMember = "member"
+	roomRoleAdmin  = "admin"
+)
+
+// canAdminRoomAs is the room-admin decision itself, split out from the lookup
+// so it can be tested without a database -- the same shape as mergeRoomConfig.
+// memberRole is the caller's room_members.role, or "" when they aren't a
+// member at all.
+//
+// The creator is always an admin, and deliberately without consulting
+// memberRole: rooms.creator_id is the ownership record, so authority survives
+// a membership row that is missing, or that predates migration 018.
+func canAdminRoomAs(creatorID, userID, memberRole string) bool {
+	if userID == "" {
+		return false
+	}
+	if userID == creatorID {
+		return true
+	}
+	return memberRole == roomRoleAdmin
+}
+
+// canAdminRoom reports whether a user may take room-admin actions in rm:
+// changing the room's sound, and managing its membership.
+//
+// It is narrower than the name suggests, on purpose. Room settings (timer,
+// sessions, check-in, auto-breaks) stay open to every member so a room can
+// organise itself when no admin is around, deleting a room stays with the
+// creator alone, and nothing here exposes another member's focus data. Add a
+// caller only for an action that genuinely needs that narrow authority.
+func (a *app) canAdminRoom(ctx context.Context, rm room, userID string) bool {
+	if userID == "" {
+		return false
+	}
+	if userID == rm.CreatorID {
+		return true
+	}
+	var role string
+	if err := a.db.QueryRow(ctx,
+		`SELECT role FROM room_members WHERE room_id = $1 AND user_id = $2`, rm.ID, userID).Scan(&role); err != nil {
+		return false
+	}
+	return canAdminRoomAs(rm.CreatorID, userID, role)
+}
+
 func (a *app) roomsForUser(ctx context.Context, userID string) ([]room, error) {
 	// Ephemeral focus rooms are deliberately excluded: they're disposable and
 	// live only on their own /f/{code} screen, never in the room list.
