@@ -107,7 +107,17 @@ onMounted(load);
                 <td><span v-if="r.active" class="status-active">Active timer</span><template v-else>Idle</template></td>
                 <td><time :datetime="r.createdAt">{{ r.created }}</time></td>
                 <td>
-                  <button type="button" class="btn-danger btn-compact" @click="post(`/admin/rooms/${r.id}/delete`, {}, `Permanently delete room ${r.name} and its room data?`)">Delete</button>
+                  <!-- Same trash as the room rosters. The confirm names the
+                       room, so the word was only repeating down the column. -->
+                  <button
+                    type="button"
+                    class="icon-btn icon-btn-danger"
+                    :title="`Delete ${r.name}`"
+                    :aria-label="`Delete ${r.name}`"
+                    @click="post(`/admin/rooms/${r.id}/delete`, {}, `Permanently delete room ${r.name} and its room data?`)"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                  </button>
                 </td>
               </tr>
               <tr v-if="!data.rooms.length"><td colspan="7" class="empty">No rooms found.</td></tr>
