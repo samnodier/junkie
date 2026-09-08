@@ -275,3 +275,68 @@ func TestCancelDoesNotReachThePrivateBlockFromARoom(t *testing.T) {
 		t.Errorf("c said nothing about why:\n%s", m.footer())
 	}
 }
+
+// A shared block whose todos nobody can see is just the same clock running
+// alone: with a room on screen the pane shows that room's list, everyone's.
+func TestRoomTodosAppearWithTheRoom(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.desk.Todos = []apiTodo{{ID: "p1", Text: "private thing"}}
+	m.desk.Rooms[0].Mine = []apiTodo{{ID: "r1", Text: "my room thing"}}
+	m.desk.Rooms[0].Others = []apiTodo{{ID: "r2", Text: "their thing", DisplayName: "Pal"}}
+
+	if got := m.visibleTodos(); len(got) != 1 || got[0].ID != "p1" {
+		t.Fatalf("your own block should show your private list, got %+v", got)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+
+	got := m.visibleTodos()
+	if len(got) != 2 || got[0].ID != "r1" || got[1].ID != "r2" {
+		t.Fatalf("room todos = %+v, want yours then theirs", got)
+	}
+	if !got[1].ReadOnly {
+		t.Error("someone else's todo is not marked read-only")
+	}
+	view := m.View()
+	for _, want := range []string{"room todos", "my room thing", "their thing", "Pal"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the pane is missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "private thing") {
+		t.Error("the private list is still on screen with a room selected")
+	}
+}
+
+// Someone else's todo is read, not worked.
+func TestOthersTodosCannotBeChanged(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.desk.Rooms[0].Others = []apiTodo{{ID: "r2", Text: "their thing", DisplayName: "Pal"}}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+
+	for _, key := range []rune{' ', 'd', 'e'} {
+		m.cursor = 0
+		_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		if cmd != nil {
+			t.Errorf("%q acted on someone else's todo", key)
+		}
+		if !strings.Contains(m.footer(), "Pal's") {
+			t.Errorf("%q did not say whose todo it was: %s", key, m.footer())
+		}
+	}
+}
+
+// g and G are the whole of the vim jump: the list is too short to earn more.
+func TestGoToEndsOfTheList(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk.Todos = []apiTodo{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	if m.cursor != 2 {
+		t.Errorf("G left the cursor at %d, want the last row", m.cursor)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if m.cursor != 0 {
+		t.Errorf("g left the cursor at %d, want the first row", m.cursor)
+	}
+}

@@ -158,6 +158,7 @@ to sync with the same account the web uses.
   tab        show the next block: your own, then each room
   f b s c    start focus · take the break · skip it · cancel
   j k        move down and up the list
+  g G        jump to the top and the bottom of it
   space      complete or un-complete
   a e d u    add · edit · remove · undo the last remove
   w          timer pane fills the window (` + "`junkie watch`" + `)
@@ -173,7 +174,11 @@ With a room on screen the timer keys act on that room, and two more apply:
 
   f b s      start a block · take the break · skip it
   i          I'm in — join the block, or check in for the next one
-  x          leave the block
+  x          leave the block — asks first, since it sits next to i
+
+The todo list is the room's while a room is on screen: yours to work, and
+everyone else's to read. A todo added there joins the room's list rather
+than your private one.
 
 ` + "`junkie CODE`" + ` opens the desk on a room directly, and ` + "`junkie watch CODE`" + ` opens it
 with that room's countdown filling the window.
@@ -284,12 +289,33 @@ func readOnly(name string) bool {
 }
 
 func writeOverview(w io.Writer) {
+	// The desk is the program; the commands are the way in and the way to
+	// script it. Listing twenty of them first made a small tool read like a
+	// large one, so what almost everyone needs comes first and the rest is
+	// named as the rest.
 	fmt.Fprint(w, `
   junkie — shared focus, in the terminal
 
-  junkie                        open the desk (no account needed)
+  junkie                        open the desk, and stay in it
   junkie CODE                   open the desk on that room's block
-  junkie help <command>         what that command does
+  junkie login                  sign in to share rooms with the web
+
+  Inside the desk
+
+    f  start a focus block          i  I'm in — join a room's block
+    b  take the break               x  leave it (asks first)
+    s  skip the break               tab  show the next block
+    c  cancel your block            w  timer fills the window
+
+    a  add a todo                   j/k  move · g/G  ends
+    space  done · e  edit · d  remove · u  undo
+
+    q  quit
+
+  With a room on screen the block keys act on the room, and the todo list
+  is the room's — yours to work, everyone else's to read.
+
+  Everything else is a command. `+"`junkie help <command>`"+` explains one.
 
 `)
 	byGroup := map[string][]command{}

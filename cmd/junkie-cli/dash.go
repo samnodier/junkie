@@ -201,11 +201,32 @@ func (m *dashModel) anchor() {
 // listing them here would put the cursor on rows whose only action is
 // restore.
 func (m *dashModel) visibleTodos() []apiTodo {
-	out := make([]apiTodo, 0, len(m.desk.Todos))
-	for _, t := range m.desk.Todos {
+	all := m.subjectTodos()
+	out := make([]apiTodo, 0, len(all))
+	for _, t := range all {
 		if !t.Removed {
 			out = append(out, t)
 		}
+	}
+	return out
+}
+
+// subjectTodos is the list the pane works on: your private todos with your
+// own block on screen, and the room's -- yours first, then everyone else's
+// -- with a room on screen. A shared block whose todos nobody can see is
+// just the same clock running alone.
+func (m *dashModel) subjectTodos() []apiTodo {
+	room, ok := m.currentRoom()
+	if !ok {
+		return m.desk.Todos
+	}
+	out := make([]apiTodo, 0, len(room.Mine)+len(room.Others))
+	out = append(out, room.Mine...)
+	// Marked here rather than trusted from the payload: every key that acts
+	// on a todo reads this to decide whether it may.
+	for _, t := range room.Others {
+		t.ReadOnly = true
+		out = append(out, t)
 	}
 	return out
 }
@@ -548,14 +569,32 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor--
 		m.clampCursor()
 		return m, nil
+	// The list is short enough that vim's counts and searches would be
+	// ceremony, but jumping to either end of it is worth the two keys.
+	case "g", "home":
+		m.cursor = 0
+		m.clampCursor()
+		return m, nil
+	case "G", "end":
+		m.cursor = len(m.visibleTodos()) - 1
+		m.clampCursor()
+		return m, nil
 
 	case "a":
-		m.editing = &editor{label: "new todo"}
+		label := "new todo"
+		if room, ok := m.currentRoom(); ok {
+			label = "new todo in " + room.Code
+		}
+		m.editing = &editor{label: label}
 		m.editingID = ""
 		return m, nil
 	case "e":
 		todo, ok := m.selected()
 		if !ok {
+			return m, nil
+		}
+		if todo.ReadOnly {
+			m.note("that one is " + todoOwner(todo) + "'s — you can't edit it")
 			return m, nil
 		}
 		// Only active todos are editable server-side; completed and removed
@@ -573,10 +612,18 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
+		if todo.ReadOnly {
+			m.note("that one is " + todoOwner(todo) + "'s — you can't complete it")
+			return m, nil
+		}
 		return m, m.do("/todo/"+todo.ID+"/toggle", nil, "")
 	case "d":
 		todo, ok := m.selected()
 		if !ok {
+			return m, nil
+		}
+		if todo.ReadOnly {
+			m.note("that one is " + todoOwner(todo) + "'s — you can't remove it")
 			return m, nil
 		}
 		// Remembered so u can put it back: removal is a flag server-side,
@@ -684,6 +731,11 @@ func (m *dashModel) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if id != "" {
 			return m, m.do("/todo/"+id+"/edit", url.Values{"text": {text}}, "edited")
+		}
+		// A todo added while looking at a room belongs to that room: the
+		// list on screen is the one it should join.
+		if room, ok := m.currentRoom(); ok {
+			return m, m.do("/r/"+room.Code+"/todos", url.Values{"text": {text}}, "added to "+room.Code)
 		}
 		return m, m.do("/todos", url.Values{"text": {text}}, "added")
 	case tea.KeyBackspace:
@@ -900,9 +952,13 @@ func (m *dashModel) timerBlock() string {
 
 func (m *dashModel) todoBlock(rows int) string {
 	var b strings.Builder
-	open, done, _ := countTodos(m.desk.Todos)
-	b.WriteString(styleLabel.Render("todos") +
-		styleFaint.Render(clip(fmt.Sprintf("  %d open · %d done", open, done), m.width-5)) + "\n")
+	open, done, _ := countTodos(m.subjectTodos())
+	label := "todos"
+	if _, ok := m.currentRoom(); ok {
+		label = "room todos"
+	}
+	b.WriteString(styleLabel.Render(label) +
+		styleFaint.Render(clip(fmt.Sprintf("  %d open · %d done", open, done), m.width-len(label))) + "\n")
 
 	todos := m.visibleTodos()
 	// The window scrolls to keep the selection visible rather than paging,
@@ -947,7 +1003,26 @@ func (m *dashModel) todoLine(todo apiTodo, selected bool) string {
 	if todo.Done {
 		mark, text = styleFaint.Render("[x]"), styleFaint
 	}
+	// Someone else's todo is read, not worked: it says whose it is, and the
+	// whole line is faint so the list reads as yours-then-theirs.
+	if todo.ReadOnly {
+		who := todo.DisplayName
+		if who == "" {
+			who = "someone"
+		}
+		body := clip(todo.Text+" · "+who, m.width-6)
+		return cursor + styleFaint.Render("[ ] ") + styleFaint.Render(body)
+	}
 	return cursor + mark + " " + text.Render(clip(todo.Text, m.width-6))
+}
+
+// todoOwner names whoever a todo belongs to, for the message that says why
+// a key did nothing.
+func todoOwner(todo apiTodo) string {
+	if todo.DisplayName == "" {
+		return "someone else"
+	}
+	return todo.DisplayName
 }
 
 // editorLine draws the field being typed, with a block cursor at the end.
@@ -1035,7 +1110,7 @@ func (m *dashModel) groupedKeys() string {
 	if m.height < 16 || m.width < 34 {
 		return ""
 	}
-	todos := keyLine{"todos", []string{"j/k move", "space done", "a add", "e edit", "d remove", "u undo"}}
+	todos := keyLine{"todos", []string{"j/k move", "g/G ends", "space done", "a add", "e edit", "d remove", "u undo"}}
 
 	block := keyLine{"block", []string{"f focus", "b break", "s skip", "c cancel"}}
 	if _, ok := m.currentRoom(); ok {

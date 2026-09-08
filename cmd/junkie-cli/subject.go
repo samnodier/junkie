@@ -207,6 +207,11 @@ func (m *dashModel) cycleSubject(step int) {
 // timer, so the digits change with the same tick as the title rather than
 // counting down the old block for half a second.
 func (m *dashModel) selectSubject(code string) {
+	if code != m.subject {
+		// The todo pane follows the subject, and row four of your own list
+		// is not row four of a room's. Start at the top of the new one.
+		m.cursor = 0
+	}
 	m.subject = code
 	m.anchor()
 }

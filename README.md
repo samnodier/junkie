@@ -185,6 +185,7 @@ The keys are grouped along the bottom of the screen the way they are grouped her
 | Group | Key | Does |
 | ----- | --- | ---- |
 | todos | `j` `k` | move down and up the list |
+| todos | `g` `G` | jump to the top and the bottom of it |
 | todos | `space` | complete or un-complete |
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` / `c` | start focus · take the break · skip it · cancel the block |
@@ -207,6 +208,10 @@ With a room on screen the timer keys act on that room, and two more apply:
 | `f` / `b` / `s` | start a block · take the break · skip it |
 | `i` | I'm in — join the block, or check in for the next one |
 | `x` | leave the block — asks first, since `x` sits next to `i` and a block you have left will not always take you back |
+
+The todo list follows the countdown. With a room on screen it is that room's list — your own todos to work, everyone else's to read, each named. `a` there adds to the room rather than to your private list.
+
+The terminal is deliberately not the whole of junkie: room members, settings, temporary rooms and admin live on the web and in Discord. What it does is the part a terminal is good at — a block running in a pane while you work.
 
 You do not have to reach for `tab` in the first place: `junkie` opens on a room whose block is live rather than on a private timer that is not running, and `junkie CODE` opens straight onto one. Answering `y` to a join prompt also brings that room's block to the front, since you just said you were joining it.
 
