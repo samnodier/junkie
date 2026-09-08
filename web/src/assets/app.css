@@ -2450,6 +2450,17 @@ body.menu-drawer-open {
   text-align: center;
   padding: var(--sp-8) var(--sp-6);
 }
+/* The card's actions are a stack of choices about the same thing, so they
+   share one width instead of each hugging its own label -- "Join when it
+   starts" is a longer string than "Start focus block" is wide. */
+.ready-card form {
+  display: flex;
+  justify-content: center;
+}
+.ready-card form > button {
+  width: 100%;
+  max-width: 280px;
+}
 .room-ready-time {
   font-family: var(--font-mono);
   font-size: 3.5rem;
