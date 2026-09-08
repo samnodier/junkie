@@ -242,6 +242,13 @@ body.embed-mode .embed-caption {
   font-size: var(--fs-small);
   color: var(--muted);
 }
+/* The picker stands next to Test sound, so it takes the compact button's
+   height rather than the 44px a form field gets on its own -- side by side,
+   two different heights read as a mistake. */
+.sound-pref-picker select {
+  min-height: 35px;
+  padding: 0 var(--sp-3);
+}
 body.focus-active .topbar {
   opacity: 0.35;
   transition: opacity 200ms ease;
