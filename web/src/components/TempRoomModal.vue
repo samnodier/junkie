@@ -63,7 +63,7 @@ async function pickSound(event) {
              already attached; the server parses either encoding. -->
         <form class="stack temp-room-form" method="post" action="/rooms" enctype="multipart/form-data">
           <input type="hidden" name="ephemeral" value="1">
-          <div class="temp-room-fields">
+          <div class="timer-fields">
             <label>Focus<input ref="firstField" type="number" name="focus_minutes" min="5" max="180" value="25" inputmode="numeric"></label>
             <label>Break<input type="number" name="break_minutes" min="1" max="60" value="5" inputmode="numeric"></label>
             <label>Sessions<input type="number" name="auto_sessions" min="1" max="12" value="4" inputmode="numeric"></label>

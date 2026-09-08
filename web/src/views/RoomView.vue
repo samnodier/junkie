@@ -325,9 +325,11 @@ onUnmounted(() => {
               <details class="room-details panel" data-room-section="settings" :open="sections.settings.value" @toggle="toggleSection('settings', $event.target.open)">
                 <summary><span class="label">Timer settings · {{ room.room.autoSessions }}×{{ room.room.focusMinutes }}/{{ room.room.breakMinutes }}</span><svg class="drawer-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
                 <form class="settings stack" @submit.prevent="saveSettings">
-                  <label>Focus <input type="number" name="focus_minutes" min="5" max="180" :value="room.room.focusMinutes"></label>
-                  <label>Break <input type="number" name="break_minutes" min="1" max="60" :value="room.room.breakMinutes"></label>
-                  <label>Sessions <input type="number" name="auto_sessions" min="1" max="12" :value="room.room.autoSessions"></label>
+                  <div class="timer-fields">
+                    <label>Focus <input type="number" name="focus_minutes" min="5" max="180" :value="room.room.focusMinutes"></label>
+                    <label>Break <input type="number" name="break_minutes" min="1" max="60" :value="room.room.breakMinutes"></label>
+                    <label>Sessions <input type="number" name="auto_sessions" min="1" max="12" :value="room.room.autoSessions"></label>
+                  </div>
                   <div class="settings-auto-roll">
                     <div>
                       <strong>Auto-start breaks</strong>

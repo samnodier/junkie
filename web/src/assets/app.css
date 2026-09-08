@@ -2266,30 +2266,33 @@ span.room-member-locked {
 .temp-room-form {
   gap: var(--sp-4);
 }
-.temp-room-fields {
+/* Focus / break / sessions, side by side: three short number fields that
+   would otherwise each take a full row. Shared by the room's timer settings
+   and the temporary-room popup, which ask for the same three numbers. */
+.timer-fields {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--sp-3);
 }
-.temp-room-fields label {
+.timer-fields label {
   display: grid;
   gap: var(--sp-2);
   font-size: var(--fs-small);
   font-weight: 600;
 }
-.temp-room-fields input {
+.timer-fields input {
   min-height: 40px;
   text-align: center;
 }
 @media (max-width: 480px) {
-  .temp-room-fields {
+  .timer-fields {
     grid-template-columns: 1fr;
   }
-  .temp-room-fields label {
+  .timer-fields label {
     grid-template-columns: 1fr auto;
     align-items: center;
   }
-  .temp-room-fields input {
+  .timer-fields input {
     width: 6rem;
   }
 }
