@@ -86,26 +86,11 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
           </div>
         </div>
 
-        <div class="admin-overview">
-          <article class="panel"><span class="label">Joined</span><strong>{{ data.joined }}</strong></article>
-          <article class="panel"><span class="label">Total focus</span><strong>{{ data.focusTime }}</strong></article>
-          <article class="panel"><span class="label">Last activity</span><strong>{{ data.lastActivity || 'None' }}</strong></article>
+        <div class="detail-stats">
+          <div class="detail-stat"><span class="label">Joined</span><strong>{{ data.joined }}</strong></div>
+          <div class="detail-stat"><span class="label">Total focus</span><strong>{{ data.focusTime }}</strong></div>
+          <div class="detail-stat"><span class="label">Last activity</span><strong>{{ data.lastActivity || 'None' }}</strong></div>
         </div>
-
-        <section class="admin-section">
-          <div class="panel-title"><h2>Rooms</h2></div>
-          <div class="connections-list">
-            <article v-for="r in data.rooms" :key="r.id" class="connection-row">
-              <div class="connection-head">
-                <RouterLink :to="`/admin/rooms/${r.id}`" class="connection-name">{{ r.name }}</RouterLink>
-                <span class="mono muted">{{ r.code }}</span>
-                <span v-if="r.creator" class="role-badge role-owner">Owner</span>
-                <span v-else-if="r.admin" class="role-badge role-admin">Room admin</span>
-              </div>
-            </article>
-            <p v-if="!data.rooms.length" class="muted">Not in any rooms.</p>
-          </div>
-        </section>
 
         <section class="admin-section">
           <div class="panel-title"><h2>Platform role</h2></div>
@@ -121,6 +106,21 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
             </template>
             <p v-else class="muted">Only the platform owner can change roles.</p>
             <button v-if="data.user.role !== 'owner'" type="button" class="btn-ghost btn-compact" @click="createResetLink">Create reset link</button>
+          </div>
+        </section>
+
+        <section class="admin-section">
+          <div class="panel-title"><h2>Rooms</h2></div>
+          <div class="connections-list">
+            <article v-for="r in data.rooms" :key="r.id" class="connection-row">
+              <div class="connection-head">
+                <RouterLink :to="`/admin/rooms/${r.id}`" class="connection-name">{{ r.name }}</RouterLink>
+                <span class="mono muted">{{ r.code }}</span>
+                <span v-if="r.creator" class="role-badge role-owner">Owner</span>
+                <span v-else-if="r.admin" class="role-badge role-admin">Room admin</span>
+              </div>
+            </article>
+            <p v-if="!data.rooms.length" class="muted">Not in any rooms.</p>
           </div>
         </section>
 

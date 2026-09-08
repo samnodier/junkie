@@ -2939,6 +2939,28 @@ body.menu-drawer-open {
   font-size: 2rem;
   line-height: 1;
 }
+
+/* The stat block on a detail page. Unlike the admin index's four big cards,
+   these are a handful of facts about one thing -- boxing each of them cost a
+   panel's padding and border for a single line of text. Label and value share
+   a line, with the labels on a common width so the values align. */
+.detail-stats {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-5);
+}
+.detail-stat {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+.detail-stat .label {
+  flex: none;
+  min-width: 8.5rem;
+}
+.detail-stat strong {
+  font-size: 1rem;
+}
 .admin-section {
   margin-top: var(--sp-6);
 }
