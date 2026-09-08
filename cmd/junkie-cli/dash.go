@@ -643,6 +643,12 @@ func (m *dashModel) handleRoomKey(msg tea.KeyMsg, room deskRoom) (bool, tea.Mode
 			return true, m, m.do(base+"timer-checkin", nil, "checked in for the next block")
 		}
 		return true, m, m.do(base+"timer-join", nil, "joining "+room.Code)
+	case "c":
+		// Claimed rather than passed through: the solo handler's c would
+		// cancel your private block, which is not the one on screen. A
+		// room's run is ended from the web, not from here.
+		m.note("a room's block can't be cancelled here — x leaves it, or end it on the web")
+		return true, m, nil
 	case "x":
 		if t == nil || !t.Participant {
 			m.note("you're not in a block in " + room.Code)

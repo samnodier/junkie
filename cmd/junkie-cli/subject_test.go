@@ -238,3 +238,40 @@ func TestRoomCodeArgumentAcceptsAURL(t *testing.T) {
 		t.Error("two arguments should be refused")
 	}
 }
+
+// An untitled countdown beside a room list reads as that room's block. The
+// private block says whose it is whenever there is a room to confuse it with.
+func TestPrivateBlockIsNamedWhenThereAreRooms(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	if f := m.currentFace(); f == nil || f.Title != "your block" {
+		t.Fatalf("private face title = %q, want \"your block\"", f.Title)
+	}
+	if view := m.View(); !strings.Contains(view, "your block") {
+		t.Errorf("the pane does not say whose block it is:\n%s", view)
+	}
+
+	// With no room on the desk there is nothing to mistake it for.
+	m.desk.Rooms = nil
+	if f := m.currentFace(); f == nil || f.Title != "" {
+		t.Errorf("private face title = %q, want it unnamed with no rooms", f.Title)
+	}
+}
+
+// c cancels the private block. With a room on screen that block is not the
+// one being drawn, so c must not quietly end it.
+func TestCancelDoesNotReachThePrivateBlockFromARoom(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if _, ok := m.currentRoom(); !ok {
+		t.Fatal("tab did not put a room on screen")
+	}
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd != nil {
+		t.Fatal("c posted something while a room was on screen")
+	}
+	if !strings.Contains(m.footer(), "can't be cancelled here") {
+		t.Errorf("c said nothing about why:\n%s", m.footer())
+	}
+}

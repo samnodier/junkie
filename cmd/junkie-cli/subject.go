@@ -30,8 +30,9 @@ const soloSubject = ""
 // server, but on screen they are the same handful of lines — so the pane
 // takes this rather than one of each.
 type face struct {
-	// Title names the room a block belongs to. Empty means the private
-	// block, which needs no naming: it is the only one that is yours alone.
+	// Title names the block: a room by its name, or the private block as
+	// "your block". Left empty only when there is nothing to confuse it
+	// with -- an account with no rooms, or a guest desk.
 	Title string
 	Code  string
 
@@ -160,12 +161,27 @@ func (m *dashModel) currentRoom() (deskRoom, bool) {
 	return deskRoom{}, false
 }
 
+// soloTitle names the private block, but only when the desk has a room it
+// could be mistaken for. An unnamed countdown next to a room list reads as
+// the room's -- pressing f with a room on the desk and getting an untitled
+// FOCUS looked like having joined that room.
+func soloTitle(rooms int) string {
+	if rooms == 0 {
+		return ""
+	}
+	return "your block"
+}
+
 // currentFace is the timer the pane draws.
 func (m *dashModel) currentFace() *face {
 	if room, ok := m.currentRoom(); ok {
 		return roomFace(room)
 	}
-	return soloFace(m.desk.SoloTimer)
+	f := soloFace(m.desk.SoloTimer)
+	if f != nil {
+		f.Title = soloTitle(len(m.desk.Rooms))
+	}
+	return f
 }
 
 // cycleSubject moves the selection one step, wrapping. Rooms only exist on
