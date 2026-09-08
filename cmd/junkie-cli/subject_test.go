@@ -486,9 +486,9 @@ func TestJoinARoomFromTheDesk(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
 
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'A'}})
 	if m.editing == nil || !m.joining {
-		t.Fatal("J did not open a field for a room code")
+		t.Fatal("A did not open a field for a room code")
 	}
 	if !strings.Contains(m.footer(), "enter join") {
 		t.Errorf("the field does not say it joins: %s", m.footer())
@@ -510,5 +510,29 @@ func TestJoinARoomFromTheDesk(t *testing.T) {
 	model, _ := m.Update(joinedMsg{})
 	if !strings.Contains(model.(*dashModel).footer(), "no room with that code") {
 		t.Errorf("a bad code passed silently: %s", m.footer())
+	}
+}
+
+// J and K move between blocks the way j and k move down a list. Typing a
+// code is the rare thing and gave up the key it was holding.
+func TestJAndKCycleTheBlocks(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	first := m.subject
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	second := m.subject
+	if second == first {
+		t.Fatal("J did not move to another block")
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+	if m.subject != first {
+		t.Errorf("K went to %q, want back to %q", m.subject, first)
+	}
+
+	// tab still does it, for a hand that learned that instead.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if m.subject != second {
+		t.Errorf("tab went to %q, want %q", m.subject, second)
 	}
 }

@@ -10,7 +10,7 @@ import (
 // always the private block: a room's run got a summary line and nothing
 // more, so being in both at once meant watching the one you cared about
 // least. The subject is which timer the pane is drawing — your own block,
-// or one of your rooms — and tab moves between them.
+// or one of your rooms — and J/K move between them.
 //
 // A subject is held as a room code rather than an index, because the desk
 // re-reads its rooms every few seconds and a list that reorders would
@@ -144,7 +144,7 @@ func roomNote(t *roomTimer) string {
 	return strings.Join(parts, " · ")
 }
 
-// subjects is what tab moves through: your own block first, then the rooms
+// subjects is what J and K move through: your own block first, then the rooms
 // in the order the desk lists them.
 func (m *dashModel) subjects() []string {
 	out := []string{soloSubject}

@@ -190,8 +190,8 @@ The keys are grouped along the bottom of the screen the way they are grouped her
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` | start focus · take the break · skip it |
 | block | `x` | end the block on screen — your own, or leave a room's. Asks first either way; ending your own banks none of its minutes |
-| desk | `J` | join a room by code, without leaving the desk |
-| desk | `tab` | show the next block: your own, then each room |
+| desk | `A` | join a room by code, without leaving the desk |
+| desk | `J` `K` | move between your blocks: your own, then each room (`tab` and `shift+tab` do the same) |
 | desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns, `c` ends the block) |
 | desk | `r` / `q` | refresh · quit (`q` backs out of the zoomed pane first) |
 | desk | `L` | sign in (guest desk) |
@@ -201,7 +201,7 @@ In a narrow window each row drops its last hints, and in a short one they collap
 
 ### Two blocks at once
 
-Your own block and a room's block run independently — you can be in both, and starting or joining one never asks you to give up the other — and the countdown shows one at a time. `tab` moves between them: your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
+Your own block and a room's block run independently — you can be in both, and starting or joining one never asks you to give up the other — and the countdown shows one at a time. `J` and `K` move between them (as do `tab` and `shift+tab`): your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
 
 With a room on screen the timer keys act on that room, and two more apply:
 
@@ -215,7 +215,7 @@ The todo list follows the countdown. With a room on screen it is that room's lis
 
 The terminal is deliberately not the whole of junkie: room members, settings, temporary rooms and admin live on the web and in Discord. What it does is the part a terminal is good at — a block running in a pane while you work.
 
-You do not have to reach for `tab` in the first place: `junkie` opens on a room whose block is live rather than on a private timer that is not running, and `junkie CODE` opens straight onto one. Answering `y` to a join prompt also brings that room's block to the front, since you just said you were joining it.
+You do not have to reach for `J` in the first place: `junkie` opens on a room whose block is live rather than on a private timer that is not running, and `junkie CODE` opens straight onto one. Answering `y` to a join prompt also brings that room's block to the front, since you just said you were joining it.
 
 When someone starts a block in one of your rooms, the desk asks whether you want in and counts down the 30 seconds you have to answer. Not answering is an answer: the block starts without you. This only reaches you while the desk is open — when you are away, the Discord bot is what notifies you.
 
@@ -231,7 +231,7 @@ When someone starts a block in one of your rooms, the desk asks whether you want
 | `junkie watch [CODE]` | the desk, timer pane filling the window — yours, or a room's |
 | `junkie todos` · `junkie rooms` | list them |
 | `junkie stats` | the work map: a year of focused days |
-| `junkie room new NAME` · `junkie room join CODE` | create or join a room (or press `J` in the desk) |
+| `junkie room new NAME` · `junkie room join CODE` | create or join a room (or press `A` in the desk) |
 | `junkie room start [CODE] [MINUTES]` | start a room's block, opening the 30-second lobby |
 | `junkie room enter` · `leave` · `checkin` · `skip` | act on the block that's running |
 | `junkie whoami` · `junkie logout` | who this terminal is, and sign out |

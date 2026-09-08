@@ -568,11 +568,14 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "ctrl+c":
 		return m, tea.Quit
-	case "tab":
+	// J and K move between blocks the way j and k move down a list: the
+	// shifted pair, because the plain one belongs to the todo cursor. tab
+	// still works, but reaching for it is a different hand position.
+	case "tab", "J":
 		m.picked = true
 		m.cycleSubject(1)
 		return m, nil
-	case "shift+tab":
+	case "shift+tab", "K":
 		m.picked = true
 		m.cycleSubject(-1)
 		return m, nil
@@ -585,10 +588,11 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "w":
 		m.zoom = !m.zoom
 		return m, nil
-	case "J":
-		// Joining a room was the one thing you had to leave the desk to do,
-		// and it needed the code typed before the command rather than
-		// pasted when asked for it.
+	case "A":
+		// Adding a room to the desk is the one thing here that needs a code
+		// typed, and it happens once per room -- so it takes the shifted a,
+		// beside the a that adds a todo, and leaves J to the moving about
+		// that happens constantly.
 		if m.identity.Guest {
 			m.note("rooms need an account — L to sign in")
 			return m, nil
@@ -674,7 +678,7 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// at all, which reads as the program having missed it.
 	case "i":
 		if len(m.desk.Rooms) == 0 {
-			m.note("that one is for a room's block — J to join a room")
+			m.note("that one is for a room's block — A to join a room")
 			return m, nil
 		}
 		m.note("that one is for a room's block — tab to a room first")
@@ -1234,14 +1238,14 @@ func (m *dashModel) groupedKeys() string {
 		block = keyLine{"block", []string{"f start", "i I'm in", "b break", "s skip", "x leave"}}
 	}
 
-	// "tab room" said which key without saying what it did. It moves the
+	// "tab room" said which key without saying what it did. J and K move the
 	// countdown between the blocks you have running -- yours, then each
 	// room -- so it is named for that.
-	desk := keyLine{"desk", []string{"q quit", "tab next block", "J join a room", "w zoom", "r refresh"}}
+	desk := keyLine{"desk", []string{"q quit", "J/K switch block", "A join a room", "w zoom", "r refresh"}}
 	if m.identity.Guest {
 		desk = keyLine{"desk", []string{"q quit", "L sign in", "w zoom"}}
 	} else if len(m.desk.Rooms) == 0 {
-		desk = keyLine{"desk", []string{"q quit", "J join a room", "w zoom", "r refresh"}}
+		desk = keyLine{"desk", []string{"q quit", "A join a room", "w zoom", "r refresh"}}
 	}
 
 	rows := make([]string, 0, 3)
@@ -1290,8 +1294,8 @@ func dashKeys(width int, rooms bool) string {
 	medium := "j/k move · space done · a add · f focus · b break · q quit"
 	short := "j/k · space · a add · f focus · q quit"
 	if rooms {
-		full = "j/k move · space done · a add · e edit · d remove · f focus · b break · tab next block · q quit"
-		medium = "j/k move · space done · a add · f focus · b break · tab next block · q quit"
+		full = "j/k move · space done · a add · e edit · d remove · f focus · b break · J/K block · q quit"
+		medium = "j/k move · space done · a add · f focus · b break · J/K block · q quit"
 		short = "j/k · space · a add · f focus · tab · q quit"
 	}
 	switch {
@@ -1347,8 +1351,8 @@ func runDashboard(zoom bool, want string) error {
 // are the same letters as the private block's — they act on the room
 // instead — plus the two only a shared block has.
 func roomDashKeys(width int) string {
-	const full = "tab next block · f start · i I'm in · b break · s skip · x leave · a add · q quit"
-	const medium = "tab next block · f start · i I'm in · s skip · x leave · q quit"
+	const full = "J/K block · f start · i I'm in · b break · s skip · x leave · a add · q quit"
+	const medium = "J/K block · f start · i I'm in · s skip · x leave · q quit"
 	const short = "tab · f start · i in · x leave · q quit"
 	switch {
 	case width >= len([]rune(full)):
