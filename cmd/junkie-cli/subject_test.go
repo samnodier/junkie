@@ -89,6 +89,11 @@ func TestRoomKeysActOnTheRoom(t *testing.T) {
 		}
 		m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
 		_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+		// Leaving asks first, so the key that acts on the room is the y
+		// that answers it.
+		if cmd == nil && m.confirm != nil {
+			_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		}
 		if cmd == nil {
 			t.Fatalf("%c should have acted on the room", tc.key)
 		}
@@ -97,6 +102,33 @@ func TestRoomKeysActOnTheRoom(t *testing.T) {
 		} else if msg.err == nil && !strings.Contains(msg.message, "ABC-123") {
 			t.Errorf("%c reported %q, which does not name the room", tc.key, msg.message)
 		}
+	}
+}
+
+// x is one key from i and s and cannot be undone, so it asks before it acts.
+func TestLeavingABlockAsksFirst(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if cmd != nil {
+		t.Fatal("x left the block without asking")
+	}
+	if m.confirm == nil {
+		t.Fatal("x asked nothing")
+	}
+	if !strings.Contains(m.footer(), "leave the block") {
+		t.Errorf("the question is not on screen:\n%s", m.footer())
+	}
+
+	// Anything that is not y is a no, and it leaves the block alone.
+	_, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if cmd != nil {
+		t.Error("declining still posted something")
+	}
+	if m.confirm != nil {
+		t.Error("the question stayed up after being answered")
 	}
 }
 

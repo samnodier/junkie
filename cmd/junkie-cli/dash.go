@@ -59,6 +59,10 @@ type dashModel struct {
 	// it; answering nothing is a real answer, and the offer simply expires.
 	prompt *joinPrompt
 
+	// confirm is a yes/no asked before something this desk cannot undo --
+	// leaving a block. It takes the footer until it is answered.
+	confirm *confirmPrompt
+
 	desk deskResponse
 	countdown
 
@@ -417,6 +421,13 @@ func bell() tea.Cmd {
 	}
 }
 
+// confirmPrompt is a question the desk asks itself, not one the server
+// sent. Unlike the lobby offer it has no deadline: it waits.
+type confirmPrompt struct {
+	question string
+	act      func() tea.Cmd
+}
+
 func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.login != nil {
 		return m.handleLoginKey(msg)
@@ -425,6 +436,23 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// todo containing "q" would quit the program mid-word.
 	if m.editing != nil {
 		return m.handleEditKey(msg)
+	}
+	// An unanswered confirmation swallows every other key. The whole point
+	// is that the next keystroke should not be able to do something else
+	// while the question is still on screen.
+	if m.confirm != nil {
+		switch msg.String() {
+		case "y", "Y":
+			act := m.confirm.act
+			m.confirm = nil
+			return m, act()
+		case "ctrl+c":
+			return m, tea.Quit
+		default:
+			m.confirm = nil
+			m.note("nothing changed")
+			return m, nil
+		}
 	}
 	// A lobby is a question with a deadline, so it gets first claim on the
 	// keys that answer it. Everything else still works: ignoring the offer
@@ -620,7 +648,16 @@ func (m *dashModel) handleRoomKey(msg tea.KeyMsg, room deskRoom) (bool, tea.Mode
 			m.note("you're not in a block in " + room.Code)
 			return true, m, nil
 		}
-		return true, m, m.do(base+"timer-leave", nil, "left the block in "+room.Code)
+		// x sits one key from i and s, and there is no undo: a block that
+		// has moved past its lobby will not always take you back.
+		code := room.Code
+		m.confirm = &confirmPrompt{
+			question: "leave the block in " + code + "?",
+			act: func() tea.Cmd {
+				return m.do(base+"timer-leave", nil, "left the block in "+code)
+			},
+		}
+		return true, m, nil
 	}
 	return false, m, nil
 }
@@ -730,7 +767,10 @@ func (m *dashModel) View() string {
 
 	// Sections are dropped from the bottom up when the window is short, so
 	// what survives is always the timer — the reason the screen is open.
-	rows := m.height - lipgloss.Height(m.header()) - lipgloss.Height(m.timerBlock()) - 4
+	// The footer is measured rather than assumed: it is three rows of
+	// grouped hints when there is room for them and one row when not.
+	foot := m.footer()
+	rows := m.height - lipgloss.Height(m.header()) - lipgloss.Height(m.timerBlock()) - 3 - lipgloss.Height(foot)
 	todos, rooms := m.sectionBudget(rows)
 	if todos > 0 {
 		b.WriteString(m.todoBlock(todos))
@@ -740,7 +780,7 @@ func (m *dashModel) View() string {
 		b.WriteString(m.roomBlock(rooms))
 		b.WriteString("\n")
 	}
-	return b.String() + m.footer()
+	return b.String() + foot
 }
 
 // sectionBudget splits the rows left over after the timer between the two
@@ -944,6 +984,9 @@ func (m *dashModel) footer() string {
 	if m.err != nil && m.login == nil {
 		return styleDanger.Render(clip("offline: "+m.err.Error(), m.width))
 	}
+	if m.confirm != nil {
+		return styleWarn.Render(clip(m.confirm.question+"  y yes · any other key no", m.width))
+	}
 	if m.editing != nil {
 		return styleFaint.Render(clip(editKeys, m.width))
 	}
@@ -958,6 +1001,9 @@ func (m *dashModel) footer() string {
 		// would be two footers arguing. Errors and notes are handled above.
 		return ""
 	}
+	if grouped := m.groupedKeys(); grouped != "" {
+		return styleFaint.Render(grouped)
+	}
 	if m.identity.Guest {
 		return styleFaint.Render(clip(guestDashKeys(m.width), m.width))
 	}
@@ -965,6 +1011,61 @@ func (m *dashModel) footer() string {
 		return styleFaint.Render(clip(roomDashKeys(m.width), m.width))
 	}
 	return styleFaint.Render(clip(dashKeys(m.width, len(m.desk.Rooms) > 0), m.width))
+}
+
+// keyLine is one labelled row of the footer. Items are dropped from the end
+// as the window narrows, so what survives is what was listed first.
+type keyLine struct {
+	label string
+	items []string
+}
+
+// groupedKeys is the footer as three labelled rows rather than one long
+// line: moving around the todo list, running a block, and working the desk
+// are three different jobs, and nine hints in a row read as noise. It
+// returns "" when the window cannot spare the rows or the width, and the
+// single-line forms below answer instead.
+func (m *dashModel) groupedKeys() string {
+	if m.height < 16 || m.width < 34 {
+		return ""
+	}
+	todos := keyLine{"todos", []string{"j/k move", "space done", "a add", "e edit", "d remove", "u undo"}}
+
+	block := keyLine{"block", []string{"f focus", "b break", "s skip", "c cancel"}}
+	if _, ok := m.currentRoom(); ok {
+		// A room's block is joined and left, and cancelling is not on
+		// offer: c would end your own private block, not the room's.
+		block = keyLine{"block", []string{"f start", "i I'm in", "b break", "s skip", "x leave"}}
+	}
+
+	// "tab room" said which key without saying what it did. It moves the
+	// countdown between the blocks you have running -- yours, then each
+	// room -- so it is named for that.
+	desk := keyLine{"desk", []string{"q quit", "tab next block", "w zoom", "r refresh"}}
+	if m.identity.Guest {
+		desk = keyLine{"desk", []string{"q quit", "L sign in", "w zoom"}}
+	} else if len(m.desk.Rooms) == 0 {
+		desk = keyLine{"desk", []string{"q quit", "w zoom", "r refresh"}}
+	}
+
+	rows := make([]string, 0, 3)
+	for _, line := range []keyLine{todos, block, desk} {
+		rows = append(rows, renderKeyLine(line, m.width))
+	}
+	return strings.Join(rows, "\n")
+}
+
+// renderKeyLine fits one row to the window by dropping hints off the end.
+// The label is padded to a common width so the three rows line up.
+func renderKeyLine(line keyLine, width int) string {
+	items := line.items
+	for {
+		text := fmt.Sprintf("%-6s %s", line.label, strings.Join(items, " · "))
+		if len([]rune(text)) <= width || len(items) == 1 {
+			return clip(text, width)
+		}
+		items = items[:len(items)-1]
+	}
 }
 
 func guestDashKeys(width int) string {
@@ -989,12 +1090,12 @@ func guestDashKeys(width int) string {
 // there is a room to move to — an account with none has nowhere to go, and
 // a key that does nothing is worse than a key nobody was told about.
 func dashKeys(width int, rooms bool) string {
-	full := "j/k move · space done · a add · e edit · d remove · f focus · b break · q quit"
+	full := "j/k move · space done · a add · e edit · d remove · f focus · b break · c cancel · q quit"
 	medium := "j/k move · space done · a add · f focus · b break · q quit"
 	short := "j/k · space · a add · f focus · q quit"
 	if rooms {
-		full = "j/k move · space done · a add · e edit · d remove · f focus · b break · tab room · q quit"
-		medium = "j/k move · space done · a add · f focus · b break · tab room · q quit"
+		full = "j/k move · space done · a add · e edit · d remove · f focus · b break · tab next block · q quit"
+		medium = "j/k move · space done · a add · f focus · b break · tab next block · q quit"
 		short = "j/k · space · a add · f focus · tab · q quit"
 	}
 	switch {
@@ -1047,8 +1148,8 @@ func runDashboard(zoom bool, want string) error {
 // are the same letters as the private block's — they act on the room
 // instead — plus the two only a shared block has.
 func roomDashKeys(width int) string {
-	const full = "tab room · f start · i I'm in · b break · s skip · x leave · a add · q quit"
-	const medium = "tab room · f start · i I'm in · s skip · x leave · q quit"
+	const full = "tab next block · f start · i I'm in · b break · s skip · x leave · a add · q quit"
+	const medium = "tab next block · f start · i I'm in · s skip · x leave · q quit"
 	const short = "tab · f start · i in · x leave · q quit"
 	switch {
 	case width >= len([]rune(full)):

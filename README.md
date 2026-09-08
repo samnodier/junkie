@@ -180,17 +180,21 @@ Changing your password anywhere signs the terminal out too, because that ends ev
 
 Run `junkie` on its own and you get the desk full-screen: a live countdown (the same block digits `junkie watch` used to be), your todos, and — signed in — what your rooms are doing. You stay in this program until you quit. A block ending offers the break on the same screen; it does not drop you back to the shell.
 
-| Key | Does |
-| --- | ---- |
-| `f` / `b` / `s` / `c` | start focus · take the break · skip it · cancel the block |
-| `j` `k` | move down and up the todo list |
-| `space` | complete or un-complete |
-| `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
-| `tab` | show the next block: your own, then each room |
-| `w` | timer pane fills the window (same as `junkie watch`; `esc` returns) |
-| `L` | sign in (guest desk) |
-| `y` / `n` | answer a room's join prompt |
-| `r` / `q` | refresh · quit |
+The keys are grouped along the bottom of the screen the way they are grouped here — the todo list, the block, and the desk itself:
+
+| Group | Key | Does |
+| ----- | --- | ---- |
+| todos | `j` `k` | move down and up the list |
+| todos | `space` | complete or un-complete |
+| todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
+| block | `f` / `b` / `s` / `c` | start focus · take the break · skip it · cancel the block |
+| desk | `tab` | show the next block: your own, then each room |
+| desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` returns) |
+| desk | `r` / `q` | refresh · quit |
+| desk | `L` | sign in (guest desk) |
+| desk | `y` / `n` | answer a room's join prompt |
+
+In a narrow window each row drops its last hints, and in a short one they collapse back to a single line.
 
 ### Two blocks at once
 
@@ -202,7 +206,7 @@ With a room on screen the timer keys act on that room, and two more apply:
 | --- | ---- |
 | `f` / `b` / `s` | start a block · take the break · skip it |
 | `i` | I'm in — join the block, or check in for the next one |
-| `x` | leave the block |
+| `x` | leave the block — asks first, since `x` sits next to `i` and a block you have left will not always take you back |
 
 You do not have to reach for `tab` in the first place: `junkie` opens on a room whose block is live rather than on a private timer that is not running, and `junkie CODE` opens straight onto one. Answering `y` to a join prompt also brings that room's block to the front, since you just said you were joining it.
 
