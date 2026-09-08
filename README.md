@@ -138,7 +138,7 @@ On supported mobile browsers, junkie requests a **screen wake lock** while a tim
 junkie is a PWA, so it installs to your home screen and runs fullscreen with no browser chrome.
 
 - **iPhone / iPad** — open [junkie](https://junkie-blin.onrender.com) in Safari, tap Share, then **Add to Home Screen**.
-- **Android** — either open it in Chrome and tap **Install app**, or download the signed APK from the [latest release](https://github.com/samnodier/junkie/releases/latest) and open it (you may need to allow installing from unknown sources).
+- **Android** — either open it in Chrome and tap **Install app**, or download the signed APK from the [android release](https://github.com/samnodier/junkie/releases/tag/android) and open it (you may need to allow installing from unknown sources).
 
 Both are the same app pointing at the hosted site; the APK just wraps it so there's nothing to install from a browser.
 
@@ -154,15 +154,23 @@ A block you start while signed in shows up on the web mid-countdown, and one you
 curl -fsSL https://raw.githubusercontent.com/samnodier/junkie/master/install.sh | sh
 ```
 
-That puts a `junkie` binary in `~/.local/bin`. Set `JUNKIE_INSTALL_DIR` to choose somewhere else, or `JUNKIE_VERSION=vX.Y.Z` to pin a release. The script verifies the download against the release's published checksums before installing it.
+That puts a `junkie` binary in `~/.local/bin`, which needs to be on your `PATH`. It picks the newest `vX.Y.Z` release for your platform and verifies the download against that release's published `checksums.txt` before installing it.
 
-With Go installed you can build it yourself instead:
+**To upgrade, run the same command again** — it always fetches the newest version and replaces what is there. `JUNKIE_VERSION=vX.Y.Z` pins a particular one, and `JUNKIE_INSTALL_DIR` installs somewhere other than `~/.local/bin`.
+
+With Go installed you can build it from source instead:
 
 ```sh
 go install github.com/samnodier/junkie/cmd/junkie-cli@latest
 ```
 
-That names the binary `junkie-cli`, because `go install` takes the name from the directory and `cmd/junkie` is the server. Rename it to `junkie` if you want the shorter command.
+That names the binary `junkie-cli`, because `go install` takes the name from the directory and `cmd/junkie` is already the server. Rename it to `junkie` if you want the shorter command — the installed release is called `junkie`, and the rest of this section assumes that name.
+
+### Versions
+
+Releases are `vMAJOR.MINOR.PATCH` tags on this repository. Pushing one runs the `release-cli` workflow, which tests the module, builds the binary for Linux, macOS and Windows on both amd64 and arm64, and publishes them as a GitHub release with a `checksums.txt`. `junkie version` prints the version it was built from; a binary built from a checkout says `dev`.
+
+The repository also carries an `android` tag for the [TWA build](#install-it-as-an-app), which is not a CLI release. The installer asks for the newest `v*` tag by name rather than for whatever GitHub currently calls "latest", so publishing a new APK cannot break `curl | sh`.
 
 ### Signing in
 

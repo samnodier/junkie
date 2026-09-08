@@ -23,24 +23,31 @@ case "$os" in
   *) echo "junkie: no release build for $os — try: go install github.com/$REPO/cmd/junkie-cli@latest" >&2; exit 1 ;;
 esac
 
-# Resolve the latest tag by following the redirect the releases page issues,
-# so this needs no JSON parser and no API token.
+# This repository releases more than the CLI -- the Android TWA build is
+# tagged `android` -- and GitHub calls whichever release was published most
+# recently "latest", whatever it contains. So ask for the newest v* tag by
+# name rather than trusting "latest" to be a CLI release: publishing a new
+# APK must not break `curl | sh`.
 latest=${JUNKIE_VERSION:-}
+if [ -z "$latest" ]; then
+  latest=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=30" 2>/dev/null |
+    sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' | head -n 1)
+fi
+# Unauthenticated API calls are rate limited by IP. When that is what went
+# wrong, the redirect the releases page issues needs no API budget -- and the
+# v* check below still refuses anything that is not a CLI release.
 if [ -z "$latest" ]; then
   latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed 's|.*/||')
 fi
 if [ -z "$latest" ]; then
-  echo "junkie: could not find the latest release" >&2
+  echo "junkie: could not find a junkie release" >&2
   exit 1
 fi
-# This repository releases more than the CLI — the TWA build is tagged
-# `android` — and GitHub calls whichever was published most recently
-# "latest". Only v* tags are CLI releases.
 case "$latest" in
   v*) ;;
   *)
-    echo "junkie: the latest release is '$latest', which is not a CLI release." >&2
-    echo "junkie: pick one from https://github.com/$REPO/releases and set JUNKIE_VERSION=vX.Y.Z" >&2
+    echo "junkie: no CLI release found — the newest one is '$latest'." >&2
+    echo "junkie: pick a vX.Y.Z from https://github.com/$REPO/releases and set JUNKIE_VERSION=vX.Y.Z" >&2
     exit 1
     ;;
 esac
