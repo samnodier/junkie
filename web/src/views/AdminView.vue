@@ -4,12 +4,10 @@
 // room deletion post to the legacy audited endpoints, then re-fetch.
 import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { useAuthStore } from '@/stores/auth';
 import AppShell from '@/components/AppShell.vue';
 import ForbiddenView from './ForbiddenView.vue';
 
 const route = useRoute();
-const auth = useAuthStore();
 const data = ref(null);
 const forbidden = ref('');
 const error = ref(String(route.query.error || ''));
@@ -71,10 +69,9 @@ onMounted(load);
       <section class="panel admin-section">
         <div class="panel-title">
           <div><p class="eyebrow">Accounts</p><h2>Users</h2></div>
-          <div class="admin-title-actions">
-            <RouterLink to="/admin/logs" class="btn-ghost btn-compact">View log</RouterLink>
-            <span class="role-badge" :class="`role-${auth.user.role}`">{{ auth.user.role }}</span>
-          </div>
+          <!-- .btn is what makes a link lay out as a button; without it the
+               link keeps block layout and the box grows to the row's height. -->
+          <RouterLink to="/admin/logs" class="btn btn-ghost btn-compact">View log</RouterLink>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">

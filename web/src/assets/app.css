@@ -366,11 +366,6 @@ button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(
   background: var(--accent-hover);
   color: var(--accent-ink);
 }
-.btn-compact {
-  min-height: 44px;
-  padding: 0 18px;
-  font-size: 0.875rem;
-}
 .btn-ghost,
 .ghost {
   min-height: 48px;
@@ -398,6 +393,13 @@ button[type="submit"]:not(.btn-ghost):not(.btn-danger):not(.check):not(
   background: var(--danger);
   color: var(--accent-ink);
   filter: none;
+}
+/* The compact variant, defined after .btn-ghost and .btn-danger so their
+   full-size heights don't win on an element carrying both. */
+.btn-compact {
+  min-height: 35px;
+  padding: 0 14px;
+  font-size: 0.875rem;
 }
 input,
 select,
@@ -1441,13 +1443,6 @@ span.room-member-locked {
 .connection-head:last-child {
   margin-bottom: 0;
 }
-/* The admin section header keeps its role badge and its links together. */
-.admin-title-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-
 /* Room todos, grouped per person. The point of the collapsed rows is that
    the list's length tracks the number of people, not the number of todos, so
    a large room stays scrollable. */
@@ -1563,10 +1558,53 @@ span.room-member-locked {
   width: auto;
   min-width: 12rem;
 }
+/* One line per person: name on the left, actions against the right edge.
+   Stacking them cost a row's height per member, which a long roster feels. */
+.member-row {
+  flex-wrap: wrap;
+}
 .member-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
+/* Square icon buttons for actions that repeat on every row, where the words
+   would be most of the width. Each carries its name in title/aria-label. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 35px;
+  height: 35px;
+  min-height: 35px;
+  padding: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.icon-btn svg {
+  width: 17px;
+  height: 17px;
+}
+.icon-btn:hover:not([disabled]) {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.icon-btn[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+.icon-btn-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.icon-btn-danger:hover:not([disabled]) {
+  background: var(--danger);
+  color: var(--accent-ink);
+  border-color: var(--danger);
 }
 /* The pending-transfer countdown, which doubles as its own undo. It sits
    faintly red to read as live rather than decorative, and swaps the time for
@@ -1576,7 +1614,8 @@ span.room-member-locked {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: 3px var(--sp-3);
+  min-height: 35px;
+  padding: 0 var(--sp-3);
   border-radius: 999px;
   font-family: var(--font-mono);
   font-size: var(--fs-label);
@@ -2931,6 +2970,13 @@ body.menu-drawer-open {
 }
 .admin-table tbody tr:last-child td {
   border-bottom: 0;
+}
+/* Every column hugs its content, so the table's spare width has to go
+   somewhere: give it to the first, or it pools after the last one and reads
+   as an empty column. */
+.admin-table th:first-child,
+.admin-table td:first-child {
+  width: 100%;
 }
 .admin-table form {
   margin: 0;
