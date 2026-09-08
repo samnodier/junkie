@@ -112,20 +112,20 @@ func TestWatchTiersShowTheirEssentials(t *testing.T) {
 		{
 			name:  "full shows the chrome",
 			width: 100, height: 30,
-			want: []string{"FOCUS", "of 50:00", "ends at", "q quit"},
+			want: []string{"FOCUS", "of 50:00", "ends at", "esc or q"},
 		},
 		{
 			// At this size the number is the whole message.
 			name:  "compact drops the chrome",
 			width: 30, height: 12,
 			want: []string{"FOCUS", "█"},
-			omit: []string{"q quit", "ends at", "of 50:00"},
+			omit: []string{"esc or q", "ends at", "of 50:00"},
 		},
 		{
 			name:  "mini is two lines of text",
 			width: 16, height: 4,
 			want: []string{"focus", "25:00"},
-			omit: []string{"█", "q quit"},
+			omit: []string{"█", "esc or q"},
 		},
 		{
 			name:  "micro is the digits alone",

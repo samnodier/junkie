@@ -125,8 +125,8 @@ numbers alone.
   junkie watch CODE     that room's block
 
 Tab moves between them without leaving the window. No block running is fine
-— f starts one. Esc returns to the full desk. q quits. The block keeps
-running either way.`,
+— f starts one. Esc or q returns to the full desk, and q again quits from
+there. The block keeps running either way.`,
 		},
 		{
 			name: "room", group: groupRooms, args: "<command>",
@@ -310,7 +310,7 @@ func writeOverview(w io.Writer) {
     a  add a todo                   j/k  move · g/G  ends
     space  done · e  edit · d  remove · u  undo
 
-    q  quit
+    q  quit · from the zoomed pane it goes back to the desk first
 
   With a room on screen the block keys act on the room, and the todo list
   is the room's — yours to work, everyone else's to read.

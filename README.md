@@ -190,12 +190,12 @@ The keys are grouped along the bottom of the screen the way they are grouped her
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` / `c` | start focus · take the break · skip it · cancel the block |
 | desk | `tab` | show the next block: your own, then each room |
-| desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` returns) |
-| desk | `r` / `q` | refresh · quit |
+| desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns) |
+| desk | `r` / `q` | refresh · quit (`q` backs out of the zoomed pane first) |
 | desk | `L` | sign in (guest desk) |
 | desk | `y` / `n` | answer a room's join prompt |
 
-In a narrow window each row drops its last hints, and in a short one they collapse back to a single line.
+In a narrow window each row drops its last hints, and in a short one they collapse back to a single line. A message the desk puts up — "no break is waiting" — clears itself after a few seconds, and the next key you press clears it immediately.
 
 ### Two blocks at once
 

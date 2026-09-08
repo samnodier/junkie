@@ -340,3 +340,50 @@ func TestGoToEndsOfTheList(t *testing.T) {
 		t.Errorf("g left the cursor at %d, want the first row", m.cursor)
 	}
 }
+
+// Four seconds is right for a note you did not expect and far too long for
+// one you already know, so the next key clears it.
+func TestANoteClearsOnTheNextKey(t *testing.T) {
+	m := dashAt(100, 30)
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	if !strings.Contains(m.footer(), "no break is waiting") {
+		t.Fatalf("b said nothing: %s", m.footer())
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if m.status != "" {
+		t.Errorf("the note outlived the next key: %q", m.status)
+	}
+	if strings.Contains(m.footer(), "no break is waiting") {
+		t.Errorf("the note is still on screen:\n%s", m.footer())
+	}
+}
+
+// The zoomed pane is a screen you are inside. q leaves that before it
+// leaves the program, so a full-window countdown is never a dead end.
+func TestQuitLeavesTheZoomedPaneFirst(t *testing.T) {
+	m := dashAt(100, 30)
+	m.zoom = true
+
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd != nil {
+		t.Fatal("q quit the program from the zoomed pane")
+	}
+	if m.zoom {
+		t.Fatal("q did not leave the zoomed pane")
+	}
+
+	// From the desk there is nothing left to back out of.
+	if _, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}); cmd == nil {
+		t.Error("q on the desk did not quit")
+	}
+}
+
+// An empty pane that does not say how to leave it is a dead end.
+func TestTheEmptyZoomedPaneSaysHowToLeave(t *testing.T) {
+	m := dashAt(100, 30)
+	m.zoom = true
+	m.desk.SoloTimer = nil
+	if view := m.View(); !strings.Contains(view, "esc or q") {
+		t.Errorf("no way out on screen:\n%s", view)
+	}
+}

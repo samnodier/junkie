@@ -54,7 +54,11 @@ func (m *watchModel) View() string {
 	if m.timer == nil {
 		msg := styleFaint.Render(clip("no block running · f to start one", m.width))
 		if m.chrome && m.height > 1 {
-			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+			// With no timer there is nothing else on the screen, so the way
+			// out has to be on it: an empty pane that does not say how to
+			// leave is a dead end.
+			body := msg + "\n\n" + styleFaint.Render(helpLine(m.width, false))
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
 		}
 		return msg + "\n"
 	}
@@ -218,13 +222,13 @@ func shortenCountdown(text string, width int) string {
 // the sentence short mid-word would be worse than saying less, so the short
 // forms are written out rather than truncated.
 func helpLine(width int, room bool) string {
-	full := "esc desk · q quit · the block keeps running either way"
-	short := "esc desk · q quit"
+	full := "esc or q back to the desk · the block keeps running either way"
+	short := "esc or q · desk"
 	if room {
 		// A room's block has somewhere else to be — the next room, or your
 		// own timer — and two actions the private block has no version of.
-		full = "esc desk · tab next · i I'm in · x leave · q quit"
-		short = "esc desk · tab next · q quit"
+		full = "esc or q desk · tab next · i I'm in · x leave"
+		short = "esc or q desk · tab next"
 	}
 	if width >= len([]rune(full)) {
 		return full
@@ -232,7 +236,7 @@ func helpLine(width int, room bool) string {
 	if width >= len([]rune(short)) {
 		return short
 	}
-	return "q quit"
+	return "q desk"
 }
 
 func pendingHint(width int) string {

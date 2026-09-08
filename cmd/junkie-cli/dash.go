@@ -453,6 +453,14 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.login != nil {
 		return m.handleLoginKey(msg)
 	}
+	// A note has said its piece the moment you reach for anything else.
+	// Four seconds is right for reading one you did not expect and far too
+	// long for one you already know, so any key clears it -- and still does
+	// whatever it does.
+	if m.status != "" {
+		m.status = ""
+		m.statusUntil = time.Time{}
+	}
 	// While a line is being typed, every key belongs to it — otherwise a
 	// todo containing "q" would quit the program mid-word.
 	if m.editing != nil {
@@ -500,7 +508,16 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	t := m.desk.SoloTimer
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "q":
+		// The zoomed pane is a screen you are inside, so q leaves that
+		// first. From the desk itself there is nothing left to back out
+		// of, and it quits.
+		if m.zoom {
+			m.zoom = false
+			return m, nil
+		}
+		return m, tea.Quit
+	case "ctrl+c":
 		return m, tea.Quit
 	case "tab":
 		m.picked = true
