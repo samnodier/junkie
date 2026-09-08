@@ -70,6 +70,11 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
 <template>
   <li :class="todo.removed ? 'removed' : todo.done ? 'done' : ''">
     <span v-if="todo.readOnly && !hideAuthor" class="todo-avatar" aria-hidden="true"><img v-if="todo.hasAvatar" class="avatar-img" :src="`/avatar/${todo.userId}?v=${todo.avatarVersion}`" alt="" loading="lazy"><template v-else>{{ initial(todo.displayName) }}</template></span>
+    <!-- Someone else's todo, under their own name: no check at all. You can't
+         complete another person's work, and the server refuses it, so a
+         toggle here would be a control that only ever fails. The column stays
+         so the text still lines up with everyone's. -->
+    <span v-else-if="todo.readOnly" class="check-spacer" aria-hidden="true"></span>
     <button
       v-else
       type="button"
