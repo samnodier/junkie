@@ -935,7 +935,14 @@ func (m *dashModel) View() string {
 	}
 	b.WriteString(m.timerBlock())
 	if m.zoom {
-		return b.String() + m.footer()
+		// The pane is placed into its own height and ends without a newline,
+		// so a footer concatenated here lands on the end of its last line
+		// rather than under it -- which is how a question the pane put up
+		// came to be drawn off the right edge of the screen.
+		if foot := m.footer(); foot != "" {
+			return b.String() + "\n" + foot
+		}
+		return b.String()
 	}
 	b.WriteString("\n")
 
@@ -1023,6 +1030,17 @@ func (m *dashModel) promptBanner() string {
 	return styleWarn.Render(clip(text, m.width)) + "\n"
 }
 
+// zoomFooterRows is how many rows the zoomed pane must leave beneath it.
+// Usually none: the pane draws its own key line and footer() says so by
+// returning nothing. A question, a note or an error is the exception, and
+// it needs a row of its own.
+func (m *dashModel) zoomFooterRows() int {
+	if foot := m.footer(); foot != "" {
+		return lipgloss.Height(foot)
+	}
+	return 0
+}
+
 func (m *dashModel) timerHeight() int {
 	if m.zoom {
 		// Header, the blank line under it, and the footer row that carries
@@ -1031,6 +1049,13 @@ func (m *dashModel) timerHeight() int {
 		if m.prompt != nil {
 			used += 2
 		}
+		// The pane fills whatever is left, its own key line included, so a
+		// footer it was not measured against is drawn one row past the
+		// bottom of the screen. That is how x came to open a question in
+		// the zoomed pane that nobody could see -- and, since the question
+		// swallows keys until it is answered, how the pane then looked
+		// frozen.
+		used += m.zoomFooterRows()
 		h := m.height - used
 		if h < 1 {
 			return 1

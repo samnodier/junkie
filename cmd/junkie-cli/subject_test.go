@@ -536,3 +536,34 @@ func TestJAndKCycleTheBlocks(t *testing.T) {
 		t.Errorf("tab went to %q, want %q", m.subject, second)
 	}
 }
+
+// The zoomed pane is placed into the whole window and ends without a
+// newline, so a footer concatenated onto it lands on the end of its last
+// line and runs off the right edge of the screen. strings.Contains cannot
+// see that -- the question is in the view either way -- so this asserts
+// where the line is, which is the thing that was wrong.
+func TestZoomedFooterGetsItsOwnLine(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m.zoom = true
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	lines := strings.Split(m.View(), "\n")
+	if last := strings.TrimSpace(lines[len(lines)-1]); !strings.HasPrefix(last, "leave the block") {
+		t.Errorf("the question is not the bottom line, that is %q", last)
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "x leave") && strings.Contains(line, "leave the block in") {
+			t.Errorf("the question was folded into the pane's key line: %q", line)
+		}
+	}
+
+	// A note behaves the same way, and used to vanish for the same reason.
+	m.confirm = nil
+	m.note("something happened")
+	lines = strings.Split(m.View(), "\n")
+	if last := strings.TrimSpace(lines[len(lines)-1]); last != "something happened" {
+		t.Errorf("a note in the zoomed pane is not on its own line, bottom is %q", last)
+	}
+}
