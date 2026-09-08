@@ -1201,7 +1201,16 @@ func (a *app) createRoom(w http.ResponseWriter, r *http.Request) {
 	// for the ordinary url-encoded case) keeps every FormValue below working
 	// either way.
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		_ = r.ParseMultipartForm(maxRoomSoundBytes + 4096)
+		// The error matters. A sound over the body cap fails the parse, and
+		// every field fails with it -- including the hidden ephemeral flag,
+		// which would leave this creating a *permanent* room from a temporary
+		// room's form and silently dropping the sound. Refuse instead.
+		if err := r.ParseMultipartForm(maxRoomSoundBytes + 4096); err != nil {
+			http.Redirect(w, r, "/?error="+url.QueryEscape(fmt.Sprintf(
+				"That sound is too large — the limit is %d KB. An MP3 or OGG of the same clip is usually far smaller than a WAV.",
+				maxRoomSoundBytes/1024)), http.StatusSeeOther)
+			return
+		}
 	}
 	u, _ := a.currentUser(r)
 	if !a.limiter.allow("createroom:"+u.ID, 20, time.Hour) {

@@ -4,6 +4,7 @@
 // so the server creates the room and redirects to its /f/{code} screen.
 import { onMounted, onUnmounted, ref } from 'vue';
 import SoundPref from '@/components/SoundPref.vue';
+import { shortFileName } from '@/lib/fileName';
 
 const emit = defineEmits(['close']);
 const firstField = ref(null);
@@ -24,7 +25,19 @@ const soundName = ref('');
 async function pickSound(event) {
   const file = event.target.files?.[0];
   soundName.value = file ? file.name : '';
-  if (!file || typeof AudioContext === 'undefined') return;
+  if (!file) return;
+  // Size first, and here rather than only on the server: an oversize body
+  // fails the whole multipart parse, so the server never gets to say why.
+  if (file.size > 512 * 1024) {
+    alert(
+      `That file is ${Math.round(file.size / 1024)} KB — the limit is 512 KB. `
+        + 'Saving it as an MP3 or OGG instead of a WAV usually makes it far smaller.',
+    );
+    event.target.value = '';
+    soundName.value = '';
+    return;
+  }
+  if (typeof AudioContext === 'undefined') return;
   try {
     const ctx = new AudioContext();
     const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
@@ -85,7 +98,7 @@ async function pickSound(event) {
               <p class="muted">Optional. Plays at the end of each block for anyone who has the chime switched on. Up to 15 seconds, 512 KB — an MP3 or OGG is much smaller than a WAV.</p>
             </div>
             <label class="btn btn-ghost btn-compact sound-pref-upload">
-              {{ soundName || 'Choose a file' }}
+              <span :title="soundName || null">{{ shortFileName(soundName) || 'Choose a file' }}</span>
               <input
                 type="file"
                 name="sound"
