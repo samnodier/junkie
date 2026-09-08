@@ -164,7 +164,7 @@ func (m *watchModel) viewFull() []string {
 		body = append(body, "", styleDanger.Render(clip("offline: "+m.err.Error(), m.width)))
 	}
 	if m.chrome {
-		body = append(body, "", styleFaint.Render(helpLine(m.width, m.timer.Title != "")))
+		body = append(body, "", styleFaint.Render(helpLine(m.width, m.timer.room())))
 	}
 	return body
 }

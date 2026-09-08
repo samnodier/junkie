@@ -52,6 +52,14 @@ type face struct {
 // counting reports whether this face has a deadline running. A pending
 // break is an offer with no clock on it, and a room sitting idle has
 // nothing at all.
+// room reports whether this face is a room's block rather than your own.
+// Code is what separates them: a room face always carries one and the
+// private block never does. Title used to answer this and stopped being
+// able to the moment the private block was given a name of its own.
+func (f *face) room() bool {
+	return f != nil && f.Code != ""
+}
+
 func (f *face) counting() bool {
 	return f != nil && !f.BreakPending && f.Phase != ""
 }

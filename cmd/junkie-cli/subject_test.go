@@ -387,3 +387,35 @@ func TestTheEmptyZoomedPaneSaysHowToLeave(t *testing.T) {
 		t.Errorf("no way out on screen:\n%s", view)
 	}
 }
+
+// The zoomed pane offered i and x over a private block once the private
+// block had a title, because a title was how it recognised a room. Only a
+// room carries a code.
+func TestZoomedPrivateBlockDoesNotOfferRoomKeys(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.zoom = true
+
+	f := m.currentFace()
+	if f.Title != "your block" {
+		t.Fatalf("expected the named private block, got %q", f.Title)
+	}
+	if f.room() {
+		t.Fatal("the private block claims to be a room")
+	}
+	view := m.View()
+	for _, absent := range []string{"i I'm in", "x leave", "tab next"} {
+		if strings.Contains(view, absent) {
+			t.Errorf("private block offers %q, which does nothing here:\n%s", absent, view)
+		}
+	}
+
+	// A room's block still gets them.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if !m.currentFace().room() {
+		t.Fatal("the room's face does not report as a room")
+	}
+	if view := m.View(); !strings.Contains(view, "x leave") {
+		t.Errorf("a room's block lost its keys:\n%s", view)
+	}
+}
