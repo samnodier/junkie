@@ -19,6 +19,7 @@ import {
 } from '@/lib/sound';
 import { postForm } from '@/lib/postForm';
 import { askConfirm } from '@/composables/confirm';
+import { shortFileName } from '@/lib/fileName';
 
 // The two hosts style their preference rows differently: the room settings and
 // the temporary-room popup use .settings-auto-roll, the profile page uses
@@ -174,7 +175,7 @@ function pick(id) {
     </div>
     <!-- The file behind the choice, so you can see what's already set before
          deciding whether to replace it. -->
-    <p v-if="enabled && chosenFileName" class="muted sound-pref-filename mono">{{ chosenFileName }}</p>
+    <p v-if="enabled && chosenFileName" class="muted sound-pref-filename mono" :title="chosenFileName">{{ shortFileName(chosenFileName) }}</p>
     <div v-if="canUpload && roomCode" class="sound-pref-row">
       <label class="btn btn-ghost btn-compact sound-pref-upload">
         {{ uploading ? 'Uploading…' : roomSound ? 'Replace room sound' : 'Upload a room sound' }}
