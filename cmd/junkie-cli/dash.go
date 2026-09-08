@@ -568,9 +568,8 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "ctrl+c":
 		return m, tea.Quit
-	// Three pairs, three scopes: tab walks every block, J and K stay among
-	// the rooms, j and k stay on the todo list. The shifted pair is one
-	// level up from the plain one, as in a list of lists.
+	// Two pairs, two jobs: tab and shift+tab move between blocks, j and k
+	// scroll whatever list the block on screen is showing.
 	case "tab":
 		m.picked = true
 		m.cycleSubject(1)
@@ -578,12 +577,6 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		m.picked = true
 		m.cycleSubject(-1)
-		return m, nil
-	case "J":
-		m.cycleRoom(1)
-		return m, nil
-	case "K":
-		m.cycleRoom(-1)
 		return m, nil
 	case "esc":
 		if m.zoom {
@@ -1272,7 +1265,7 @@ func (m *dashModel) groupedKeys() string {
 	// "tab room" said which key without saying what it did. J and K move the
 	// countdown between the blocks you have running -- yours, then each
 	// room -- so it is named for that.
-	desk := keyLine{"desk", []string{"q quit", "tab next block", "J/K rooms", "A join a room", "w zoom", "r refresh"}}
+	desk := keyLine{"desk", []string{"q quit", "tab next block", "A join a room", "w zoom", "r refresh"}}
 	if m.identity.Guest {
 		desk = keyLine{"desk", []string{"q quit", "L sign in", "w zoom"}}
 	} else if len(m.desk.Rooms) == 0 {
@@ -1382,8 +1375,8 @@ func runDashboard(zoom bool, want string) error {
 // are the same letters as the private block's — they act on the room
 // instead — plus the two only a shared block has.
 func roomDashKeys(width int) string {
-	const full = "tab block · J/K rooms · f start · i I'm in · s skip · x leave · q quit"
-	const medium = "tab block · J/K rooms · f start · x leave · q quit"
+	const full = "tab block · f start · i I'm in · b break · s skip · x leave · q quit"
+	const medium = "tab block · f start · i I'm in · x leave · q quit"
 	const short = "tab · f start · i in · x leave · q quit"
 	switch {
 	case width >= len([]rune(full)):

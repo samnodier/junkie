@@ -184,15 +184,14 @@ The keys are grouped along the bottom of the screen the way they are grouped her
 
 | Group | Key | Does |
 | ----- | --- | ---- |
-| todos | `j` `k` | move down and up the list |
+| todos | `j` `k` | scroll the list on whichever block is showing |
 | todos | `g` `G` | jump to the top and the bottom of it |
 | todos | `space` | complete or un-complete |
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` | start focus · take the break · skip it |
 | block | `x` | end the block on screen — your own, or leave a room's. Asks first either way; ending your own banks none of its minutes |
 | desk | `A` | join a room by code, without leaving the desk |
-| desk | `tab` | show the next block: your own, then each room |
-| desk | `J` `K` | move between rooms only, without passing back through your own block |
+| desk | `tab` `shift+tab` | move between blocks: your own, then each room |
 | desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns, `c` ends the block) |
 | desk | `r` / `q` | refresh · quit (`q` backs out of the zoomed pane first) |
 | desk | `L` | sign in (guest desk) |
@@ -202,7 +201,7 @@ In a narrow window each row drops its last hints, and in a short one they collap
 
 ### Two blocks at once
 
-Your own block and a room's block run independently — you can be in both, and starting or joining one never asks you to give up the other — and the countdown shows one at a time. `tab` moves between them: your private block first, then each room you are in. `J` and `K` step between the rooms alone, for a desk with several of them. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
+Your own block and a room's block run independently — you can be in both, and starting or joining one never asks you to give up the other — and the countdown shows one at a time. `tab` moves between them: your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
 
 With a room on screen the timer keys act on that room, and two more apply:
 

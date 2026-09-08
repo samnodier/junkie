@@ -513,52 +513,47 @@ func TestJoinARoomFromTheDesk(t *testing.T) {
 	}
 }
 
-// Three pairs, three scopes: tab walks every block, J and K stay among the
-// rooms, j and k stay on the todo list.
-func TestJAndKStayAmongTheRooms(t *testing.T) {
+// Two pairs, two jobs: tab moves between blocks, j and k scroll the list
+// on whichever one is showing.
+func TestTabMovesBlocksAndJKScrollsThem(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	m.desk.Rooms = append(m.desk.Rooms, deskRoom{Code: "XYZ-789", Name: "Second room"})
+	m.desk.Todos = []apiTodo{{ID: "p1"}, {ID: "p2"}}
+	m.desk.Rooms[0].Mine = []apiTodo{{ID: "r1"}, {ID: "r2"}}
 
-	// Over your own block there is no room to step from, and it says so.
+	// j scrolls your own block's list.
 	m.selectSubject(soloSubject)
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
-	if m.subject != soloSubject {
-		t.Errorf("J moved off your own block to %q", m.subject)
-	}
-	if !strings.Contains(m.footer(), "tab to a room first") {
-		t.Errorf("J said nothing over your own block: %s", m.footer())
-	}
-
-	// tab is what reaches a room, and then J and K stay inside them.
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
-	first := m.subject
-	if first == soloSubject {
-		t.Fatal("tab did not leave your own block")
-	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
-	second := m.subject
-	if second == first || second == soloSubject {
-		t.Fatalf("J went to %q, want the other room", second)
-	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
-	if m.subject == soloSubject {
-		t.Error("J passed back through your own block")
-	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
-	if m.subject != second {
-		t.Errorf("K went to %q, want back to %q", m.subject, second)
-	}
-
-	// j and k are still the todo cursor, wherever you are.
-	m.desk.Rooms[0].Mine = []apiTodo{{ID: "a"}, {ID: "b"}}
-	m.selectSubject(m.desk.Rooms[0].Code)
-	room := m.subject
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	if m.subject != room {
-		t.Error("j moved the room instead of the cursor")
+	if m.cursor != 1 || m.subject != soloSubject {
+		t.Errorf("j moved the block instead of the cursor: subject=%q cursor=%d", m.subject, m.cursor)
 	}
-	if m.cursor != 1 {
-		t.Errorf("j left the cursor at %d, want 1", m.cursor)
+
+	// tab moves to the room, and j scrolls that one's list just the same.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	room := m.subject
+	if room == soloSubject {
+		t.Fatal("tab did not move to the room")
+	}
+	if m.cursor != 0 {
+		t.Errorf("the cursor carried over to another list at %d", m.cursor)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.cursor != 1 || m.subject != room {
+		t.Errorf("j on a room moved the block: subject=%q cursor=%d", m.subject, m.cursor)
+	}
+
+	// shift+tab goes back.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.subject != soloSubject {
+		t.Errorf("shift+tab went to %q, want back to your own block", m.subject)
+	}
+
+	// J and K are gone: they move nothing and scroll nothing.
+	before, cursor := m.subject, m.cursor
+	for _, key := range []rune{'J', 'K'} {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		if m.subject != before || m.cursor != cursor {
+			t.Errorf("%q still does something: subject=%q cursor=%d", key, m.subject, m.cursor)
+		}
 	}
 }

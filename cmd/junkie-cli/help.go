@@ -155,12 +155,11 @@ puts you in straight away.`,
 is required: without one this is a guest desk on this machine. L signs in
 to sync with the same account the web uses.
 
-  tab        show the next block: your own, then each room
-  J K        move between rooms only, without passing through your own
+  tab        show the next block: your own, then each room (shift+tab back)
   f b s      start focus · take the break · skip it
   x          end the block on screen — yours, or leave a room's
   A          join a room by code, without leaving the desk
-  j k        move down and up the list
+  j k        scroll the list on whichever block is showing
   g G        jump to the top and the bottom of it
   space      complete or un-complete
   a e d u    add · edit · remove · undo the last remove

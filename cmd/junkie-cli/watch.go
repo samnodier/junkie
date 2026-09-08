@@ -230,8 +230,8 @@ func helpLine(width int, room bool) string {
 	if room {
 		// A room's block has somewhere else to be — the next room, or your
 		// own timer — and two actions the private block has no version of.
-		full = "esc or q desk · tab block · J/K rooms · i I'm in · x leave"
-		short = "esc or q desk · J/K rooms"
+		full = "esc or q desk · tab block · i I'm in · x leave"
+		short = "esc or q desk · tab block"
 	}
 	if width >= len([]rune(full)) {
 		return full
