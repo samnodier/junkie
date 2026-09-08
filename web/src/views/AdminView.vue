@@ -6,13 +6,11 @@ import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import AppShell from '@/components/AppShell.vue';
-import EventLog from '@/components/EventLog.vue';
 import ForbiddenView from './ForbiddenView.vue';
 
 const route = useRoute();
 const auth = useAuthStore();
 const data = ref(null);
-const events = ref(null);
 const forbidden = ref('');
 const error = ref(String(route.query.error || ''));
 
@@ -24,12 +22,7 @@ async function load() {
       forbidden.value = body.error;
       return;
     }
-    if (!res.ok) return;
-    data.value = body;
-    // Loaded after the page's own data so a slow or failing log never holds
-    // up the tables above it.
-    const logRes = await fetch('/api/admin/events', { credentials: 'same-origin' });
-    if (logRes.ok) events.value = await logRes.json();
+    if (res.ok) data.value = body;
   } catch {
     /* leave the page blank; a reload retries */
   }
@@ -78,39 +71,29 @@ onMounted(load);
       <section class="panel admin-section">
         <div class="panel-title">
           <div><p class="eyebrow">Accounts</p><h2>Users</h2></div>
-          <span class="role-badge" :class="`role-${auth.user.role}`">{{ auth.user.role }}</span>
+          <div class="admin-title-actions">
+            <RouterLink to="/admin/logs" class="btn-ghost btn-compact">View log</RouterLink>
+            <span class="role-badge" :class="`role-${auth.user.role}`">{{ auth.user.role }}</span>
+          </div>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Joined</th><th scope="col">Rooms</th><template v-if="data.isOwner"><th scope="col">Focus summary</th><th scope="col"></th></template></tr></thead>
+            <thead><tr><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Joined</th><th scope="col">Rooms</th><th v-if="data.isOwner" scope="col">Focus summary</th></tr></thead>
             <tbody>
               <tr v-for="u in data.users" :key="u.id">
                 <td><RouterLink :to="`/admin/users/${u.id}`"><strong>{{ u.username }}</strong></RouterLink></td>
                 <td><span class="role-badge" :class="`role-${u.role}`">{{ u.role }}</span></td>
                 <td><time :datetime="u.joinedAt">{{ u.joined }}</time></td>
                 <td>{{ u.roomsCount }}</td>
-                <template v-if="data.isOwner">
-                  <td>{{ u.focusTime }} · {{ u.lastActivity ? `last ${u.lastActivity}` : 'no activity' }}</td>
-                  <td>
-                    <!-- Role changes and reset links live on the person's own
-                         page. Promoting grants this entire space, which is too
-                         much to sit one click away in a list. -->
-                    <RouterLink :to="`/admin/users/${u.id}`" class="btn-ghost btn-compact">Open</RouterLink>
-                  </td>
-                </template>
+                <!-- No action column: the username is the way in, and role
+                     changes live on the person's own page rather than one
+                     click away in a list. -->
+                <td v-if="data.isOwner">{{ u.focusTime }} · {{ u.lastActivity ? `last ${u.lastActivity}` : 'no activity' }}</td>
               </tr>
-              <tr v-if="!data.users.length"><td colspan="6" class="empty">No users found.</td></tr>
+              <tr v-if="!data.users.length"><td colspan="5" class="empty">No users found.</td></tr>
             </tbody>
           </table>
         </div>
-      </section>
-
-      <section class="panel admin-section">
-        <div class="panel-title">
-          <div><p class="eyebrow">Everything that happened</p><h2>Log</h2></div>
-          <span v-if="events" class="muted">kept {{ events.retentionDays }} days</span>
-        </div>
-        <EventLog v-if="events" :events="events.events" />
       </section>
 
       <section class="panel admin-section">

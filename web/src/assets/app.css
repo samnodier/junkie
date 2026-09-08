@@ -1441,6 +1441,13 @@ span.room-member-locked {
 .connection-head:last-child {
   margin-bottom: 0;
 }
+/* The admin section header keeps its role badge and its links together. */
+.admin-title-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 /* Room todos, grouped per person. The point of the collapsed rows is that
    the list's length tracks the number of people, not the number of todos, so
    a large room stays scrollable. */

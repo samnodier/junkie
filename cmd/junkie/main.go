@@ -415,6 +415,7 @@ func main() {
 	mux.HandleFunc("GET /api/admin/users/{id}", a.requireAuth(a.apiAdminUser))
 	mux.HandleFunc("GET /api/admin/rooms/{id}", a.requireAuth(a.apiAdminRoom))
 	mux.HandleFunc("POST /admin/rooms/{id}/room-role", a.requireAdminMutation(a.adminSetRoomRole))
+	mux.HandleFunc("GET /admin/logs", a.requireAdmin(a.spaPage))
 	mux.HandleFunc("GET /admin/users/{id}", a.requireAdmin(a.spaPage))
 	mux.HandleFunc("GET /admin/rooms/{id}", a.requireAdmin(a.spaPage))
 
