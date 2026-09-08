@@ -1607,6 +1607,54 @@ span.room-member-locked {
 .member-row {
   flex-wrap: wrap;
 }
+
+/* The members roster reads as one list, ruled between rows the way the admin
+   space does it, rather than as a stack of cards. A box per person spent a
+   border and its padding on every row, and a long roster feels that as
+   scrolling. */
+.room-members-list {
+  /* The rules do the separating now, so the rows sit tight against them. */
+  gap: 0;
+  margin-top: var(--sp-2);
+}
+.room-members-list .connection-row {
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  padding: var(--sp-3) 0;
+}
+.room-members-list .connection-row:last-child {
+  border-bottom: 0;
+}
+.room-members-list .connection-head {
+  margin-bottom: 0;
+}
+/* Never two lines. The name gives up its width before anything wraps, so the
+   controls stay beside the person they act on however narrow the window. */
+.room-members-list .member-row {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.room-members-list .connection-name,
+.room-members-list .member-username {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.room-members-list .connection-avatar,
+.room-members-list .role-badge,
+.room-members-list .member-actions {
+  flex-shrink: 0;
+}
+@media (max-width: 560px) {
+  /* The @username is the first thing to go: the avatar and the display name
+     already say who this is, and the controls have to keep their line. */
+  .room-members-list .member-username {
+    display: none;
+  }
+}
 .member-actions {
   display: flex;
   align-items: center;

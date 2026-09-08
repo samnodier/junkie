@@ -120,7 +120,7 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
         <h1>Room members</h1>
         <span class="mono muted">{{ data.room.code }}</span>
       </div>
-      <div class="connections-list">
+      <div class="connections-list room-members-list">
         <template v-if="data.members.length">
           <article v-for="m in data.members" :key="m.user.id" class="connection-row">
             <div class="connection-head member-row">
@@ -128,9 +128,9 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
               <a v-if="m.self" href="/profile" class="connection-name">{{ m.user.displayName }}</a>
               <a v-else-if="m.connected" :href="`/${m.user.username}`" class="connection-name">{{ m.user.displayName }}</a>
               <span v-else class="connection-name room-member-locked" title="Not connected">{{ m.user.displayName }}</span>
-              <span class="mono muted">@{{ m.user.username }}</span>
+              <span class="mono muted member-username">@{{ m.user.username }}</span>
               <span v-if="m.creator" class="role-badge role-owner">Owner</span>
-              <span v-else-if="m.admin" class="role-badge role-admin">Room admin</span>
+              <span v-else-if="m.admin" class="role-badge role-admin">Admin</span>
 
               <!-- Actions sit on the same line as the name rather than under
                    it: one row per person, so a long roster stays short.
