@@ -1476,8 +1476,17 @@ span.room-member-locked {
   font-family: var(--font-mono);
   font-size: var(--fs-label);
 }
+/* The list belongs to the name directly above it, so it starts there rather
+   than a paragraph's gap below. Indented under the person, and tighter than
+   your own list: these rows are for reading, not working. */
 .todo-person .todo-list {
-  padding-left: var(--sp-5);
+  margin-top: 0;
+  padding-left: var(--sp-7);
+  gap: 0;
+}
+.todo-person .todo-list li {
+  min-height: 30px;
+  padding: 0 var(--sp-2);
 }
 
 /* The file behind the chosen sound, under the picker. */

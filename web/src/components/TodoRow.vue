@@ -6,6 +6,10 @@ import { inject, nextTick, ref } from 'vue';
 
 const props = defineProps({
   todo: { type: Object, required: true },
+  // Set when the row already sits under the person who wrote it, as in the
+  // room's per-person groups: repeating their face and name on every line
+  // says nothing the heading above hasn't.
+  hideAuthor: { type: Boolean, default: false },
 });
 // The surface owning this row (desk or room page) provides the actions, so
 // the same row works against either store.
@@ -65,7 +69,7 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
 
 <template>
   <li :class="todo.removed ? 'removed' : todo.done ? 'done' : ''">
-    <span v-if="todo.readOnly" class="todo-avatar" aria-hidden="true"><img v-if="todo.hasAvatar" class="avatar-img" :src="`/avatar/${todo.userId}?v=${todo.avatarVersion}`" alt="" loading="lazy"><template v-else>{{ initial(todo.displayName) }}</template></span>
+    <span v-if="todo.readOnly && !hideAuthor" class="todo-avatar" aria-hidden="true"><img v-if="todo.hasAvatar" class="avatar-img" :src="`/avatar/${todo.userId}?v=${todo.avatarVersion}`" alt="" loading="lazy"><template v-else>{{ initial(todo.displayName) }}</template></span>
     <button
       v-else
       type="button"
@@ -76,7 +80,8 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
 
     <span>
       <template v-if="todo.readOnly">
-        <span class="todo-text">{{ todo.text }}</span><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{ todo.displayName }}</span>
+        <span class="todo-text">{{ todo.text }}</span>
+        <template v-if="!hideAuthor"><span class="todo-sep" aria-hidden="true"> · </span><span class="todo-author">{{ todo.displayName }}</span></template>
       </template>
       <template v-else>
         <span

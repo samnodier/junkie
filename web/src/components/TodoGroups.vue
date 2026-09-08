@@ -90,7 +90,7 @@ const initial = (name) => (name ? name[0].toUpperCase() : '?');
             <span class="muted todo-person-count">{{ outstanding(p.todos) }} of {{ p.todos.length }}</span>
           </button>
           <ul class="todo-list" :id="`todo-person-${roomCode}-${p.id}`" v-show="openPeople.has(p.id)">
-            <TodoRow v-for="t in p.todos" :key="t.id" :todo="t" />
+            <TodoRow v-for="t in p.todos" :key="t.id" :todo="t" hide-author />
           </ul>
         </section>
       </div>
