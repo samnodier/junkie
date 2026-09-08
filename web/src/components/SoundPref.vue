@@ -169,7 +169,7 @@ function pick(id) {
          deciding whether to replace it. -->
     <p v-if="enabled && chosenFileName" class="muted sound-pref-filename mono">{{ chosenFileName }}</p>
     <div v-if="canUpload && roomCode" class="sound-pref-row">
-      <label class="btn-ghost btn-compact sound-pref-upload">
+      <label class="btn btn-ghost btn-compact sound-pref-upload">
         {{ uploading ? 'Uploading…' : roomSound ? 'Replace room sound' : 'Upload a room sound' }}
         <input
           ref="fileInput"

@@ -84,7 +84,7 @@ async function pickSound(event) {
               <strong>This room's sound</strong>
               <p class="muted">Optional. Plays at the end of each block for anyone who has the chime switched on. Up to 15 seconds, 512 KB — an MP3 or OGG is much smaller than a WAV.</p>
             </div>
-            <label class="btn-ghost btn-compact sound-pref-upload">
+            <label class="btn btn-ghost btn-compact sound-pref-upload">
               {{ soundName || 'Choose a file' }}
               <input
                 type="file"

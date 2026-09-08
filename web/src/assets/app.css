@@ -1502,9 +1502,10 @@ span.room-member-locked {
   margin: 0;
   font-size: var(--fs-small);
 }
+/* A file input's label, dressed as a button. It needs .btn in the markup for
+   the shared button shape -- border-radius and the rest come from `button,
+   .btn`, which a bare <label> never matches. */
 .sound-pref-upload {
-  display: inline-flex;
-  align-items: center;
   cursor: pointer;
 }
 
