@@ -214,6 +214,38 @@ func (m *dashModel) cycleSubject(step int) {
 // selectSubject switches the pane and re-bases the countdown on the new
 // timer, so the digits change with the same tick as the title rather than
 // counting down the old block for half a second.
+// cycleRoom steps between rooms and only between rooms. tab is what moves
+// through every block, your own included; this is the pair that stays among
+// the rooms, so a desk with several can be walked without passing back
+// through your own block each time round.
+//
+// Over your own block there is no room to step from, and it says so: a key
+// that quietly does nothing reads as one the program missed.
+func (m *dashModel) cycleRoom(step int) {
+	rooms := m.desk.Rooms
+	if len(rooms) == 0 {
+		m.note("you're not in a room yet — A to join one")
+		return
+	}
+	at := -1
+	for i, room := range rooms {
+		if room.Code == m.subject {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		m.note("J and K move between rooms — tab to a room first")
+		return
+	}
+	if len(rooms) < 2 {
+		m.note("this is your only room")
+		return
+	}
+	m.picked = true
+	m.selectSubject(rooms[(at+step+len(rooms))%len(rooms)].Code)
+}
+
 func (m *dashModel) selectSubject(code string) {
 	if code != m.subject {
 		// The todo pane follows the subject, and row four of your own list

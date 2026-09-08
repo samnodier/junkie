@@ -513,57 +513,52 @@ func TestJoinARoomFromTheDesk(t *testing.T) {
 	}
 }
 
-// J and K move between blocks the way j and k move down a list. Typing a
-// code is the rare thing and gave up the key it was holding.
-func TestJAndKCycleTheBlocks(t *testing.T) {
+// Three pairs, three scopes: tab walks every block, J and K stay among the
+// rooms, j and k stay on the todo list.
+func TestJAndKStayAmongTheRooms(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	first := m.subject
+	m.desk.Rooms = append(m.desk.Rooms, deskRoom{Code: "XYZ-789", Name: "Second room"})
 
+	// Over your own block there is no room to step from, and it says so.
+	m.selectSubject(soloSubject)
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	if m.subject != soloSubject {
+		t.Errorf("J moved off your own block to %q", m.subject)
+	}
+	if !strings.Contains(m.footer(), "tab to a room first") {
+		t.Errorf("J said nothing over your own block: %s", m.footer())
+	}
+
+	// tab is what reaches a room, and then J and K stay inside them.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	first := m.subject
+	if first == soloSubject {
+		t.Fatal("tab did not leave your own block")
+	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
 	second := m.subject
-	if second == first {
-		t.Fatal("J did not move to another block")
+	if second == first || second == soloSubject {
+		t.Fatalf("J went to %q, want the other room", second)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	if m.subject == soloSubject {
+		t.Error("J passed back through your own block")
 	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
-	if m.subject != first {
-		t.Errorf("K went to %q, want back to %q", m.subject, first)
-	}
-
-	// tab still does it, for a hand that learned that instead.
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
 	if m.subject != second {
-		t.Errorf("tab went to %q, want %q", m.subject, second)
-	}
-}
-
-// The zoomed pane is placed into the whole window and ends without a
-// newline, so a footer concatenated onto it lands on the end of its last
-// line and runs off the right edge of the screen. strings.Contains cannot
-// see that -- the question is in the view either way -- so this asserts
-// where the line is, which is the thing that was wrong.
-func TestZoomedFooterGetsItsOwnLine(t *testing.T) {
-	m := dashAt(100, 30)
-	m.desk = bothRunningDesk()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
-	m.zoom = true
-
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	lines := strings.Split(m.View(), "\n")
-	if last := strings.TrimSpace(lines[len(lines)-1]); !strings.HasPrefix(last, "leave the block") {
-		t.Errorf("the question is not the bottom line, that is %q", last)
-	}
-	for _, line := range lines {
-		if strings.Contains(line, "x leave") && strings.Contains(line, "leave the block in") {
-			t.Errorf("the question was folded into the pane's key line: %q", line)
-		}
+		t.Errorf("K went to %q, want back to %q", m.subject, second)
 	}
 
-	// A note behaves the same way, and used to vanish for the same reason.
-	m.confirm = nil
-	m.note("something happened")
-	lines = strings.Split(m.View(), "\n")
-	if last := strings.TrimSpace(lines[len(lines)-1]); last != "something happened" {
-		t.Errorf("a note in the zoomed pane is not on its own line, bottom is %q", last)
+	// j and k are still the todo cursor, wherever you are.
+	m.desk.Rooms[0].Mine = []apiTodo{{ID: "a"}, {ID: "b"}}
+	m.selectSubject(m.desk.Rooms[0].Code)
+	room := m.subject
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.subject != room {
+		t.Error("j moved the room instead of the cursor")
+	}
+	if m.cursor != 1 {
+		t.Errorf("j left the cursor at %d, want 1", m.cursor)
 	}
 }

@@ -155,7 +155,8 @@ puts you in straight away.`,
 is required: without one this is a guest desk on this machine. L signs in
 to sync with the same account the web uses.
 
-  J K        move between your blocks: your own, then each room (tab too)
+  tab        show the next block: your own, then each room
+  J K        move between rooms only, without passing through your own
   f b s      start focus · take the break · skip it
   x          end the block on screen — yours, or leave a room's
   A          join a room by code, without leaving the desk
@@ -168,7 +169,7 @@ to sync with the same account the web uses.
   y n        answer a room's join prompt
   r q        refresh · quit
 
-The countdown shows one block at a time and J/K move between them — your
+The countdown shows one block at a time and tab moves between them — your
 private block first, then each room you are in. The room the pane is
 showing is the one marked in the list below it.
 
@@ -306,7 +307,7 @@ func writeOverview(w io.Writer) {
 
     f  start a focus block          i  I'm in — join a room's block
     b  take the break               x  end it — your block, or a room's
-    s  skip the break               J/K  move between your blocks
+    s  skip the break               tab  show the next block
     A  join a room by code          w  timer fills the window
 
     a  add a todo                   j/k  move · g/G  ends
