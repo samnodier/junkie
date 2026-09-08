@@ -125,7 +125,12 @@ func (a *app) uploadRoomSound(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseMultipartForm(maxRoomSoundBytes + 4096); err != nil {
-		fail("That file is too large — the limit is 512 KB.")
+		// The body cap rejects an oversize upload before any of it is read,
+		// so this is the message people actually meet -- validateRoomSound's
+		// nicer one below is only reachable on the Discord paths, which don't
+		// come through multipart. Carry the useful hint here too: a WAV is
+		// the most likely way to be over.
+		fail(fmt.Sprintf("That file is too large — the limit is %d KB. An MP3 or OGG of the same clip is usually far smaller than a WAV.", maxRoomSoundBytes/1024))
 		return
 	}
 	file, header, err := r.FormFile("sound")
