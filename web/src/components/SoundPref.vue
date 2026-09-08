@@ -18,6 +18,7 @@ import {
   soundEnabled,
 } from '@/lib/sound';
 import { postForm } from '@/lib/postForm';
+import { askConfirm } from '@/composables/confirm';
 
 // The two hosts style their preference rows differently: the room settings and
 // the temporary-room popup use .settings-auto-roll, the profile page uses
@@ -117,7 +118,13 @@ async function upload(event) {
 }
 
 async function removeSound() {
-  if (!confirm('Remove this room\u2019s sound? Everyone falls back to the built-in chime.')) return;
+  const ok = await askConfirm({
+    title: 'Remove this room\u2019s sound?',
+    body: 'Everyone falls back to the built-in chime.',
+    confirmLabel: 'Remove',
+    danger: true,
+  });
+  if (!ok) return;
   if (await postForm(`/r/${encodeURIComponent(props.roomCode)}/sound`, { remove: '1' })) {
     await refresh();
   }

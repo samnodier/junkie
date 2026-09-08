@@ -11,6 +11,7 @@ import HeatmapChart from '@/components/HeatmapChart.vue';
 import SoundPref from '@/components/SoundPref.vue';
 import { buildGuestHeatmap } from '@/lib/guestActivity';
 import { useConnectLink } from '@/composables/connectLink';
+import { askConfirm } from '@/composables/confirm';
 
 const NOTIFY_KEY = 'junkie:roomInviteNotifications';
 
@@ -70,10 +71,20 @@ async function submitAvatar() {
 // Rooms this account can't simply take with it when it goes.
 const ownedRooms = computed(() => profile.value?.ownedRooms || []);
 
-function confirmDelete(event) {
-  if (!confirm('Permanently delete your account and all its data? This cannot be undone.')) {
-    event.preventDefault();
-  }
+// The native submit is always stopped and re-issued after the answer:
+// preventDefault has to happen synchronously, so the dialog can't be awaited
+// inside the handler. form.submit() bypasses this listener, which is what
+// makes the second pass go straight through.
+async function confirmDelete(event) {
+  event.preventDefault();
+  const form = event.target;
+  const ok = await askConfirm({
+    title: 'Permanently delete your account?',
+    body: 'Your todos, activity history and any rooms you are alone in go with it. This cannot be undone.',
+    confirmLabel: 'Delete account',
+    danger: true,
+  });
+  if (ok) form.submit();
 }
 
 // Native file inputs can't be styled, so a hidden input backs a real button

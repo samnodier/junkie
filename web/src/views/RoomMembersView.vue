@@ -12,6 +12,7 @@ import { useRoute } from 'vue-router';
 import AppShell from '@/components/AppShell.vue';
 import { useClock } from '@/composables/clock';
 import { postForm } from '@/lib/postForm';
+import { askConfirm } from '@/composables/confirm';
 
 const route = useRoute();
 const code = String(route.params.code || '');
@@ -77,7 +78,13 @@ async function remove(member) {
   // Removing someone is the one control here that acts on another person, so
   // it asks first -- the role buttons are all trivially reversible, this one
   // takes them out of a run in progress.
-  if (!confirm(`Remove ${member.user.displayName} from this room?`)) return;
+  const ok = await askConfirm({
+    title: `Remove ${member.user.displayName} from this room?`,
+    body: 'They lose their place in the room. Their todos and history are untouched, and they can rejoin with the room code.',
+    confirmLabel: 'Remove',
+    danger: true,
+  });
+  if (!ok) return;
   busy.value = member.user.id;
   if (await postForm(`/r/${encodeURIComponent(code)}/remove-member`, { user_id: member.user.id })) {
     await load();

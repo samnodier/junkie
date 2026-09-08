@@ -4,6 +4,7 @@
 import { provide, ref } from 'vue';
 import TopBar from './TopBar.vue';
 import MenuDrawer from './MenuDrawer.vue';
+import ConfirmModal from './ConfirmModal.vue';
 import ToastHolder from './ToastHolder.vue';
 
 defineProps({
@@ -41,4 +42,5 @@ provide('shellApi', {
     @close="drawerOpen = false"
   />
   <ToastHolder />
+  <ConfirmModal />
 </template>

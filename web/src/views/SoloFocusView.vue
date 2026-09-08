@@ -19,6 +19,7 @@ import RingCountdown from '@/components/RingCountdown.vue';
 import RingIdle from '@/components/RingIdle.vue';
 import BreakReadyRing from '@/components/BreakReadyRing.vue';
 import PipTimer from '@/components/PipTimer.vue';
+import { askConfirm } from '@/composables/confirm';
 
 const auth = useAuthStore();
 const desk = useDeskStore();
@@ -33,8 +34,14 @@ function start(minutes) {
   requestPermission();
   desk.soloStart(minutes);
 }
-function cancel() {
-  if (!confirm("End this focus session? It won't count toward your map.")) return;
+async function cancel() {
+  const ok = await askConfirm({
+    title: 'End this focus session?',
+    body: "It won't count toward your map.",
+    confirmLabel: 'End session',
+    danger: true,
+  });
+  if (!ok) return;
   desk.soloCancel();
 }
 function expired(phase) {

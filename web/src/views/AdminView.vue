@@ -6,6 +6,7 @@ import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import AppShell from '@/components/AppShell.vue';
 import ForbiddenView from './ForbiddenView.vue';
+import { askConfirm } from '@/composables/confirm';
 
 const route = useRoute();
 const data = ref(null);
@@ -27,8 +28,9 @@ async function load() {
 }
 
 
-async function post(url, fields = {}, confirmMsg = '') {
-  if (confirmMsg && !confirm(confirmMsg)) return;
+// ask is the confirm options, or nothing when the action needs no question.
+async function post(url, fields = {}, ask = null) {
+  if (ask && !(await askConfirm({ ...ask, danger: true }))) return;
   try {
     await fetch(url, {
       method: 'POST',
@@ -114,7 +116,7 @@ onMounted(load);
                     class="icon-btn icon-btn-danger"
                     :title="`Delete ${r.name}`"
                     :aria-label="`Delete ${r.name}`"
-                    @click="post(`/admin/rooms/${r.id}/delete`, {}, `Permanently delete room ${r.name} and its room data?`)"
+                    @click="post(`/admin/rooms/${r.id}/delete`, {}, { title: `Delete ${r.name}?`, body: `Permanently removes the room and everything in it, for ${r.membersCount === 1 ? 'its 1 member' : `all ${r.membersCount} members`}.`, confirmLabel: 'Delete room' })"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
                   </button>

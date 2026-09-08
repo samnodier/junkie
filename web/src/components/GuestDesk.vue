@@ -7,6 +7,7 @@ import { requestPermission } from '@/lib/notify';
 import { useWakeLock } from '@/composables/wakeLock';
 import RingIdle from './RingIdle.vue';
 import RingCountdown from './RingCountdown.vue';
+import { askConfirm } from '@/composables/confirm';
 
 const store = useGuestDeskStore();
 const shell = inject('shellApi', null);
@@ -62,8 +63,14 @@ function startFocus(mins) {
   requestPermission();
   store.startFocus(mins);
 }
-function cancelFocus() {
-  if (!confirm("End this focus session? It won't count toward your map.")) return;
+async function cancelFocus() {
+  const ok = await askConfirm({
+    title: 'End this focus session?',
+    body: "It won't count toward your map.",
+    confirmLabel: 'End session',
+    danger: true,
+  });
+  if (!ok) return;
   peekOpen.value = false;
   clearTimeout(hideTimer);
   store.cancelFocus();

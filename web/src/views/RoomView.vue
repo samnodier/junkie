@@ -22,6 +22,7 @@ import JoinPromptModal from '@/components/JoinPromptModal.vue';
 import StartConfirmModal from '@/components/StartConfirmModal.vue';
 import PipTimer from '@/components/PipTimer.vue';
 import SoundPref from '@/components/SoundPref.vue';
+import { askConfirm } from '@/composables/confirm';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -112,7 +113,15 @@ async function saveSettings(event) {
   }
 }
 async function deleteRoom() {
-  if (!confirm(`Delete '${room.room.name}'? This removes it for all ${room.memberCount} members.`)) return;
+  const ok = await askConfirm({
+    title: `Delete ${room.room.name}?`,
+    body: room.memberCount === 1
+      ? "This removes it along with its todos. It can't be undone."
+      : `This removes it for all ${room.memberCount} members, along with their todos. It can't be undone.`,
+    confirmLabel: 'Delete room',
+    danger: true,
+  });
+  if (!ok) return;
   await room.action('delete');
   location.href = '/';
 }

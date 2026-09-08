@@ -8,6 +8,7 @@ import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import AppShell from '@/components/AppShell.vue';
 import { postForm } from '@/lib/postForm';
+import { askConfirm } from '@/composables/confirm';
 
 const route = useRoute();
 const id = String(route.params.id || '');
@@ -34,7 +35,15 @@ onMounted(load);
 async function changeRole(role) {
   const name = data.value.user.username;
   const verb = role === 'admin' ? 'Promote' : 'Demote';
-  if (!confirm(`${verb} ${name}? An admin can see every user and every room in this space.`)) return;
+  const ok = await askConfirm({
+    title: `${verb} ${name}?`,
+    body: role === 'admin'
+      ? 'An admin can see every user and every room in this space, and issue password reset links.'
+      : 'They lose access to this space.',
+    confirmLabel: verb,
+    danger: role !== 'admin',
+  });
+  if (!ok) return;
   if (await postForm(`/admin/users/${encodeURIComponent(id)}/role`, { role })) await load();
 }
 
@@ -43,7 +52,12 @@ async function changeRole(role) {
 const resetLink = ref(null);
 const resetCopied = ref(false);
 async function createResetLink() {
-  if (!confirm(`Create a password reset link for ${data.value.user.username}? It works once and expires in 30 minutes.`)) return;
+  const ok = await askConfirm({
+    title: `Create a password reset link for ${data.value.user.username}?`,
+    body: 'It works once and expires in 30 minutes. You send it to them yourself.',
+    confirmLabel: 'Create link',
+  });
+  if (!ok) return;
   try {
     const res = await fetch(`/admin/users/${encodeURIComponent(id)}/reset-link`, {
       method: 'POST',

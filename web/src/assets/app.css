@@ -1181,6 +1181,19 @@ h2 {
 }
 /* Holds the check column's width on rows that have no check, so a read-only
    list still lines up with an editable one. */
+/* A banner that clears itself fades on the way out, so the page doesn't
+   jump under whatever the reader has moved on to. */
+.banner-timed {
+  animation: banner-settle 8s ease-out forwards;
+}
+@keyframes banner-settle {
+  0%, 88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .banner-timed { animation: none; }
+}
+
 .check-spacer {
   display: block;
   width: 18px;

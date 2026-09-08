@@ -11,6 +11,7 @@ import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import RingIdle from './RingIdle.vue';
 import RingCountdown from './RingCountdown.vue';
 import BreakReadyRing from './BreakReadyRing.vue';
+import { askConfirm } from '@/composables/confirm';
 
 const auth = useAuthStore();
 const desk = useDeskStore();
@@ -22,8 +23,14 @@ function start(minutes) {
   requestPermission();
   desk.soloStart(minutes);
 }
-function cancel() {
-  if (!confirm("End this focus session? It won't count toward your map.")) return;
+async function cancel() {
+  const ok = await askConfirm({
+    title: 'End this focus session?',
+    body: "It won't count toward your map.",
+    confirmLabel: 'End session',
+    danger: true,
+  });
+  if (!ok) return;
   desk.soloCancel();
 }
 function expired(phase) {
