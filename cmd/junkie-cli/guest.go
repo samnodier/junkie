@@ -146,13 +146,13 @@ func (s *localStore) mutateLocked(path string, form url.Values) error {
 		return s.startFocusLocked(mins)
 	case "/solo/cancel":
 		if s.timer == nil || s.timer.Phase != "focus" {
-			return errors.New("only a running focus block can be cancelled — `junkie skip` ends a break")
+			return errors.New("only a running focus block can be ended — s skips a break")
 		}
 		s.timer = nil
 		return nil
 	case "/solo/break/start":
 		if s.timer == nil || s.timer.Phase != "break_offer" {
-			return errors.New("no break is waiting — `junkie focus` to start a block")
+			return errors.New("no break is waiting — f starts a block")
 		}
 		mins := s.timer.BreakMinutes
 		if v := strings.TrimSpace(form.Get("minutes")); v != "" {
@@ -252,7 +252,7 @@ func (s *localStore) startFocusLocked(minutes int) error {
 	}
 	if s.timer != nil {
 		if s.timer.Phase == "break_offer" {
-			return errors.New("a break is waiting — `junkie break` to take it, `junkie skip` to go straight on")
+			return errors.New("a break is waiting — b takes it, s goes straight on")
 		}
 		return fmt.Errorf("a %s block is already running", s.timer.Phase)
 	}

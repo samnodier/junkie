@@ -58,13 +58,13 @@ func renderStatus(desk deskResponse, width int) string {
 func renderSoloLine(t *soloTimer, width int) string {
 	if t == nil {
 		return labeled("timer", styleFaint.Render(
-			fit("nothing running · `junkie focus` to start a block", width-labelWidth))) + "\n"
+			fit("nothing running · open `junkie` and press f", width-labelWidth))) + "\n"
 	}
 	style := lipgloss.NewStyle().Foreground(phaseColor(t.Phase)).Bold(true)
 	if t.BreakPending {
 		return labeled("timer", style.Render("break ready")+
 			fmt.Sprintf(" · %d min offered", t.BreakMinutes)+
-			styleFaint.Render(" · `junkie break` or `junkie skip`")) + "\n"
+			styleFaint.Render(" · open `junkie`: b takes it, s skips it")) + "\n"
 	}
 	total := phaseSeconds(t)
 	line := labeled("timer", style.Render(phaseLabel(t))+
@@ -178,23 +178,6 @@ func renderTodos(todos []apiTodo, width int) string {
 	}
 	if _, _, removed := countTodos(todos); removed > 0 {
 		b.WriteString(styleFaint.Render(fmt.Sprintf("\n  %d removed\n", removed)))
-	}
-	b.WriteString("\n")
-	return b.String()
-}
-
-func renderRooms(rooms []deskRoom, width int) string {
-	var b strings.Builder
-	b.WriteString("\n")
-	if len(rooms) == 0 {
-		b.WriteString(styleFaint.Render("  you're not in any rooms yet\n\n"))
-		return b.String()
-	}
-	for _, room := range rooms {
-		b.WriteString("  " + roomLine(room, width-2) + "\n")
-		if open, _, _ := countTodos(room.Mine); open > 0 {
-			b.WriteString(styleFaint.Render(fmt.Sprintf("    %d of your todos here\n", open)))
-		}
 	}
 	b.WriteString("\n")
 	return b.String()

@@ -42,7 +42,7 @@ func run(args []string) error {
 		if terminalWidth() == 0 {
 			return cmdStatus(nil)
 		}
-		return cmdDash(nil)
+		return openDesk(nil)
 	}
 
 	name, rest := args[0], args[1:]
@@ -62,7 +62,7 @@ func run(args []string) error {
 		// dash or a slash — so a mistyped command is still a mistyped
 		// command rather than a room nobody is in.
 		if looksLikeRoomCode(name) && len(rest) == 0 {
-			return cmdDash([]string{name})
+			return openDesk([]string{name})
 		}
 		writeOverview(os.Stderr)
 		return fmt.Errorf("unknown command %q", name)

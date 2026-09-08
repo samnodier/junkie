@@ -28,12 +28,11 @@ type command struct {
 // Groups, in the order they are printed.
 const (
 	groupAccount = "Account"
-	groupFocus   = "Your own focus"
 	groupRooms   = "Rooms"
 	groupLooking = "Looking at things"
 )
 
-var groupOrder = []string{groupAccount, groupFocus, groupRooms, groupLooking}
+var groupOrder = []string{groupAccount, groupRooms, groupLooking}
 
 func commands() []command {
 	return []command{
@@ -71,64 +70,6 @@ who typed logout should not be left holding a live session on disk.`,
 			detail:  `Prints your display name, username, and which server this terminal is talking to.`,
 		},
 		{
-			name: "focus", aliases: []string{"start"}, group: groupFocus, args: "[MINUTES]",
-			summary: "start a private focus block",
-			run:     cmdFocus,
-			detail: `Starts a private block of MINUTES minutes (5–180, default 50).
-
-Without an account this runs on this machine only. Signed in, the server
-owns the clock, so the block keeps running whether or not this terminal
-stays open, and the minutes are credited when it completes. A block started
-here shows up on the web mid-countdown, and vice versa.
-
-  --watch    stay in the desk, timer pane filling the window`,
-		},
-		{
-			name: "break", group: groupFocus, args: "[MINUTES]",
-			summary: "take the break you were offered",
-			run:     cmdBreak,
-			detail: `When a focus block ends, junkie offers a break rather than starting one.
-This takes it, for MINUTES minutes (1–60; the default is derived from the
-block you just finished).
-
-An offered break left untouched for an hour is treated as walked away from:
-the run ends and the next visit starts fresh. The focus minutes were already
-banked at the end of the block, so nothing is lost.
-
-  --watch    stay in the desk, timer pane filling the window`,
-		},
-		{
-			name: "skip", group: groupFocus,
-			summary: "skip the break and start the next block",
-			run:     cmdSkip,
-			detail:  `Ends the break and immediately starts another focus block the same length as the last one.`,
-		},
-		{
-			name: "cancel", aliases: []string{"stop"}, group: groupFocus,
-			summary: "end the running block early",
-			run:     cmdCancel,
-			detail: `Ends the focus block now.
-
-Minutes are only credited when a block completes, so a cancelled block banks
-nothing. Use it when you're abandoning the session, not when you're done.`,
-		},
-		{
-			name: "watch", group: groupFocus,
-			summary: "the desk, timer pane filling the window",
-			run:     cmdWatch,
-			detail: `The same program as bare ` + "`junkie`" + `, with the countdown taking the
-window. Sized to the terminal, so a strip parked down the side of a screen
-works: it steps down to smaller digits, then to a line of text, then to the
-numbers alone.
-
-  junkie watch          your own block
-  junkie watch CODE     that room's block
-
-Tab moves between them without leaving the window. No block running is fine
-— f starts one. Esc or q returns to the full desk, and q again quits from
-there. The block keeps running either way.`,
-		},
-		{
 			name: "room", group: groupRooms, args: "<command>",
 			summary: "create, join and run shared rooms",
 			run:     cmdRoom,
@@ -148,49 +89,6 @@ the queue and you're in at the next break. During the lobby or a break, it
 puts you in straight away.`,
 		},
 		{
-			name: "dash", aliases: []string{"desk"}, group: groupLooking,
-			summary: "open the desk full-screen (same as bare `junkie`)",
-			run:     cmdDash,
-			detail: `The timer, your todos and your rooms on one screen, kept live. No account
-is required: without one this is a guest desk on this machine. L signs in
-to sync with the same account the web uses.
-
-  tab        move between the three panes: block, todos, rooms (shift+tab back)
-  f b s      start focus · take the break · skip it
-  x          end the block on screen — yours, or leave a room's
-  A          join a room by code, without leaving the desk
-  j k        scroll the focused pane — the blocks, the todos, or the rooms
-  g G        jump to the top and the bottom of it
-  space      complete or un-complete
-  a e d u    add · edit · remove · undo the last remove
-  w          timer pane fills the window (` + "`junkie watch`" + `)
-  L          sign in (guest)
-  y n        answer a room's join prompt
-  r q        refresh · quit
-
-The countdown shows one block at a time and j/k on the block pane move between them — your
-private block first, then each room you are in. The room the pane is
-showing is the one marked in the list below it.
-
-With a room on screen the timer keys act on that room, and two more apply:
-
-  f b s      start a block · take the break · skip it
-  i          I'm in — join the block, or check in for the next one
-  x          leave the block — the same key that ends your own
-
-The todo list is the room's while a room is on screen: yours to work, and
-everyone else's to read. A todo added there joins the room's list rather
-than your private one.
-
-` + "`junkie CODE`" + ` opens the desk on a room directly, and ` + "`junkie watch CODE`" + ` opens it
-with that room's countdown filling the window.
-
-When someone starts a block in one of your rooms, the desk asks whether you
-want in and counts down the 30 seconds you have to answer. Not answering is
-an answer. This only reaches you while the desk is open. Saying yes also
-puts that room's block on screen.`,
-		},
-		{
 			name: "status", aliases: []string{"st"}, group: groupLooking,
 			summary: "timer, todo counts and room activity",
 			run:     cmdStatus,
@@ -201,12 +99,6 @@ puts that room's block on screen.`,
 			summary: "list your private todos",
 			run:     cmdTodos,
 			detail:  `Lists them. To add, complete or remove one, open the desk with ` + "`junkie`" + ` — the list is worked from there.`,
-		},
-		{
-			name: "rooms", group: groupLooking,
-			summary: "your rooms and what their timers are doing",
-			run:     cmdRooms,
-			detail:  `Every room you're in, with its code and whether a block is running in it.`,
 		},
 		{
 			name: "stats", aliases: []string{"map"}, group: groupLooking,
@@ -300,24 +192,29 @@ func writeOverview(w io.Writer) {
 
   junkie                        open the desk, and stay in it
   junkie CODE                   open the desk on that room's block
-  junkie login                  sign in to share rooms with the web
 
-  Inside the desk
+  No account needed: without one the desk is yours alone on this machine.
+  Sign in with `+"`junkie login`"+`, or L inside the desk, to share rooms with
+  the web and keep your work map across machines.
 
-    f  start a focus block          i  I'm in — join a room's block
-    b  take the break               x  end it — your block, or a room's
-    s  skip the break               g/G  ends of the list
-    A  join a room by code          w  timer fills the window
+  Inside the desk — everything happens here
 
-    tab  move between panes         j/k  scroll the focused pane
-    a  add a todo · space  done · e  edit · d  remove · u  undo
+    Your block   f  start   b  break   s  skip break   x  end it
+    A room's     f  start   b  break   s  skip break   i  I'm in   x  leave
+    Todos        a  add   space  done   e  edit   d  remove   u  undo
 
-    q  quit · from the zoomed pane it goes back to the desk first
+    Moving       tab  next pane (block · todos · rooms)   shift+tab  back
+                 j/k  scroll the focused pane   g/G  its ends
 
-  With a room on screen the block keys act on the room, and the todo list
-  is the room's — yours to work, everyone else's to read.
+    Rooms        A  join one by code   L  sign in   y/n  answer a join offer
+    Screen       w  zoom the timer   esc  back   r  refresh
+                 q  quit — from the zoomed pane it goes back to the desk first
 
-  Everything else is a command. `+"`junkie help <command>`"+` explains one.
+  The pane j and k are pointed at is marked with a ‹. With a room on screen
+  the block keys act on that room, and the todo list is the room's — yours to
+  work, everyone else's to read.
+
+  Everything below is for reading from a shell. `+"`junkie help <command>`"+` explains one.
 
 `)
 	byGroup := map[string][]command{}

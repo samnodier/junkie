@@ -26,7 +26,7 @@ func TestCountTodos(t *testing.T) {
 
 func TestRenderStatusEmptyDesk(t *testing.T) {
 	out := renderStatus(deskResponse{}, 0)
-	for _, want := range []string{"nothing running", "junkie focus", "0 open", "none yet"} {
+	for _, want := range []string{"nothing running", "press f", "0 open", "none yet"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status missing %q:\n%s", want, out)
 		}
@@ -144,8 +144,10 @@ func TestRenderTodosEmpty(t *testing.T) {
 	}
 }
 
-func TestRenderRoomsEmpty(t *testing.T) {
-	if out := renderRooms(nil, 0); !strings.Contains(out, "not in any rooms") {
+// The room list lives inside status now, so an account with no rooms has to
+// read as that there rather than nowhere.
+func TestRenderStatusWithNoRooms(t *testing.T) {
+	if out := renderStatus(deskResponse{}, 0); !strings.Contains(out, "none yet") {
 		t.Errorf("empty rooms reads as %q", out)
 	}
 }

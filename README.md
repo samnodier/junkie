@@ -178,7 +178,7 @@ Changing your password anywhere signs the terminal out too, because that ends ev
 
 ### The desk
 
-Run `junkie` on its own and you get the desk full-screen: a live countdown (the same block digits `junkie watch` used to be), your todos, and — signed in — what your rooms are doing. You stay in this program until you quit. A block ending offers the break on the same screen; it does not drop you back to the shell.
+Run `junkie` on its own and you get the desk full-screen: a live countdown, your todos, and — signed in — what your rooms are doing. You stay in this program until you quit. A block ending offers the break on the same screen; it does not drop you back to the shell.
 
 The desk is three panes — the block, the todos and the rooms. `tab` moves between them and `j`/`k` scroll whichever one has the focus, marked with a `‹`. The keys are grouped along the bottom of the screen the way they are grouped here:
 
@@ -192,7 +192,7 @@ The desk is three panes — the block, the todos and the rooms. `tab` moves betw
 | block | `x` | end the block on screen — your own, or leave a room's. Asks first either way; ending your own banks none of its minutes |
 | desk | `A` | join a room by code, without leaving the desk |
 | desk | `tab` `shift+tab` | move the focus between the three panes |
-| desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns, `c` ends the block) |
+| desk | `w` | timer pane fills the window (`esc` or `q` returns, `x` ends the block) |
 | desk | `r` / `q` | refresh · quit (`q` backs out of the zoomed pane first) |
 | desk | `L` | sign in (guest desk) |
 | desk | `y` / `n` | answer a room's join prompt |
@@ -225,11 +225,8 @@ When someone starts a block in one of your rooms, the desk asks whether you want
 | ------- | ---- |
 | `junkie` | open the desk full-screen |
 | `junkie CODE` | open the desk on that room's block |
-| `junkie status` | timer, todo counts and room activity, in one glance |
-| `junkie focus [MINUTES]` | start a private block (5–180, default 50) |
-| `junkie break [MINUTES]` · `junkie skip` · `junkie cancel` | take the offered break, skip it, or end the block early |
-| `junkie watch [CODE]` | the desk, timer pane filling the window — yours, or a room's |
-| `junkie todos` · `junkie rooms` | list them |
+| `junkie status` | timer, todo counts and every room's activity, in one glance |
+| `junkie todos` | list your private todos |
 | `junkie stats` | the work map: a year of focused days |
 | `junkie room new NAME` · `junkie room join CODE` | create or join a room (or press `A` in the desk) |
 | `junkie room start [CODE] [MINUTES]` | start a room's block, opening the 30-second lobby |
@@ -237,6 +234,8 @@ When someone starts a block in one of your rooms, the desk asks whether you want
 | `junkie whoami` · `junkie logout` | who this terminal is, and sign out |
 
 `junkie room` commands take a room code, and you can leave it out when you are only in one room. Pasting a room's URL works as well as typing its code.
+
+Running a block is done in the desk, not from the shell: `f`, `b`, `s` and `x` are one keystroke each and there is nothing a `junkie focus` would add over pressing `f`. The commands that remain are the ones worth reading from a script or a status bar.
 
 ### Sizing
 
@@ -347,7 +346,7 @@ export JUNKIE_CONFIG=/tmp/junkie-dev/config.json
 export JUNKIE_DATA=/tmp/junkie-dev/data
 ```
 
-Guest mode talks to no server, so the desk and `junkie focus` work with nothing else running; `JUNKIE_URL` only matters once you sign in. To watch a block turn over without sitting out the clock, rewrite its end time — `endsAt` in `$JUNKIE_DATA/timer.json` for a guest block, or `phase_ends_at` on the open `timer_runs` row for a signed-in one.
+Guest mode talks to no server, so the desk works with nothing else running; `JUNKIE_URL` only matters once you sign in. To watch a block turn over without sitting out the clock, rewrite its end time — `endsAt` in `$JUNKIE_DATA/timer.json` for a guest block, or `phase_ends_at` on the open `timer_runs` row for a signed-in one.
 
 ### Tests
 

@@ -66,7 +66,6 @@ func TestDeskIsSanitizedOnArrival(t *testing.T) {
 	for _, out := range []string{
 		renderStatus(desk, 80),
 		renderTodos(desk.Todos, 80),
-		renderRooms(desk.Rooms, 80),
 	} {
 		if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x1b]52") {
 			t.Errorf("a rendered view carried an escape through:\n%q", out)

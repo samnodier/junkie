@@ -8,7 +8,7 @@ import (
 )
 
 // watchModel draws one timer at a size. It is not a program of its own —
-// the desk hosts it as a pane, and `junkie watch` is the same desk with
+// the desk hosts it as a pane, and w zooms it to the same desk with
 // that pane filling the window. A run ending is a new state on the same
 // screen, not a reason to quit.
 

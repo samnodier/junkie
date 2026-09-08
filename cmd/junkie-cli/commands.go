@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -161,8 +160,11 @@ func cmdWhoami(args []string) error {
 	return nil
 }
 
-func cmdDash(args []string) error {
-	code, err := optionalRoomCode(args, "usage: junkie dash [CODE]")
+// openDesk is how bare `junkie` and `junkie CODE` get in. It is not a
+// command any more -- there is nothing for `junkie dash` to add over
+// `junkie` itself.
+func openDesk(args []string) error {
+	code, err := optionalRoomCode(args, "usage: junkie [CODE]")
 	if err != nil {
 		return err
 	}
@@ -211,26 +213,6 @@ func cmdTodos(args []string) error {
 	return nil
 }
 
-func cmdRooms(args []string) error {
-	args, asJSON := hasFlag(args, "json")
-	if len(args) > 0 {
-		return errors.New("usage: junkie rooms [--json]")
-	}
-	c, _, err := authed()
-	if err != nil {
-		return err
-	}
-	desk, err := c.desk()
-	if err != nil {
-		return err
-	}
-	if asJSON {
-		return printJSON(desk.Rooms)
-	}
-	fmt.Print(renderRooms(desk.Rooms, terminalWidth()))
-	return nil
-}
-
 func cmdStats(args []string) error {
 	args, asJSON := hasFlag(args, "json")
 	if len(args) > 0 {
@@ -252,170 +234,6 @@ func cmdStats(args []string) error {
 	return nil
 }
 
-func cmdFocus(args []string) error {
-	args, watch := hasFlag(args, "watch")
-	minutes, err := optionalMinutes(args, "junkie focus [MINUTES] [--watch]")
-	if err != nil {
-		return err
-	}
-	if minutes != 0 && (minutes < minFocusMinutes || minutes > maxFocusMinutes) {
-		return fmt.Errorf("a focus block is %d–%d minutes", minFocusMinutes, maxFocusMinutes)
-	}
-	s, _, err := openDeskSession()
-	if err != nil {
-		return err
-	}
-	desk, err := s.Load()
-	if err != nil {
-		s.Close()
-		return err
-	}
-	if desk.SoloTimer != nil {
-		s.Close()
-		if desk.SoloTimer.BreakPending {
-			return errors.New("a break is waiting — `junkie break` to take it, `junkie skip` to go straight on")
-		}
-		return fmt.Errorf("a %s block is already running (%s left)",
-			phaseLabel(desk.SoloTimer), formatDuration(desk.SoloTimer.SecondsLeft))
-	}
-	form := url.Values{}
-	if minutes != 0 {
-		form.Set("focus_minutes", strconv.Itoa(minutes))
-	}
-	if err := s.Do("/solo/start", form); err != nil {
-		s.Close()
-		return err
-	}
-	s.Close()
-	return afterStart(watch, "Focus block started")
-}
-
-func cmdBreak(args []string) error {
-	args, watch := hasFlag(args, "watch")
-	minutes, err := optionalMinutes(args, "junkie break [MINUTES] [--watch]")
-	if err != nil {
-		return err
-	}
-	if minutes != 0 && (minutes < minBreakMinutes || minutes > maxBreakMinutes) {
-		return fmt.Errorf("a break is %d–%d minutes", minBreakMinutes, maxBreakMinutes)
-	}
-	s, _, err := openDeskSession()
-	if err != nil {
-		return err
-	}
-	desk, err := s.Load()
-	if err != nil {
-		s.Close()
-		return err
-	}
-	if desk.SoloTimer == nil {
-		s.Close()
-		return errors.New("no break is waiting — `junkie focus` to start a block")
-	}
-	if !desk.SoloTimer.BreakPending {
-		s.Close()
-		return fmt.Errorf("no break is waiting (a %s block is running)", phaseLabel(desk.SoloTimer))
-	}
-	form := url.Values{}
-	if minutes != 0 {
-		form.Set("minutes", strconv.Itoa(minutes))
-	}
-	if err := s.Do("/solo/break/start", form); err != nil {
-		s.Close()
-		return err
-	}
-	s.Close()
-	return afterStart(watch, "Break started")
-}
-
-func cmdSkip(args []string) error {
-	if len(args) > 0 {
-		return errors.New("usage: junkie skip")
-	}
-	s, _, err := openDeskSession()
-	if err != nil {
-		return err
-	}
-	desk, err := s.Load()
-	if err != nil {
-		s.Close()
-		return err
-	}
-	if desk.SoloTimer == nil || desk.SoloTimer.Phase != "break" {
-		s.Close()
-		return errors.New("there is no break to skip")
-	}
-	if err := s.Do("/solo/break/skip", nil); err != nil {
-		s.Close()
-		return err
-	}
-	s.Close()
-	return afterStart(false, "Break skipped — next block started")
-}
-
-func cmdCancel(args []string) error {
-	if len(args) > 0 {
-		return errors.New("usage: junkie cancel")
-	}
-	s, _, err := openDeskSession()
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-	desk, err := s.Load()
-	if err != nil {
-		return err
-	}
-	if desk.SoloTimer == nil {
-		return errors.New("no timer is running")
-	}
-	if desk.SoloTimer.Phase != "focus" {
-		return errors.New("only a running focus block can be cancelled — `junkie skip` ends a break")
-	}
-	if err := s.Do("/solo/cancel", nil); err != nil {
-		return err
-	}
-	// Ending early keeps nothing: minutes are credited at the focus->break
-	// flip, which cancelling never reaches. Say so, so it isn't a surprise
-	// when the day's total doesn't move.
-	fmt.Println("Block cancelled. Minutes are only credited when a block completes, so nothing was banked.")
-	return nil
-}
-
-// afterStart re-reads the desk so the confirmation quotes the length the
-// server actually stored (it clamps), then hands over to the countdown when
-// --watch asked for it.
-func afterStart(watch bool, message string) error {
-	if watch {
-		return runDashboard(true, "")
-	}
-	s, _, err := openDeskSession()
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-	desk, err := s.Load()
-	if err != nil {
-		return err
-	}
-	if desk.SoloTimer == nil {
-		return errors.New("the server did not start a timer — try `junkie status`")
-	}
-	fmt.Printf("%s · %s · ends at %s\n", message,
-		formatDuration(desk.SoloTimer.SecondsLeft),
-		desk.SoloTimer.EndsAt.Local().Format("15:04"))
-	fmt.Println(styleFaint.Render("`junkie watch` to follow it, `junkie` to open the desk."))
-	return nil
-}
-
-func cmdWatch(args []string) error {
-	code, err := optionalRoomCode(args, "usage: junkie watch [CODE]")
-	if err != nil {
-		return err
-	}
-	return runDashboard(true, code)
-}
-
 // optionalRoomCode reads the room a desk command should open on. Codes are
 // normalized the way `junkie room` normalizes them, so pasting a room's URL
 // works here too.
@@ -432,21 +250,6 @@ func optionalRoomCode(args []string, usage string) (string, error) {
 	default:
 		return "", errors.New(usage)
 	}
-}
-
-// optionalMinutes reads the one positional argument these commands take.
-func optionalMinutes(args []string, usage string) (int, error) {
-	if len(args) == 0 {
-		return 0, nil
-	}
-	if len(args) > 1 {
-		return 0, errors.New("usage: " + usage)
-	}
-	n, err := strconv.Atoi(args[0])
-	if err != nil {
-		return 0, fmt.Errorf("%q is not a number of minutes", args[0])
-	}
-	return n, nil
 }
 
 func printJSON(v any) error {

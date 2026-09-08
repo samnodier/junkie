@@ -14,7 +14,7 @@ import (
 
 // The dashboard is the whole desk in one screen: what the timer is doing,
 // what is on the list, and which rooms are live — the terminal's answer to
-// leaving a browser tab open all day. `junkie watch` is this same program
+// leaving a browser tab open all day. The zoomed pane is this same program
 // with the timer pane filling the window, not a second one that quits when
 // the block ends.
 //
@@ -127,7 +127,7 @@ type dashModel struct {
 	// scroll. The rooms pane is skipped when there are none to scroll.
 	focus pane
 
-	// zoom is `junkie watch`: the timer pane takes the window. Esc returns
+	// zoom is w: the timer pane takes the window. Esc returns
 	// to the desk; a run ending does not.
 	zoom bool
 
@@ -188,8 +188,8 @@ func newDashModel(s store, id identity, desk deskResponse) *dashModel {
 	return m
 }
 
-// openOn puts the desk in front of one room, for `junkie watch CODE` and
-// `junkie dash CODE`. An unknown code is refused by the caller before this
+// openOn puts the desk in front of one room, for `junkie CODE`. An
+// unknown code is refused by the caller before this
 // is reached, so a subject set here is one the desk knows about.
 func (m *dashModel) openOn(code string) {
 	if code == "" {
@@ -1377,7 +1377,7 @@ const editKeys = "enter save · esc cancel · ctrl+u clear"
 // The same field takes a room code, and saving one is not "saving".
 const joinKeys = "enter join · esc cancel · ctrl+u clear"
 
-// runDashboard opens the desk full-screen. zoom is `junkie watch`: the
+// runDashboard opens the desk full-screen. zoom is the w key: the
 // timer pane takes the window, but it is the same program and a run ending
 // does not quit it.
 func runDashboard(zoom bool, want string) error {
@@ -1398,7 +1398,7 @@ func runDashboard(zoom bool, want string) error {
 		return err
 	}
 	if want != "" && !hasRoom(desk, want) {
-		return fmt.Errorf("you're not in %s — `junkie rooms` lists the ones you are", want)
+		return fmt.Errorf("you're not in %s — `junkie status` lists the ones you are", want)
 	}
 	m := newDashModel(s, id, desk)
 	m.openOn(want)

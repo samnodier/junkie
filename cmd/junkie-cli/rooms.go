@@ -87,7 +87,7 @@ func cmdRoomNew(args []string) error {
 			return nil
 		}
 	}
-	return errors.New("the room was not created — try `junkie rooms`")
+	return errors.New("the room was not created — try `junkie status`")
 }
 
 func cmdRoomJoin(args []string) error {

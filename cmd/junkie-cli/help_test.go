@@ -56,10 +56,10 @@ func TestEveryCommandIsDocumentedAndReachable(t *testing.T) {
 
 func TestHelpForOneCommand(t *testing.T) {
 	var out bytes.Buffer
-	writeHelp(&out, []string{"focus"})
+	writeHelp(&out, []string{"room"})
 	got := out.String()
-	for _, want := range []string{"junkie focus [MINUTES]", "start a private focus block",
-		"also: junkie start", "5–180", "--watch"} {
+	for _, want := range []string{"junkie room <command>", "create, join and run shared rooms",
+		"junkie room join CODE", "junkie room start"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help missing %q:\n%s", want, got)
 		}
