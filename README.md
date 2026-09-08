@@ -188,7 +188,9 @@ The keys are grouped along the bottom of the screen the way they are grouped her
 | todos | `g` `G` | jump to the top and the bottom of it |
 | todos | `space` | complete or un-complete |
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
-| block | `f` / `b` / `s` / `c` | start focus · take the break · skip it · cancel the block |
+| block | `f` / `b` / `s` | start focus · take the break · skip it |
+| block | `x` | end the block on screen — your own, or leave a room's. Asks first either way; ending your own banks none of its minutes |
+| desk | `J` | join a room by code, without leaving the desk |
 | desk | `tab` | show the next block: your own, then each room |
 | desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns, `c` ends the block) |
 | desk | `r` / `q` | refresh · quit (`q` backs out of the zoomed pane first) |
@@ -207,7 +209,7 @@ With a room on screen the timer keys act on that room, and two more apply:
 | --- | ---- |
 | `f` / `b` / `s` | start a block · take the break · skip it |
 | `i` | I'm in — join the block, or check in for the next one |
-| `x` | leave the block — asks first, since `x` sits next to `i` and a block you have left will not always take you back |
+| `x` | leave the block — the same key that ends your own block, so there is one to remember. Asks first: a block you have left will not always take you back |
 
 The todo list follows the countdown. With a room on screen it is that room's list — your own todos to work, everyone else's to read, each named. `a` there adds to the room rather than to your private list.
 
@@ -229,7 +231,7 @@ When someone starts a block in one of your rooms, the desk asks whether you want
 | `junkie watch [CODE]` | the desk, timer pane filling the window — yours, or a room's |
 | `junkie todos` · `junkie rooms` | list them |
 | `junkie stats` | the work map: a year of focused days |
-| `junkie room new NAME` · `junkie room join CODE` | create or join a room |
+| `junkie room new NAME` · `junkie room join CODE` | create or join a room (or press `J` in the desk) |
 | `junkie room start [CODE] [MINUTES]` | start a room's block, opening the 30-second lobby |
 | `junkie room enter` · `leave` · `checkin` · `skip` | act on the block that's running |
 | `junkie whoami` · `junkie logout` | who this terminal is, and sign out |

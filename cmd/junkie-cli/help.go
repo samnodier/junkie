@@ -156,7 +156,9 @@ is required: without one this is a guest desk on this machine. L signs in
 to sync with the same account the web uses.
 
   tab        show the next block: your own, then each room
-  f b s c    start focus · take the break · skip it · cancel
+  f b s      start focus · take the break · skip it
+  x          end the block on screen — yours, or leave a room's
+  J          join a room by code, without leaving the desk
   j k        move down and up the list
   g G        jump to the top and the bottom of it
   space      complete or un-complete
@@ -174,7 +176,7 @@ With a room on screen the timer keys act on that room, and two more apply:
 
   f b s      start a block · take the break · skip it
   i          I'm in — join the block, or check in for the next one
-  x          leave the block — asks first, since it sits next to i
+  x          leave the block — the same key that ends your own
 
 The todo list is the room's while a room is on screen: yours to work, and
 everyone else's to read. A todo added there joins the room's list rather
@@ -303,9 +305,9 @@ func writeOverview(w io.Writer) {
   Inside the desk
 
     f  start a focus block          i  I'm in — join a room's block
-    b  take the break               x  leave it (asks first)
+    b  take the break               x  end it — your block, or a room's
     s  skip the break               tab  show the next block
-    c  cancel your block            w  timer fills the window
+    J  join a room by code          w  timer fills the window
 
     a  add a todo                   j/k  move · g/G  ends
     space  done · e  edit · d  remove · u  undo

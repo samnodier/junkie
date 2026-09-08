@@ -426,13 +426,40 @@ func TestZoomedPrivatePaneSaysHowToEndTheBlock(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
 	m.zoom = true
-	if view := m.View(); !strings.Contains(view, "c ends it") {
+	if view := m.View(); !strings.Contains(view, "x ends it") {
 		t.Errorf("no way to end the block on screen:\n%s", view)
 	}
-	// And c reaches it from inside the pane.
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
-	if cmd == nil {
-		t.Error("c did nothing in the zoomed pane")
+	// And x reaches it from inside the pane, asking first.
+	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
+		t.Error("x ended the block without asking")
+	}
+	if m.confirm == nil {
+		t.Fatal("x did nothing in the zoomed pane")
+	}
+	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}}); cmd == nil {
+		t.Error("answering yes ended nothing")
+	}
+}
+
+// x is the leave key wherever you are: it ends your own block and leaves a
+// room's, so there is one thing to remember rather than two.
+func TestXEndsWhicheverBlockIsOnScreen(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+
+	// Over your own block it ends it.
+	m.selectSubject(soloSubject)
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if m.confirm == nil || !strings.Contains(m.confirm.question, "end your block") {
+		t.Fatalf("x over your own block asked %v", m.confirm)
+	}
+	m.confirm = nil
+
+	// Over a room's it leaves that.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if m.confirm == nil || !strings.Contains(m.confirm.question, "leave the block") {
+		t.Fatalf("x over a room asked %v", m.confirm)
 	}
 }
 
@@ -441,7 +468,7 @@ func TestZoomedPrivatePaneSaysHowToEndTheBlock(t *testing.T) {
 func TestRoomKeysExplainThemselvesOverYourOwnBlock(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	for _, key := range []rune{'i', 'x'} {
+	for _, key := range []rune{'i'} {
 		m.selectSubject(soloSubject)
 		_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
 		if cmd != nil {
@@ -450,5 +477,38 @@ func TestRoomKeysExplainThemselvesOverYourOwnBlock(t *testing.T) {
 		if !strings.Contains(m.footer(), "for a room's block") {
 			t.Errorf("%q said nothing: %s", key, m.footer())
 		}
+	}
+}
+
+// Joining a room was the one thing you had to leave the desk to do, and it
+// wanted the code typed before the command rather than pasted when asked.
+func TestJoinARoomFromTheDesk(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	if m.editing == nil || !m.joining {
+		t.Fatal("J did not open a field for a room code")
+	}
+	if !strings.Contains(m.footer(), "enter join") {
+		t.Errorf("the field does not say it joins: %s", m.footer())
+	}
+
+	// A pasted link works as well as a typed code.
+	for _, r := range "http://x/r/ABC-123" {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter joined nothing")
+	}
+	if m.joining || m.editing != nil {
+		t.Error("the field stayed open after joining")
+	}
+
+	// A code nobody owns is reported rather than assumed to have worked.
+	model, _ := m.Update(joinedMsg{})
+	if !strings.Contains(model.(*dashModel).footer(), "no room with that code") {
+		t.Errorf("a bad code passed silently: %s", m.footer())
 	}
 }

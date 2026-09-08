@@ -59,6 +59,11 @@ type dashModel struct {
 	// it; answering nothing is a real answer, and the offer simply expires.
 	prompt *joinPrompt
 
+	// joining marks the one-line field as a room code rather than a todo:
+	// the two share the editor, and only the key that opened it knows
+	// which was meant.
+	joining bool
+
 	// confirm is a yes/no asked before something this desk cannot undo --
 	// leaving a block. It takes the footer until it is answered.
 	confirm *confirmPrompt
@@ -297,6 +302,36 @@ func (m *dashModel) do(path string, form url.Values, message string) tea.Cmd {
 	}
 }
 
+// joinedMsg reports a join attempt. /rooms/join redirects without
+// complaint for a code nobody owns, so the desk is re-read and the room
+// looked for rather than the join being taken on trust.
+type joinedMsg struct {
+	code string
+	name string
+	err  error
+}
+
+func (m *dashModel) joinRoom(code string) tea.Cmd {
+	return func() tea.Msg {
+		if m.store == nil {
+			return joinedMsg{err: errors.New("no server to join through")}
+		}
+		if err := m.store.Do("/rooms/join", url.Values{"code": {code}}); err != nil {
+			return joinedMsg{err: err}
+		}
+		desk, err := m.store.Load()
+		if err != nil {
+			return joinedMsg{err: err}
+		}
+		for _, room := range desk.Rooms {
+			if room.Code == code {
+				return joinedMsg{code: code, name: room.Name}
+			}
+		}
+		return joinedMsg{}
+	}
+}
+
 func (m *dashModel) refresh() tea.Cmd {
 	return func() tea.Msg {
 		if m.store == nil {
@@ -354,6 +389,20 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.anchor()
 		m.clampCursor()
 		return m, nil
+
+	case joinedMsg:
+		switch {
+		case msg.err != nil:
+			m.note(msg.err.Error())
+		case msg.code == "":
+			m.note("no room with that code")
+		default:
+			// You just asked for this room, so it becomes the one on screen.
+			m.picked = true
+			m.selectSubject(msg.code)
+			m.note("joined " + msg.name)
+		}
+		return m, m.refresh()
 
 	case signal:
 		return m.handleSignal(msg)
@@ -536,6 +585,18 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "w":
 		m.zoom = !m.zoom
 		return m, nil
+	case "J":
+		// Joining a room was the one thing you had to leave the desk to do,
+		// and it needed the code typed before the command rather than
+		// pasted when asked for it.
+		if m.identity.Guest {
+			m.note("rooms need an account — L to sign in")
+			return m, nil
+		}
+		m.editing = &editor{label: "room code"}
+		m.editingID = ""
+		m.joining = true
+		return m, nil
 	case "L":
 		if !m.identity.Guest {
 			m.note("already signed in")
@@ -571,12 +632,24 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.do("/solo/break/skip", nil, "break skipped")
-	case "c":
+	// x is the leave key wherever you are: it ends your own block here and
+	// leaves a room's block over there. c stays as it was, so a hand that
+	// learned it keeps working.
+	case "x", "c":
 		if t == nil || t.Phase != "focus" {
-			m.note("no running block to cancel")
+			m.note("no running block to end")
 			return m, nil
 		}
-		return m, m.do("/solo/cancel", nil, "block cancelled — nothing banked")
+		// Ending a block banks none of its minutes, which is worth one
+		// keystroke of warning -- and it is the same question x asks over a
+		// room's block.
+		m.confirm = &confirmPrompt{
+			question: "end your block? none of its minutes are banked",
+			act: func() tea.Cmd {
+				return m.do("/solo/cancel", nil, "block ended — nothing banked")
+			},
+		}
+		return m, nil
 
 	case "j", "down":
 		m.cursor++
@@ -597,11 +670,11 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 		return m, nil
 
-	// i and x are a room's keys. Pressed over your own block they used to
-	// do nothing at all, which reads as the program having missed them.
-	case "i", "x":
+	// i is a room's key. Pressed over your own block it used to do nothing
+	// at all, which reads as the program having missed it.
+	case "i":
 		if len(m.desk.Rooms) == 0 {
-			m.note("that one is for a room's block — you're not in a room yet")
+			m.note("that one is for a room's block — J to join a room")
 			return m, nil
 		}
 		m.note("that one is for a room's block — tab to a room first")
@@ -747,10 +820,22 @@ func (m *dashModel) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlC:
 		m.editing = nil
+		m.joining = false
 		return m, nil
 	case tea.KeyEnter:
 		text, id := m.editing.value(), m.editingID
+		joining := m.joining
 		m.editing = nil
+		m.joining = false
+		if joining {
+			// The same normalising the room commands do, so a pasted link
+			// works as well as a typed code.
+			code := normalizeCode(text)
+			if code == "" {
+				return m, nil
+			}
+			return m, m.joinRoom(code)
+		}
 		if text == "" {
 			// An emptied todo is a no-op, not a delete — the same rule the
 			// server applies to an edit that arrives blank.
@@ -1096,6 +1181,9 @@ func (m *dashModel) footer() string {
 		return styleWarn.Render(clip(m.confirm.question+"  y yes · any other key no", m.width))
 	}
 	if m.editing != nil {
+		if m.joining {
+			return styleFaint.Render(clip(joinKeys, m.width))
+		}
 		return styleFaint.Render(clip(editKeys, m.width))
 	}
 	if m.prompt != nil {
@@ -1139,7 +1227,7 @@ func (m *dashModel) groupedKeys() string {
 	}
 	todos := keyLine{"todos", []string{"j/k move", "g/G ends", "space done", "a add", "e edit", "d remove", "u undo"}}
 
-	block := keyLine{"block", []string{"f focus", "b break", "s skip", "c cancel"}}
+	block := keyLine{"block", []string{"f focus", "b break", "s skip", "x end it"}}
 	if _, ok := m.currentRoom(); ok {
 		// A room's block is joined and left, and cancelling is not on
 		// offer: c would end your own private block, not the room's.
@@ -1149,11 +1237,11 @@ func (m *dashModel) groupedKeys() string {
 	// "tab room" said which key without saying what it did. It moves the
 	// countdown between the blocks you have running -- yours, then each
 	// room -- so it is named for that.
-	desk := keyLine{"desk", []string{"q quit", "tab next block", "w zoom", "r refresh"}}
+	desk := keyLine{"desk", []string{"q quit", "tab next block", "J join a room", "w zoom", "r refresh"}}
 	if m.identity.Guest {
 		desk = keyLine{"desk", []string{"q quit", "L sign in", "w zoom"}}
 	} else if len(m.desk.Rooms) == 0 {
-		desk = keyLine{"desk", []string{"q quit", "w zoom", "r refresh"}}
+		desk = keyLine{"desk", []string{"q quit", "J join a room", "w zoom", "r refresh"}}
 	}
 
 	rows := make([]string, 0, 3)
@@ -1198,7 +1286,7 @@ func guestDashKeys(width int) string {
 // there is a room to move to — an account with none has nowhere to go, and
 // a key that does nothing is worse than a key nobody was told about.
 func dashKeys(width int, rooms bool) string {
-	full := "j/k move · space done · a add · e edit · d remove · f focus · b break · c cancel · q quit"
+	full := "j/k move · space done · a add · e edit · d remove · f focus · b break · x end it · q quit"
 	medium := "j/k move · space done · a add · f focus · b break · q quit"
 	short := "j/k · space · a add · f focus · q quit"
 	if rooms {
@@ -1221,6 +1309,9 @@ func dashKeys(width int, rooms bool) string {
 // editKeys replaces the hints while a line is being typed: none of the
 // normal keys apply, and saying so is the whole job.
 const editKeys = "enter save · esc cancel · ctrl+u clear"
+
+// The same field takes a room code, and saving one is not "saving".
+const joinKeys = "enter join · esc cancel · ctrl+u clear"
 
 // runDashboard opens the desk full-screen. zoom is `junkie watch`: the
 // timer pane takes the window, but it is the same program and a run ending

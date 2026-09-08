@@ -225,8 +225,8 @@ func helpLine(width int, room bool) string {
 	// Leaving the pane and ending the block are different things, and the
 	// pane named only the first: c was the way out of a block you no
 	// longer wanted and appeared on no screen that was showing one.
-	full := "esc or q desk — the block runs on · c ends it"
-	short := "esc or q desk · c ends it"
+	full := "esc or q desk — the block runs on · x ends it"
+	short := "esc or q desk · x ends it"
 	if room {
 		// A room's block has somewhere else to be — the next room, or your
 		// own timer — and two actions the private block has no version of.
