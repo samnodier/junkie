@@ -1498,14 +1498,20 @@ span.room-member-locked {
   display: grid;
   gap: var(--sp-2);
 }
-.event-log-filter input {
-  max-width: 28rem;
+.event-log-filter {
+  display: block;
 }
 .event-log-count {
   font-size: var(--fs-small);
 }
+/* The log scrolls inside its own box rather than growing the page: 300
+   events is a long way to scroll past to reach the filter or anything under
+   it. Long lines still scroll sideways instead of wrapping, so the timestamp
+   column stays aligned. */
 .event-log-lines {
-  overflow-x: auto;
+  max-height: min(65vh, 40rem);
+  overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-2);
