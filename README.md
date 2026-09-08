@@ -180,18 +180,18 @@ Changing your password anywhere signs the terminal out too, because that ends ev
 
 Run `junkie` on its own and you get the desk full-screen: a live countdown (the same block digits `junkie watch` used to be), your todos, and — signed in — what your rooms are doing. You stay in this program until you quit. A block ending offers the break on the same screen; it does not drop you back to the shell.
 
-The keys are grouped along the bottom of the screen the way they are grouped here — the todo list, the block, and the desk itself:
+The desk is three panes — the block, the todos and the rooms. `tab` moves between them and `j`/`k` scroll whichever one has the focus, marked with a `‹`. The keys are grouped along the bottom of the screen the way they are grouped here:
 
 | Group | Key | Does |
 | ----- | --- | ---- |
-| todos | `j` `k` | scroll the list on whichever block is showing |
-| todos | `g` `G` | jump to the top and the bottom of it |
+| any | `j` `k` | scroll the focused pane: the blocks, the todos, or the rooms |
+| any | `g` `G` | jump to the ends of the focused pane |
 | todos | `space` | complete or un-complete |
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` | start focus · take the break · skip it |
 | block | `x` | end the block on screen — your own, or leave a room's. Asks first either way; ending your own banks none of its minutes |
 | desk | `A` | join a room by code, without leaving the desk |
-| desk | `tab` `shift+tab` | move between blocks: your own, then each room |
+| desk | `tab` `shift+tab` | move the focus between the three panes |
 | desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns, `c` ends the block) |
 | desk | `r` / `q` | refresh · quit (`q` backs out of the zoomed pane first) |
 | desk | `L` | sign in (guest desk) |
@@ -201,7 +201,7 @@ In a narrow window each row drops its last hints, and in a short one they collap
 
 ### Two blocks at once
 
-Your own block and a room's block run independently — you can be in both, and starting or joining one never asks you to give up the other — and the countdown shows one at a time. `tab` moves between them: your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
+Your own block and a room's block run independently — you can be in both, and starting or joining one never asks you to give up the other — and the countdown shows one at a time. `j` and `k` move between them with the block pane focused: your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
 
 With a room on screen the timer keys act on that room, and two more apply:
 

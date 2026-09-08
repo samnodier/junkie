@@ -47,6 +47,29 @@ func tick() tea.Cmd {
 	return tea.Tick(time.Second/2, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// The desk is three panes: the countdown, the todo list and the room list.
+// tab moves between them and j and k scroll whichever one has the focus, so
+// there is one pair of keys for moving about rather than a different pair
+// per thing that can be moved about in.
+type pane int
+
+const (
+	paneBlock pane = iota
+	paneTodos
+	paneRooms
+)
+
+func (p pane) String() string {
+	switch p {
+	case paneTodos:
+		return "todos"
+	case paneRooms:
+		return "rooms"
+	default:
+		return "block"
+	}
+}
+
 type dashModel struct {
 	store    store
 	identity identity
@@ -99,6 +122,10 @@ type dashModel struct {
 	// is reversible server-side (removed is a flag, not a delete), which is
 	// what makes a one-key undo honest rather than a second guess.
 	undoID string
+
+	// focus is which pane tab last landed on, and so which list j and k
+	// scroll. The rooms pane is skipped when there are none to scroll.
+	focus pane
 
 	// zoom is `junkie watch`: the timer pane takes the window. Esc returns
 	// to the desk; a run ending does not.
@@ -568,15 +595,13 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "ctrl+c":
 		return m, tea.Quit
-	// Two pairs, two jobs: tab and shift+tab move between blocks, j and k
-	// scroll whatever list the block on screen is showing.
+	// Two pairs, two jobs: tab and shift+tab move between panes, j and k
+	// scroll whichever pane has the focus.
 	case "tab":
-		m.picked = true
-		m.cycleSubject(1)
+		m.cyclePane(1)
 		return m, nil
 	case "shift+tab":
-		m.picked = true
-		m.cycleSubject(-1)
+		m.cyclePane(-1)
 		return m, nil
 	case "esc":
 		if m.zoom {
@@ -655,22 +680,18 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "j", "down":
-		m.cursor++
-		m.clampCursor()
+		m.scroll(1)
 		return m, nil
 	case "k", "up":
-		m.cursor--
-		m.clampCursor()
+		m.scroll(-1)
 		return m, nil
-	// The list is short enough that vim's counts and searches would be
-	// ceremony, but jumping to either end of it is worth the two keys.
+	// The lists are short enough that vim's counts and searches would be
+	// ceremony, but jumping to either end is worth the two keys.
 	case "g", "home":
-		m.cursor = 0
-		m.clampCursor()
+		m.scrollTo(0)
 		return m, nil
 	case "G", "end":
-		m.cursor = len(m.visibleTodos()) - 1
-		m.clampCursor()
+		m.scrollTo(-1)
 		return m, nil
 
 	// i is a room's key. Pressed over your own block it used to do nothing
@@ -1083,6 +1104,11 @@ func (m *dashModel) timerFace() *watchModel {
 		width:     m.width,
 		height:    m.timerHeight(),
 		chrome:    m.zoom,
+		// The pane is one of the three tab moves between, and it has no
+		// label of its own to mark -- so it marks itself, before it lays
+		// itself out. Marking the rendered text instead made every centred
+		// line two columns too wide.
+		focused: m.focus == paneBlock && !m.zoom,
 	}
 }
 
@@ -1097,7 +1123,7 @@ func (m *dashModel) todoBlock(rows int) string {
 	if _, ok := m.currentRoom(); ok {
 		label = "room todos"
 	}
-	b.WriteString(styleLabel.Render(label) +
+	b.WriteString(m.paneLabel(paneTodos, label) +
 		styleFaint.Render(clip(fmt.Sprintf("  %d open · %d done", open, done), m.width-len(label))) + "\n")
 
 	todos := m.visibleTodos()
@@ -1178,9 +1204,19 @@ func (m *dashModel) editorLine() string {
 		styleInk.Render(typed) + styleAccent.Render("▌")
 }
 
+// paneLabel marks the pane j and k are pointed at. Without it tab appears
+// to do nothing at all: the focus is real but invisible, and the next j
+// scrolls something the eye was not on.
+func (m *dashModel) paneLabel(p pane, text string) string {
+	if m.focus != p {
+		return styleLabel.Render(text)
+	}
+	return styleAccent.Render(text + " ‹")
+}
+
 func (m *dashModel) roomBlock(rows int) string {
 	var b strings.Builder
-	b.WriteString(styleLabel.Render("rooms") + "\n")
+	b.WriteString(m.paneLabel(paneRooms, "rooms") + "\n")
 	shown := 0
 	for _, room := range m.desk.Rooms {
 		if shown >= rows-1 {
@@ -1253,7 +1289,7 @@ func (m *dashModel) groupedKeys() string {
 	if m.height < 16 || m.width < 34 {
 		return ""
 	}
-	todos := keyLine{"todos", []string{"j/k move", "g/G ends", "space done", "a add", "e edit", "d remove", "u undo"}}
+	todos := keyLine{"list", []string{"j/k scroll", "g/G ends", "space done", "a add", "e edit", "d remove", "u undo"}}
 
 	block := keyLine{"block", []string{"f focus", "b break", "s skip", "x end it"}}
 	if _, ok := m.currentRoom(); ok {
@@ -1265,7 +1301,7 @@ func (m *dashModel) groupedKeys() string {
 	// "tab room" said which key without saying what it did. J and K move the
 	// countdown between the blocks you have running -- yours, then each
 	// room -- so it is named for that.
-	desk := keyLine{"desk", []string{"q quit", "tab next block", "A join a room", "w zoom", "r refresh"}}
+	desk := keyLine{"desk", []string{"q quit", "tab next pane", "A join a room", "w zoom", "r refresh"}}
 	if m.identity.Guest {
 		desk = keyLine{"desk", []string{"q quit", "L sign in", "w zoom"}}
 	} else if len(m.desk.Rooms) == 0 {

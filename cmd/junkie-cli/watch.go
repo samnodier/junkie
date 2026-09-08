@@ -25,6 +25,18 @@ type watchModel struct {
 	// chrome is the full-screen watch: help line, end time. The desk pane
 	// drops them; the footer already names the keys.
 	chrome bool
+	// focused marks this pane as the one j and k are pointed at. The mark
+	// is added before the pane is laid out, so the centring counts it.
+	focused bool
+}
+
+// mark appends the focus indicator, or nothing when this pane is not the
+// focused one.
+func (m *watchModel) mark(text string) string {
+	if !m.focused || text == "" {
+		return text
+	}
+	return text + " ‹"
 }
 
 func newWatchModel(t *face) *watchModel {
@@ -52,7 +64,7 @@ func (m *watchModel) remaining() int {
 
 func (m *watchModel) View() string {
 	if m.timer == nil {
-		msg := styleFaint.Render(clip("no block running · f to start one", m.width))
+		msg := styleFaint.Render(clip(m.mark("no block running")+" · f to start one", m.width))
 		if m.chrome && m.height > 1 {
 			// With no timer there is nothing else on the screen, so the way
 			// out has to be on it: an empty pane that does not say how to
@@ -135,7 +147,7 @@ func (m *watchModel) viewFull() []string {
 	if title := m.titleLine(); title != "" {
 		body = append(body, title)
 	}
-	body = append(body, colour.Bold(true).Render(strings.ToUpper(m.timer.Label)), "")
+	body = append(body, colour.Bold(true).Render(m.markPhase(strings.ToUpper(m.timer.Label))), "")
 
 	if rows := m.digits(2); rows != nil {
 		body = append(body, colour.Render(strings.Join(rows, "\n")))
@@ -178,7 +190,7 @@ func (m *watchModel) viewCompact() []string {
 	if title := m.titleLine(); title != "" {
 		body = append(body, title)
 	}
-	body = append(body, colour.Bold(true).Render(strings.ToUpper(m.timer.Label)), "")
+	body = append(body, colour.Bold(true).Render(m.markPhase(strings.ToUpper(m.timer.Label))), "")
 
 	if rows := m.digits(1); rows != nil {
 		body = append(body, colour.Render(strings.Join(rows, "\n")))
@@ -199,7 +211,7 @@ func (m *watchModel) viewCompact() []string {
 func (m *watchModel) viewMini() []string {
 	colour := m.phaseStyle()
 	return []string{
-		colour.Render(clip(m.timer.Label, m.width)),
+		colour.Render(clip(m.markPhase(m.timer.Label), m.width)),
 		colour.Bold(true).Render(shortenCountdown(m.countdownText(), m.width)),
 	}
 }
@@ -266,11 +278,22 @@ func clamp(v, lo, hi int) int {
 
 // titleLine names the room a block belongs to. The private block has no
 // title: it is the only one that is nobody else's.
+// markPhase adds the focus mark to the word above the digits, but only
+// when there is no title line to carry it -- the pane is marked exactly
+// once however much of it is drawn. The word itself is the caller's: the
+// larger tiers shout it, the mini one does not.
+func (m *watchModel) markPhase(word string) string {
+	if m.titleLine() == "" {
+		return m.mark(word)
+	}
+	return word
+}
+
 func (m *watchModel) titleLine() string {
 	if m.timer == nil || m.timer.Title == "" {
 		return ""
 	}
-	label := m.timer.Title
+	label := m.mark(m.timer.Title)
 	if m.timer.Code != "" {
 		label += " · " + m.timer.Code
 	}

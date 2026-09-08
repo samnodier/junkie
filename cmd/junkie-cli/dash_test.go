@@ -223,6 +223,8 @@ func press(m *dashModel, keys ...string) tea.Cmd {
 // whose only action is restore would make j/k walk through the past.
 func TestDashCursorSkipsRemovedTodos(t *testing.T) {
 	m := dashAt(80, 24)
+	// j and k scroll the focused pane; this one is about the todo list.
+	onTodos(m)
 	if got := len(m.visibleTodos()); got != 2 {
 		t.Fatalf("visible todos = %d, want 2", got)
 	}
@@ -339,6 +341,8 @@ func TestDashEscapeAbandonsTheEdit(t *testing.T) {
 // server refuses the edit, so the client says why rather than posting it.
 func TestDashRefusesToEditACompletedTodo(t *testing.T) {
 	m := dashAt(80, 24)
+	// j and k scroll the focused pane; this one is about the todo list.
+	onTodos(m)
 	press(m, "j")
 	if cmd := press(m, "e"); cmd != nil {
 		t.Error("editing a completed todo should not post")
@@ -374,6 +378,8 @@ func TestDashRemoveThenUndo(t *testing.T) {
 // off the bottom.
 func TestDashScrollsToKeepTheCursorVisible(t *testing.T) {
 	m := dashAt(80, 14)
+	// j and k scroll the focused pane; this one is about the todo list.
+	onTodos(m)
 	var todos []apiTodo
 	for i := 0; i < 40; i++ {
 		todos = append(todos, apiTodo{ID: fmt.Sprint(i), Text: fmt.Sprintf("todo number %d", i)})

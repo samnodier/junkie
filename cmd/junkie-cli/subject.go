@@ -214,6 +214,104 @@ func (m *dashModel) cycleSubject(step int) {
 // selectSubject switches the pane and re-bases the countdown on the new
 // timer, so the digits change with the same tick as the title rather than
 // counting down the old block for half a second.
+// panes is what tab moves through. The rooms pane is only there when there
+// are rooms: a pane with nothing in it is a stop on the way to nowhere.
+func (m *dashModel) panes() []pane {
+	out := []pane{paneBlock, paneTodos}
+	if len(m.desk.Rooms) > 0 {
+		out = append(out, paneRooms)
+	}
+	return out
+}
+
+func (m *dashModel) cyclePane(step int) {
+	panes := m.panes()
+	at := 0
+	for i, p := range panes {
+		if p == m.focus {
+			at = i
+			break
+		}
+	}
+	m.focus = panes[(at+step+len(panes))%len(panes)]
+}
+
+// scroll moves within the focused pane. The block pane's list is the blocks
+// themselves -- your own, then each room -- so j and k walk it the same way
+// they walk the todos, and the room list follows whichever is showing.
+func (m *dashModel) scroll(step int) {
+	switch m.focus {
+	case paneBlock:
+		m.picked = true
+		m.cycleSubject(step)
+	case paneRooms:
+		m.cycleRoomSelection(step)
+	default:
+		m.cursor += step
+		m.clampCursor()
+	}
+}
+
+// scrollTo jumps to an end of the focused pane. A negative index means the
+// last row, which is what G asks for.
+func (m *dashModel) scrollTo(index int) {
+	switch m.focus {
+	case paneBlock:
+		subjects := m.subjects()
+		if len(subjects) == 0 {
+			return
+		}
+		if index < 0 {
+			index = len(subjects) - 1
+		}
+		m.picked = true
+		m.selectSubject(subjects[index])
+	case paneRooms:
+		rooms := m.desk.Rooms
+		if len(rooms) == 0 {
+			return
+		}
+		if index < 0 {
+			index = len(rooms) - 1
+		}
+		m.picked = true
+		m.selectSubject(rooms[index].Code)
+	default:
+		if index < 0 {
+			index = len(m.visibleTodos()) - 1
+		}
+		m.cursor = index
+		m.clampCursor()
+	}
+}
+
+// cycleRoomSelection walks the room list. The row it lands on becomes the
+// block on screen, because the marker in that list and the countdown above
+// it have always been the same thing.
+func (m *dashModel) cycleRoomSelection(step int) {
+	rooms := m.desk.Rooms
+	if len(rooms) == 0 {
+		return
+	}
+	at := 0
+	for i, room := range rooms {
+		if room.Code == m.subject {
+			at = i
+			break
+		}
+	}
+	// From your own block, the first step lands on the first room rather
+	// than the second.
+	if _, onRoom := m.currentRoom(); !onRoom {
+		at = -1
+		if step < 0 {
+			at = 0
+		}
+	}
+	m.picked = true
+	m.selectSubject(rooms[(at+step+len(rooms))%len(rooms)].Code)
+}
+
 func (m *dashModel) selectSubject(code string) {
 	if code != m.subject {
 		// The todo pane follows the subject, and row four of your own list

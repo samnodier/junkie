@@ -31,17 +31,19 @@ func TestTabMovesBetweenTheBlocksAndWraps(t *testing.T) {
 		t.Fatalf("a running private block should be the opening subject, got %q", m.subject)
 	}
 
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	// The block pane's list is the blocks, and j walks it.
+	m.focus = paneBlock
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	if m.subject != "ABC-123" {
-		t.Errorf("tab should select the room, got %q", m.subject)
+		t.Errorf("j should select the room, got %q", m.subject)
 	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	if m.subject != soloSubject {
-		t.Errorf("tab should wrap back to the private block, got %q", m.subject)
+		t.Errorf("j should wrap back to the private block, got %q", m.subject)
 	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 	if m.subject != "ABC-123" {
-		t.Errorf("shift+tab should go the other way, got %q", m.subject)
+		t.Errorf("k should go the other way, got %q", m.subject)
 	}
 }
 
@@ -50,7 +52,7 @@ func TestTabMovesBetweenTheBlocksAndWraps(t *testing.T) {
 func TestSelectedRoomDrawsItsOwnCountdown(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 
 	view := m.View()
 	for _, want := range []string{"Deep work", "ABC-123", "of 25:00", "session 1/4", "2 here"} {
@@ -68,7 +70,7 @@ func TestSelectedRoomDrawsItsOwnCountdown(t *testing.T) {
 func TestSwitchingRebasesTheCountdown(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 	if got := m.countdown.remaining(); got != 724 {
 		t.Errorf("countdown = %d, want the room's 724", got)
 	}
@@ -87,7 +89,7 @@ func TestRoomKeysActOnTheRoom(t *testing.T) {
 		if tc.key == 's' {
 			m.desk.Rooms[0].Timer.Phase = "break"
 		}
-		m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+		onFirstRoom(m)
 		_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
 		// Leaving asks first, so the key that acts on the room is the y
 		// that answers it.
@@ -109,7 +111,7 @@ func TestRoomKeysActOnTheRoom(t *testing.T) {
 func TestLeavingABlockAsksFirst(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	if cmd != nil {
@@ -139,7 +141,7 @@ func TestStartActsOnWhicheverBlockIsSelected(t *testing.T) {
 	m.desk.SoloTimer = nil
 	m.desk.Rooms[0].Timer = nil
 
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
 	if cmd == nil {
 		t.Fatal("f should start the selected room's block")
@@ -155,7 +157,7 @@ func TestIdleRoomSaysWhatItIs(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
 	m.desk.Rooms[0].Timer = nil
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 
 	view := m.View()
 	for _, want := range []string{"Deep work", "idle", "25 min blocks", "f starts a block here"} {
@@ -170,7 +172,7 @@ func TestIdleRoomSaysWhatItIs(t *testing.T) {
 func TestSubjectFallsBackWhenTheRoomGoesAway(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 
 	next := bothRunningDesk()
 	next.Rooms = nil
@@ -222,7 +224,7 @@ func TestOpeningSubjectHonoursAnAskedForRoom(t *testing.T) {
 func TestARefreshDoesNotUndoTheUsersChoice(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 	m.Update(deskMsg{desk: bothRunningDesk()})
 	if m.subject != "ABC-123" {
 		t.Errorf("subject = %q after a refresh, want the room the user picked", m.subject)
@@ -263,7 +265,7 @@ func TestPrivateBlockIsNamedWhenThereAreRooms(t *testing.T) {
 func TestCancelDoesNotReachThePrivateBlockFromARoom(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 	if _, ok := m.currentRoom(); !ok {
 		t.Fatal("tab did not put a room on screen")
 	}
@@ -288,7 +290,7 @@ func TestRoomTodosAppearWithTheRoom(t *testing.T) {
 	if got := m.visibleTodos(); len(got) != 1 || got[0].ID != "p1" {
 		t.Fatalf("your own block should show your private list, got %+v", got)
 	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 
 	got := m.visibleTodos()
 	if len(got) != 2 || got[0].ID != "r1" || got[1].ID != "r2" {
@@ -313,7 +315,7 @@ func TestOthersTodosCannotBeChanged(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
 	m.desk.Rooms[0].Others = []apiTodo{{ID: "r2", Text: "their thing", DisplayName: "Pal"}}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 
 	for _, key := range []rune{' ', 'd', 'e'} {
 		m.cursor = 0
@@ -330,6 +332,8 @@ func TestOthersTodosCannotBeChanged(t *testing.T) {
 // g and G are the whole of the vim jump: the list is too short to earn more.
 func TestGoToEndsOfTheList(t *testing.T) {
 	m := dashAt(100, 30)
+	// j and k scroll the focused pane; this one is about the todo list.
+	onTodos(m)
 	m.desk.Todos = []apiTodo{{ID: "a"}, {ID: "b"}, {ID: "c"}}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
 	if m.cursor != 2 {
@@ -411,7 +415,7 @@ func TestZoomedPrivateBlockDoesNotOfferRoomKeys(t *testing.T) {
 	}
 
 	// A room's block still gets them.
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 	if !m.currentFace().room() {
 		t.Fatal("the room's face does not report as a room")
 	}
@@ -456,7 +460,7 @@ func TestXEndsWhicheverBlockIsOnScreen(t *testing.T) {
 	m.confirm = nil
 
 	// Over a room's it leaves that.
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	onFirstRoom(m)
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	if m.confirm == nil || !strings.Contains(m.confirm.question, "leave the block") {
 		t.Fatalf("x over a room asked %v", m.confirm)
@@ -513,47 +517,111 @@ func TestJoinARoomFromTheDesk(t *testing.T) {
 	}
 }
 
-// Two pairs, two jobs: tab moves between blocks, j and k scroll the list
-// on whichever one is showing.
-func TestTabMovesBlocksAndJKScrollsThem(t *testing.T) {
+// The desk is three panes and tab moves between them; j and k scroll
+// whichever one has the focus, so there is one pair of keys for moving
+// about rather than a different pair per thing that moves.
+func TestTabMovesPanesAndJKScrollsTheFocusedOne(t *testing.T) {
 	m := dashAt(100, 30)
 	m.desk = bothRunningDesk()
 	m.desk.Todos = []apiTodo{{ID: "p1"}, {ID: "p2"}}
 	m.desk.Rooms[0].Mine = []apiTodo{{ID: "r1"}, {ID: "r2"}}
 
-	// j scrolls your own block's list.
-	m.selectSubject(soloSubject)
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	if m.cursor != 1 || m.subject != soloSubject {
-		t.Errorf("j moved the block instead of the cursor: subject=%q cursor=%d", m.subject, m.cursor)
+	if m.focus != paneBlock {
+		t.Fatalf("focus starts on %v, want the block", m.focus)
 	}
 
-	// tab moves to the room, and j scrolls that one's list just the same.
-	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
-	room := m.subject
-	if room == soloSubject {
-		t.Fatal("tab did not move to the room")
+	// The block pane's list is the blocks themselves.
+	before := m.subject
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if m.subject == before {
+		t.Error("j on the block pane did not change the block")
 	}
 	if m.cursor != 0 {
-		t.Errorf("the cursor carried over to another list at %d", m.cursor)
+		t.Errorf("j on the block pane moved the todo cursor to %d", m.cursor)
 	}
+
+	// tab to the todos, where j is the cursor and the block sits still.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if m.focus != paneTodos {
+		t.Fatalf("tab landed on %v, want the todos", m.focus)
+	}
+	onRoom := m.subject
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	if m.cursor != 1 || m.subject != room {
-		t.Errorf("j on a room moved the block: subject=%q cursor=%d", m.subject, m.cursor)
+	if m.cursor != 1 {
+		t.Errorf("j on the todos left the cursor at %d", m.cursor)
+	}
+	if m.subject != onRoom {
+		t.Error("j on the todos moved the block")
 	}
 
-	// shift+tab goes back.
+	// tab again to the rooms, where j walks the list and the countdown
+	// follows the row it lands on.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if m.focus != paneRooms {
+		t.Fatalf("tab landed on %v, want the rooms", m.focus)
+	}
+	m.scrollTo(0)
+	if _, ok := m.currentRoom(); !ok {
+		t.Error("the rooms pane did not put a room on screen")
+	}
+
+	// and back round to the block.
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if m.focus != paneBlock {
+		t.Errorf("tab wrapped to %v, want the block", m.focus)
+	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyShiftTab})
-	if m.subject != soloSubject {
-		t.Errorf("shift+tab went to %q, want back to your own block", m.subject)
-	}
-
-	// J and K are gone: they move nothing and scroll nothing.
-	before, cursor := m.subject, m.cursor
-	for _, key := range []rune{'J', 'K'} {
-		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
-		if m.subject != before || m.cursor != cursor {
-			t.Errorf("%q still does something: subject=%q cursor=%d", key, m.subject, m.cursor)
-		}
+	if m.focus != paneRooms {
+		t.Errorf("shift+tab went to %v, want back to the rooms", m.focus)
 	}
 }
+
+// tab that appears to do nothing is worse than no tab: the focus has to be
+// on the screen.
+func TestTheFocusedPaneIsMarked(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+
+	for _, tc := range []struct {
+		focus pane
+		mark  string
+	}{
+		{paneTodos, "todos ‹"},
+		{paneRooms, "rooms ‹"},
+	} {
+		m.focus = tc.focus
+		if view := m.View(); !strings.Contains(view, tc.mark) {
+			t.Errorf("%v is focused but %q is not on screen:\n%s", tc.focus, tc.mark, view)
+		}
+	}
+
+	// The block pane has no label, so the mark goes on what it is drawing.
+	m.focus = paneBlock
+	if view := m.View(); !strings.Contains(view, "‹") {
+		t.Errorf("the block pane is focused and nothing says so:\n%s", view)
+	}
+}
+
+// A pane with nothing in it is a stop on the way to nowhere.
+func TestTheRoomsPaneIsSkippedWithNoRooms(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.desk.Rooms = nil
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	if m.focus == paneRooms {
+		t.Error("tab stopped on a rooms pane with no rooms in it")
+	}
+}
+
+// onFirstRoom puts the first room on screen the way the desk does it: the
+// block pane focused, and j walking off your own block onto the next one.
+func onFirstRoom(m *dashModel) {
+	m.focus = paneBlock
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+}
+
+// onTodos points j and k at the todo list, which is what most of the older
+// tests meant when they pressed them.
+func onTodos(m *dashModel) { m.focus = paneTodos }
