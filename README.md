@@ -190,7 +190,7 @@ The keys are grouped along the bottom of the screen the way they are grouped her
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` / `c` | start focus · take the break · skip it · cancel the block |
 | desk | `tab` | show the next block: your own, then each room |
-| desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns) |
+| desk | `w` | timer pane fills the window (same as `junkie watch`; `esc` or `q` returns, `c` ends the block) |
 | desk | `r` / `q` | refresh · quit (`q` backs out of the zoomed pane first) |
 | desk | `L` | sign in (guest desk) |
 | desk | `y` / `n` | answer a room's join prompt |
@@ -199,7 +199,7 @@ In a narrow window each row drops its last hints, and in a short one they collap
 
 ### Two blocks at once
 
-Your own block and a room's block run independently — you can be in both — and the countdown shows one at a time. `tab` moves between them: your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
+Your own block and a room's block run independently — you can be in both, and starting or joining one never asks you to give up the other — and the countdown shows one at a time. `tab` moves between them: your private block first, then each room you are in. Whichever is on screen is named above the digits and marked in the room list below them, so there is never a question of which block you are looking at.
 
 With a room on screen the timer keys act on that room, and two more apply:
 

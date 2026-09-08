@@ -597,6 +597,16 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 		return m, nil
 
+	// i and x are a room's keys. Pressed over your own block they used to
+	// do nothing at all, which reads as the program having missed them.
+	case "i", "x":
+		if len(m.desk.Rooms) == 0 {
+			m.note("that one is for a room's block — you're not in a room yet")
+			return m, nil
+		}
+		m.note("that one is for a room's block — tab to a room first")
+		return m, nil
+
 	case "a":
 		label := "new todo"
 		if room, ok := m.currentRoom(); ok {

@@ -419,3 +419,36 @@ func TestZoomedPrivateBlockDoesNotOfferRoomKeys(t *testing.T) {
 		t.Errorf("a room's block lost its keys:\n%s", view)
 	}
 }
+
+// Ending a block and leaving the pane showing it are different things, and
+// the pane named only the second.
+func TestZoomedPrivatePaneSaysHowToEndTheBlock(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	m.zoom = true
+	if view := m.View(); !strings.Contains(view, "c ends it") {
+		t.Errorf("no way to end the block on screen:\n%s", view)
+	}
+	// And c reaches it from inside the pane.
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	if cmd == nil {
+		t.Error("c did nothing in the zoomed pane")
+	}
+}
+
+// i and x belong to a room. Over your own block they did nothing and said
+// nothing, which reads as dropped keystrokes.
+func TestRoomKeysExplainThemselvesOverYourOwnBlock(t *testing.T) {
+	m := dashAt(100, 30)
+	m.desk = bothRunningDesk()
+	for _, key := range []rune{'i', 'x'} {
+		m.selectSubject(soloSubject)
+		_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+		if cmd != nil {
+			t.Errorf("%q acted on something over the private block", key)
+		}
+		if !strings.Contains(m.footer(), "for a room's block") {
+			t.Errorf("%q said nothing: %s", key, m.footer())
+		}
+	}
+}
