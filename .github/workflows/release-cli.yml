@@ -26,6 +26,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Two server tests read the built frontend out of the go:embed bundle
+      # (the SPA shell, and the link-preview tags in index.html), and
+      # cmd/junkie/static/app is gitignored -- the Dockerfile builds it, a
+      # fresh checkout does not have it. So build it here, or `go test ./...`
+      # below fails on a release that is perfectly fine.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web run build
+
       # The server's tests run here too: the CLI shares its module, so a
       # release that would not build or pass is worth catching before it is
       # published rather than after.
