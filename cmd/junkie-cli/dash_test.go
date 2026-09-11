@@ -630,16 +630,67 @@ func TestDashGuestOpensLogin(t *testing.T) {
 	if !strings.Contains(m.View(), "sign in") {
 		t.Errorf("expected the sign-in screen:\n%s", m.View())
 	}
-	press(m, "q", "u", "i", "t")
+	// The panel takes no typing -- there is nothing to fill in -- so the
+	// only thing a key can do is close it, and it must close the panel
+	// rather than the program.
+	press(m, "u", "i", "t")
 	if m.login == nil {
-		t.Fatal("typing q on the sign-in screen should not quit")
-	}
-	if got := string(m.login.username); got != "quit" {
-		t.Errorf("typed %q", got)
+		t.Fatal("stray keys on the sign-in screen should not close it")
 	}
 	press(m, "esc")
 	if m.login != nil {
 		t.Fatal("esc should close sign-in")
+	}
+}
+
+// The code and the URL are the whole panel: without both, there is nothing
+// for the person to act on.
+func TestDashSignInShowsTheCodeAndWhereToApproveIt(t *testing.T) {
+	m := dashAt(80, 24)
+	m.identity.Guest = true
+	m.user = "guest"
+	press(m, "L")
+	m.Update(pairStartedMsg{start: linkStart{
+		UserCode:  "WXYZ-2345",
+		VerifyURL: "https://junkie.test/cli",
+		ExpiresIn: 600,
+		Interval:  2,
+	}})
+	view := m.View()
+	for _, want := range []string{"WXYZ-2345", "junkie.test/cli"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("sign-in panel is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// Escaping before approval must mean it: an approval landing afterwards is
+// a session appearing out of a wait that was abandoned.
+func TestDashIgnoresAnApprovalAfterThePanelIsClosed(t *testing.T) {
+	m := dashAt(80, 24)
+	m.identity.Guest = true
+	m.user = "guest"
+	press(m, "L")
+	press(m, "esc")
+	if m.login != nil {
+		t.Fatal("esc should close sign-in")
+	}
+	m.Update(loginResultMsg{id: identity{User: "Someone", Username: "someone"}})
+	if m.user == "Someone" {
+		t.Error("a late approval signed the desk in after it was dismissed")
+	}
+}
+
+// A server that cannot pair says so on the panel rather than leaving it
+// waiting on a code that will never come.
+func TestDashSignInShowsAStartError(t *testing.T) {
+	m := dashAt(80, 24)
+	m.identity.Guest = true
+	m.user = "guest"
+	press(m, "L")
+	m.Update(pairStartedMsg{err: errors.New("could not reach the server")})
+	if !strings.Contains(m.View(), "could not reach the server") {
+		t.Errorf("expected the error on the panel:\n%s", m.View())
 	}
 }
 

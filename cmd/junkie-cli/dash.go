@@ -434,6 +434,9 @@ func (m *dashModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case signal:
 		return m.handleSignal(msg)
 
+	case pairStartedMsg:
+		return m.handlePairStarted(msg)
+
 	case loginResultMsg:
 		return m.handleLogin(msg)
 
@@ -632,7 +635,8 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		cfg, _ := loadConfig()
 		m.login = newLoginForm(firstNonEmpty(m.identity.BaseURL, cfg.BaseURL), cfg.Username)
-		return m, nil
+		// There is nothing to fill in, so the request opens straight away.
+		return m, m.login.begin()
 	case "r":
 		if m.refreshing {
 			return m, nil
@@ -890,42 +894,44 @@ func (m *dashModel) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleLoginKey takes almost nothing: the panel has no fields to fill, so
+// the only thing to press is the way out.
 func (m *dashModel) handleLoginKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.login.busy {
-		return m, nil
-	}
 	switch msg.String() {
-	case "esc", "ctrl+c":
+	case "esc", "ctrl+c", "q":
+		m.login.dismiss()
 		m.login = nil
 		return m, nil
-	case "enter":
-		return m, m.login.submit()
-	case "tab", "down":
-		m.login.field = (m.login.field + 1) % 2
-		return m, nil
-	case "shift+tab", "up":
-		m.login.field = (m.login.field + 1) % 2
-		return m, nil
-	}
-	switch msg.Type {
-	case tea.KeyBackspace:
-		m.login.backspace()
-	case tea.KeySpace:
-		m.login.insert([]rune{' '})
-	case tea.KeyRunes:
-		m.login.insert(msg.Runes)
 	}
 	return m, nil
 }
 
-func (m *dashModel) handleLogin(msg loginResultMsg) (tea.Model, tea.Cmd) {
-	if m.login != nil {
-		m.login.busy = false
+// handlePairStarted shows the issued code, and starts waiting for it.
+func (m *dashModel) handlePairStarted(msg pairStartedMsg) (tea.Model, tea.Cmd) {
+	// Dismissed while the request was in flight: the code is nobody's now.
+	if m.login == nil {
+		return m, nil
 	}
 	if msg.err != nil {
-		if m.login != nil {
-			m.login.err = msg.err.Error()
-		}
+		m.login.busy = false
+		m.login.err = msg.err.Error()
+		return m, nil
+	}
+	m.login.start = msg.start
+	m.login.opened = msg.opened
+	return m, m.login.wait()
+}
+
+func (m *dashModel) handleLogin(msg loginResultMsg) (tea.Model, tea.Cmd) {
+	// The panel is gone: they pressed esc, and whatever this is arrived too
+	// late to be wanted. Signing them in now would be a session appearing out
+	// of a wait they already abandoned.
+	if m.login == nil {
+		return m, nil
+	}
+	m.login.busy = false
+	if msg.err != nil {
+		m.login.err = msg.err.Error()
 		return m, nil
 	}
 	if m.store != nil {

@@ -360,6 +360,13 @@ func main() {
 	mux.HandleFunc("GET /api/room/{code}/members", a.requireAuth(a.apiRoomMembers))
 	mux.HandleFunc("GET /api/room/{code}/embed", a.apiFocusEmbed)
 	mux.HandleFunc("GET /api/public-profile/{username}", a.requireAuth(a.apiPublicProfile))
+	// Terminal-client pairing. start/poll are unauthenticated by nature (the
+	// caller has no session yet); approve is the click that needs one.
+	mux.HandleFunc("POST /api/cli/link/start", a.apiCLILinkStart)
+	mux.HandleFunc("POST /api/cli/link/poll", a.apiCLILinkPoll)
+	mux.HandleFunc("GET /api/cli/link/context", a.requireAuth(a.apiCLILinkContext))
+	mux.HandleFunc("POST /api/cli/link/approve", a.requireAuth(a.apiCLILinkApprove))
+	mux.HandleFunc("GET /cli", a.spaPage)
 	mux.HandleFunc("GET /docs", a.spaPage)
 	mux.HandleFunc("GET /privacy", a.spaPage)
 	mux.HandleFunc("GET /terms", a.spaPage)

@@ -4060,3 +4060,35 @@ body.menu-drawer-open {
 .drawer-docs-link a:hover {
   color: var(--ink);
 }
+
+/* Terminal sign-in approval (/cli): the code is the thing being checked, so
+   it is set large and monospaced to compare against a terminal at a glance. */
+.cli-link-form {
+  margin-top: var(--sp-5);
+}
+.cli-link-field {
+  display: grid;
+  gap: var(--sp-2);
+  text-align: left;
+}
+.cli-link-code {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.cli-link-code:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.cli-link-note {
+  font-size: var(--fs-small);
+}

@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	ossignal "os/signal"
 	"strings"
 	"time"
 
@@ -25,8 +27,11 @@ const (
 
 func cmdLogin(args []string) error {
 	args, urlFlag := flagValue(args, "url")
+	// --password is the way back to the old flow, for a server too old to
+	// offer pairing and for anyone who would rather type the password.
+	args, wantPassword := hasFlag(args, "password")
 	if len(args) > 1 {
-		return errors.New("usage: junkie login [--url URL] [USERNAME]")
+		return errors.New("usage: junkie login [--url URL] [--password] [USERNAME]")
 	}
 
 	// A stored login is the starting point, so `junkie login` against the
@@ -41,11 +46,75 @@ func cmdLogin(args []string) error {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = baseURLFromEnv(defaultBaseURL)
 	}
-
 	username := ""
 	if len(args) == 1 {
-		username = args[0]
+		username = strings.ToLower(strings.TrimSpace(args[0]))
 	}
+
+	if warning := insecureURLWarning(cfg.BaseURL); warning != "" {
+		fmt.Fprintln(os.Stderr, styleWarn.Render(warning))
+	}
+
+	if !wantPassword {
+		err := loginViaBrowser(&cfg)
+		if err == nil {
+			return afterLogin(cfg)
+		}
+		// An older server has no pairing endpoints. Say so once and ask for
+		// the password rather than leaving someone stuck.
+		if !errors.Is(err, errPairingUnsupported) {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, styleFaint.Render("this server doesn't support browser sign-in yet; asking for a password instead"))
+	}
+
+	if err := loginWithPassword(&cfg, username); err != nil {
+		return err
+	}
+	return afterLogin(cfg)
+}
+
+// loginViaBrowser runs the pairing flow: show a code, wait for it to be
+// approved in a browser, store the session that comes back.
+func loginViaBrowser(cfg *config) error {
+	c := newClient(config{BaseURL: cfg.BaseURL})
+	start, err := c.startPairing()
+	if err != nil {
+		return err
+	}
+
+	target := firstNonEmpty(start.VerifyURLFull, start.VerifyURL)
+	fmt.Fprintf(os.Stderr, "\n  %s  %s\n\n",
+		styleLabel.Render("your code"), styleAccent.Render(start.UserCode))
+	fmt.Fprintf(os.Stderr, "  Approve it at %s\n", styleInk.Render(start.VerifyURL))
+	if openBrowser(target) {
+		fmt.Fprintln(os.Stderr, styleFaint.Render("  (opening that page in your browser)"))
+	} else {
+		fmt.Fprintln(os.Stderr, styleFaint.Render("  Open it on any device — it doesn't have to be this one."))
+	}
+	fmt.Fprintln(os.Stderr, "\n"+styleFaint.Render("  waiting for approval… ctrl-c to stop"))
+
+	// Ctrl-C should stop the wait, not leave a terminal staring at a code
+	// nobody is going to approve.
+	ctx, stop := ossignal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	out, err := c.awaitApproval(ctx, start, nil)
+	if errors.Is(err, context.Canceled) {
+		return errors.New("sign-in cancelled")
+	}
+	if err != nil {
+		return err
+	}
+	cfg.Token = out.Token
+	cfg.Username = out.Username
+	return saveConfig(*cfg)
+}
+
+// loginWithPassword is the original flow, kept for old servers and for
+// anyone who asks for it with --password.
+func loginWithPassword(cfg *config, username string) error {
+	var err error
 	if username == "" {
 		if username, err = prompt("username: "); err != nil {
 			return err
@@ -59,29 +128,25 @@ func cmdLogin(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	if warning := insecureURLWarning(cfg.BaseURL); warning != "" {
-		fmt.Fprintln(os.Stderr, styleWarn.Render(warning))
-	}
 	fmt.Fprintf(os.Stderr, "signing in to %s…\n", cfg.BaseURL)
-	c := newClient(config{BaseURL: cfg.BaseURL})
-	token, err := c.login(username, password)
+	token, err := newClient(config{BaseURL: cfg.BaseURL}).login(username, password)
 	if err != nil {
 		return err
 	}
-
 	cfg.Token = token
 	cfg.Username = username
-	if err := saveConfig(cfg); err != nil {
-		return err
-	}
+	return saveConfig(*cfg)
+}
+
+// afterLogin is everything both routes do once a session is stored.
+func afterLogin(cfg config) error {
 	// Record the machine's zone so focus minutes land on the day this user
 	// actually had. Best-effort: the server rejects zones Postgres doesn't
 	// know, and a declined timezone is no reason to fail a good login.
 	_ = newClient(cfg).setTimezone(time.Local.String())
 
 	path, _ := configPath()
-	fmt.Printf("Signed in as %s. Session stored in %s\n", username, path)
+	fmt.Printf("Signed in as %s. Session stored in %s\n", cfg.Username, path)
 	if terminalWidth() == 0 {
 		return nil
 	}

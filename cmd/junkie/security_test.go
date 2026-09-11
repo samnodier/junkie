@@ -73,7 +73,7 @@ func TestSingleSegmentPagePathsAreReservedUsernames(t *testing.T) {
 	pages := []string{
 		"login", "signup", "logout", "profile", "todos", "rooms", "join",
 		"admin", "dashboard", "solo", "connections", "settings", "terms",
-		"privacy", "discord", "reset-password", "docs",
+		"privacy", "discord", "reset-password", "docs", "cli",
 	}
 	for _, page := range pages {
 		if validUsername(page) {

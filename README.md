@@ -72,7 +72,9 @@ You do not have to. `junkie` on its own opens a guest desk. Press `L` there, or 
 junkie login
 ```
 
-It asks for your username and password — the same ones you use on the web — and stores the session in `~/.config/junkie/config.json`, mode `0600`. In a terminal it then opens the desk signed in. You stay signed in across terminals and reboots until the session expires **30 days after you signed in**; it does not renew as you use it, so roughly once a month you will be asked to sign in again. `junkie logout` ends it immediately, on the server as well as on disk.
+It shows a short code and waits while you approve it at `/cli` in a browser you are already signed in to — **the password is never typed into the terminal**. The browser does not have to be on the same machine, so this works on a box you reached over SSH: read the code, approve it on your laptop or your phone. The session is then stored in `~/.config/junkie/config.json`, mode `0600`.
+
+`junkie login --password` asks for a username and password instead, for a self-hosted server too old to offer the browser flow. In a terminal it then opens the desk signed in. You stay signed in across terminals and reboots until the session expires **30 days after you signed in**; it does not renew as you use it, so roughly once a month you will be asked to sign in again. `junkie logout` ends it immediately, on the server as well as on disk.
 
 Changing your password anywhere signs the terminal out too, because that ends every other session on the account.
 

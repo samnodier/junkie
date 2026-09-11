@@ -40,8 +40,13 @@ func commands() []command {
 			name: "login", group: groupAccount, args: "[USERNAME]",
 			summary: "sign in and remember the session",
 			run:     cmdLogin,
-			detail: `Asks for your username and password — the same ones you use on the web —
-and stores the session in ~/.config/junkie/config.json (mode 0600).
+			detail: `Shows a short code and waits while you approve it in a browser, then
+stores the session in ~/.config/junkie/config.json (mode 0600). Your
+password is never typed into the terminal.
+
+The browser does not have to be on this machine. On a server you reached
+over SSH, read the code and approve it on your laptop or your phone — the
+code is what ties the two together.
 
 In a terminal it then opens the desk, signed in. Piped, it prints the
 confirmation and stops, so a script can sign in without hanging in a
@@ -52,7 +57,8 @@ you sign in. The session does not renew as you use it, so about once a month
 you will be asked again. Changing your password anywhere ends it early,
 because that ends every other session on your account.
 
-  --url URL    sign in to a different server (default: the hosted one)`,
+  --url URL     sign in to a different server (default: the hosted one)
+  --password    ask for a username and password instead of using a browser`,
 		},
 		{
 			name: "logout", group: groupAccount,

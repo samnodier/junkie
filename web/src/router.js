@@ -34,6 +34,15 @@ const routes = [
     component: () => import('./views/ResetPasswordView.vue'),
   },
   {
+    // Approving a terminal sign-in. Guarded, so a guest lands on /login with
+    // ?next= pointing back here -- signing in is exactly what they need to do
+    // first, and the code survives the round trip in the query string.
+    path: '/cli',
+    name: 'cli-link',
+    component: () => import('./views/CLILinkView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     // Public: the user documentation, and the one page someone may arrive on
     // from outside with no session at all.
     path: '/docs',
