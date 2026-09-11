@@ -3,11 +3,14 @@
 // junkie is, how to run it, how to deploy it. This is the user's: what every
 // screen does, for people who will never clone the repository.
 //
-// One long page rather than a section per route, because almost every question
-// someone has here is answered by two paragraphs, and ctrl-F over the whole
-// thing beats navigating to find out which page holds them. The filter box
-// narrows it when the page is too long to skim.
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+// One section on screen at a time, chosen from the rail, the way a
+// documentation site works — not one endless scroll. The rail is then a place
+// you go rather than a place you scroll past, which is why it stays put.
+//
+// Every section stays in the DOM (v-show, not v-if): the filter searches the
+// text of all of them, and it can only do that if the text is there to read.
+import { computed, nextTick, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import AppShell from '@/components/AppShell.vue';
 
 const sections = [
@@ -29,58 +32,66 @@ const sections = [
   { id: 'admin', title: 'Admin and owner access' },
   { id: 'selfhost', title: 'Self-hosting' },
 ];
+const ids = new Set(sections.map((s) => s.id));
 
-// Which heading the reader is currently under, for the sidebar marker.
-const active = ref('start');
-let observer = null;
+const route = useRoute();
+const router = useRouter();
+
+// The hash is the state, so a deep link, the back button and a click all
+// arrive the same way. Anything unrecognised falls back to the first section
+// rather than showing nothing.
+const active = computed(() => {
+  const id = String(route.hash || '').slice(1);
+  return ids.has(id) ? id : sections[0].id;
+});
 
 const filter = ref('');
 const query = computed(() => filter.value.trim().toLowerCase());
-// Filtering hides whole sections rather than individual paragraphs: a
-// half-shown section reads as a bug, and the sections are small enough that
-// the right one is usually the whole answer.
-const visible = computed(() => {
-  if (!query.value) return null;
+// Searched off the rendered text, so a section is found by anything it says,
+// not only by its title.
+const matches = ref(null);
+watch(query, async (q) => {
+  if (!q) {
+    matches.value = null;
+    return;
+  }
+  await nextTick();
   const hits = new Set();
   for (const el of document.querySelectorAll('[data-docs-section]')) {
-    if (el.textContent.toLowerCase().includes(query.value)) {
-      hits.add(el.dataset.docsSection);
-    }
+    if (el.textContent.toLowerCase().includes(q)) hits.add(el.dataset.docsSection);
   }
-  return hits;
+  matches.value = hits;
+  // Narrowing the list should land you on a result rather than leaving you
+  // on a section the filter just said is not one.
+  if (hits.size > 0 && !hits.has(active.value)) {
+    go(sections.find((s) => hits.has(s.id)).id);
+  }
 });
-function shown(id) {
-  return !visible.value || visible.value.has(id);
-}
-const matchCount = computed(() => (visible.value ? visible.value.size : sections.length));
 
-// The drawer's own scroll position is the sidebar's on narrow screens, where
-// the list is a disclosure rather than a rail.
+const listed = computed(() =>
+  matches.value ? sections.filter((s) => matches.value.has(s.id)) : sections
+);
+
 const tocOpen = ref(false);
-function goTo(id) {
+function go(id) {
   tocOpen.value = false;
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  history.replaceState(null, '', `#${id}`);
+  if (route.hash === `#${id}`) return;
+  // push, not replace, so the back button walks back through the sections
+  // someone read — the thing that makes this feel like pages.
+  router.push({ hash: `#${id}` });
 }
 
-onMounted(() => {
-  // rootMargin pulls the trip line up near the top of the viewport, so the
-  // marked entry is the heading you are reading under, not the one that
-  // happens to be centred.
-  observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) active.value = entry.target.id;
-      }
-    },
-    { rootMargin: '-80px 0px -70% 0px', threshold: 0 }
-  );
-  for (const el of document.querySelectorAll('[data-docs-section]')) observer.observe(el);
-  // A deep link should land on its section, not at the top of the page.
-  const hash = location.hash.slice(1);
-  if (hash) document.getElementById(hash)?.scrollIntoView({ block: 'start' });
-});
-onUnmounted(() => observer?.disconnect());
+// A new section starts at its own beginning. Skipped on the very first
+// render, where there is nothing to scroll back from.
+let settled = false;
+watch(active, async () => {
+  await nextTick();
+  if (!settled) {
+    settled = true;
+    return;
+  }
+  document.querySelector('.docs-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}, { immediate: true });
 </script>
 
 <template>
@@ -115,15 +126,15 @@ onUnmounted(() => observer?.disconnect());
               <input v-model="filter" type="search" placeholder="Filter…" autocomplete="off">
             </label>
             <p v-if="query" class="label docs-nav-count">
-              {{ matchCount }} of {{ sections.length }} sections
+              {{ listed.length }} of {{ sections.length }} sections
             </p>
             <ul class="docs-nav-list">
-              <li v-for="s in sections" :key="s.id">
+              <li v-for="s in listed" :key="s.id">
                 <button
                   type="button"
                   class="docs-nav-link"
-                  :class="{ 'is-active': active === s.id, 'is-dim': !shown(s.id) }"
-                  @click="goTo(s.id)"
+                  :class="{ 'is-active': active === s.id }"
+                  @click="go(s.id)"
                 >{{ s.title }}</button>
               </li>
             </ul>
@@ -131,12 +142,12 @@ onUnmounted(() => observer?.disconnect());
         </nav>
 
         <div class="docs-content">
-          <p v-if="query && matchCount === 0" class="panel docs-empty">
+          <p v-if="query && listed.length === 0" class="panel docs-empty">
             Nothing here matches “{{ filter }}”. Try a shorter word — the filter matches the
             text of a whole section.
           </p>
 
-          <section v-show="shown('start')" id="start" data-docs-section="start" class="docs-section">
+          <section v-show="active === 'start'" id="start" data-docs-section="start" class="docs-section">
             <h2>Start here</h2>
             <p>
               A <strong>block</strong> is one run of the timer: a focus session, then a break,
@@ -152,12 +163,12 @@ onUnmounted(() => observer?.disconnect());
               <p>
                 <strong>You do not need an account to try it.</strong> Open junkie and the solo
                 timer and a private todo list are there straight away — they just live in that
-                browser rather than on the server. See <a href="#guest" @click.prevent="goTo('guest')">Without an account</a>.
+                browser rather than on the server. See <a href="#guest" @click.prevent="go('guest')">Without an account</a>.
               </p>
             </div>
           </section>
 
-          <section v-show="shown('guest')" id="guest" data-docs-section="guest" class="docs-section">
+          <section v-show="active === 'guest'" id="guest" data-docs-section="guest" class="docs-section">
             <h2>Without an account</h2>
             <p>
               Guest mode keeps everything in that browser's <code>localStorage</code>, on that
@@ -175,11 +186,11 @@ onUnmounted(() => observer?.disconnect());
             </p>
             <p class="muted">
               The terminal client has its own guest mode with the same rule — see
-              <a href="#terminal" @click.prevent="goTo('terminal')">Terminal client</a>.
+              <a href="#terminal" @click.prevent="go('terminal')">Terminal client</a>.
             </p>
           </section>
 
-          <section v-show="shown('accounts')" id="accounts" data-docs-section="accounts" class="docs-section">
+          <section v-show="active === 'accounts'" id="accounts" data-docs-section="accounts" class="docs-section">
             <h2>Accounts</h2>
             <p>
               Create one when you want shared rooms, or data that follows you between devices.
@@ -211,7 +222,7 @@ onUnmounted(() => observer?.disconnect());
             </div>
           </section>
 
-          <section v-show="shown('solo')" id="solo" data-docs-section="solo" class="docs-section">
+          <section v-show="active === 'solo'" id="solo" data-docs-section="solo" class="docs-section">
             <h2>Solo focus</h2>
             <p>The ring on the desk is adjustable before you start:</p>
             <ul>
@@ -231,7 +242,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('rooms')" id="rooms" data-docs-section="rooms" class="docs-section">
+          <section v-show="active === 'rooms'" id="rooms" data-docs-section="rooms" class="docs-section">
             <h2>Rooms</h2>
             <p>
               A room is a persistent shared space at <code>/r/{code}</code> with its own members,
@@ -261,16 +272,16 @@ onUnmounted(() => observer?.disconnect());
               are <strong>open to every member</strong>, so a room can organise itself when nobody
               in particular is around. They are locked while a block is running, because a run
               takes a copy of its settings when it starts — with one deliberate exception, covered
-              under <a href="#temporary" @click.prevent="goTo('temporary')">Temporary rooms</a>.
+              under <a href="#temporary" @click.prevent="go('temporary')">Temporary rooms</a>.
             </p>
           </section>
 
-          <section v-show="shown('room-people')" id="room-people" data-docs-section="room-people" class="docs-section">
+          <section v-show="active === 'room-people'" id="room-people" data-docs-section="room-people" class="docs-section">
             <h2>Members, admins, ownership</h2>
             <p>
               Every room has a <strong>creator</strong>, and can have any number of
               <strong>room admins</strong>. This is separate from the site-wide account roles under
-              <a href="#admin" @click.prevent="goTo('admin')">Admin and owner access</a>.
+              <a href="#admin" @click.prevent="go('admin')">Admin and owner access</a>.
             </p>
             <table class="docs-table">
               <thead><tr><th>Who</th><th>Can</th></tr></thead>
@@ -301,7 +312,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('room-timers')" id="room-timers" data-docs-section="room-timers" class="docs-section">
+          <section v-show="active === 'room-timers'" id="room-timers" data-docs-section="room-timers" class="docs-section">
             <h2>Running a block</h2>
             <p>
               Shared blocks run from server timestamps and count down locally, so everyone's ring
@@ -346,7 +357,7 @@ onUnmounted(() => observer?.disconnect());
             </div>
           </section>
 
-          <section v-show="shown('temporary')" id="temporary" data-docs-section="temporary" class="docs-section">
+          <section v-show="active === 'temporary'" id="temporary" data-docs-section="temporary" class="docs-section">
             <h2>Temporary rooms</h2>
             <p>
               For a quick block with a few people when you don't want a room that sticks around.
@@ -371,7 +382,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
             <ul>
               <li>The change lands about half a second after your last tap, so walking 6 down to 4 is one change rather than two.</li>
-              <li>Anything reading the block follows automatically, including the <a href="#streaming" @click.prevent="goTo('streaming')">OBS overlay</a>.</li>
+              <li>Anything reading the block follows automatically, including the <a href="#streaming" @click.prevent="go('streaming')">OBS overlay</a>.</li>
               <li>You cannot go below the session the break is leading into — that one is already committed. To stop sooner, leave the block or skip the break.</li>
               <li>Focus and break lengths stay fixed for the whole run. Only the session count moves.</li>
             </ul>
@@ -382,7 +393,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('streaming')" id="streaming" data-docs-section="streaming" class="docs-section">
+          <section v-show="active === 'streaming'" id="streaming" data-docs-section="streaming" class="docs-section">
             <h2>Streaming and overlays</h2>
             <h3>The OBS overlay</h3>
             <p>
@@ -410,7 +421,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('sound')" id="sound" data-docs-section="sound" class="docs-section">
+          <section v-show="active === 'sound'" id="sound" data-docs-section="sound" class="docs-section">
             <h2>Chimes and room sounds</h2>
             <p>
               junkie can play a sound when a block ends. There are two separate pieces, and they
@@ -441,7 +452,7 @@ onUnmounted(() => observer?.disconnect());
             </div>
           </section>
 
-          <section v-show="shown('connections')" id="connections" data-docs-section="connections" class="docs-section">
+          <section v-show="active === 'connections'" id="connections" data-docs-section="connections" class="docs-section">
             <h2>Connections and profiles</h2>
             <p>
               A connection is a mutual link between two accounts, separate from room membership.
@@ -458,7 +469,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('phone')" id="phone" data-docs-section="phone" class="docs-section">
+          <section v-show="active === 'phone'" id="phone" data-docs-section="phone" class="docs-section">
             <h2>On your phone</h2>
             <p>
               junkie is a PWA, so it installs to the home screen and runs fullscreen with no browser
@@ -475,7 +486,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('terminal')" id="terminal" data-docs-section="terminal" class="docs-section">
+          <section v-show="active === 'terminal'" id="terminal" data-docs-section="terminal" class="docs-section">
             <h2>Terminal client</h2>
             <p>
               A full-screen terminal desk against the same account and the same rooms: a live
@@ -509,13 +520,36 @@ onUnmounted(() => observer?.disconnect());
 
             <h3>Signing in</h3>
             <p>
-              You don't have to — <code>junkie</code> on its own opens a guest desk. Press
-              <code>L</code> there, or run <code>junkie login</code>, and it asks for the username and
-              password you use on the web. The session is stored in
-              <code>~/.config/junkie/config.json</code> at mode <code>0600</code> and lasts
-              <strong>30 days from signing in</strong> without renewing, so roughly once a month you
-              will sign in again. <code>junkie logout</code> ends it immediately, on the server as
-              well as on disk.
+              You don't have to — <code>junkie</code> on its own opens a guest desk. When you do want
+              your account, press <code>L</code> there or run <code>junkie login</code>. It shows a
+              short code and waits:
+            </p>
+            <pre class="docs-code"><code>  your code  2HA5-6AM8
+
+  Approve it at https://junkie-blin.onrender.com/cli
+  waiting for approval…</code></pre>
+            <p>
+              Open that page in a browser where you are already signed in, check the code matches,
+              and approve it. The terminal picks the session up a second later.
+              <strong>Your password is never typed into the terminal.</strong>
+            </p>
+            <div class="docs-callout">
+              <p>
+                <strong>The browser does not have to be on that machine.</strong> On a server you
+                reached over SSH, read the code off the screen and approve it on your laptop or your
+                phone — the code is what ties the two together. That is also why the page never
+                approves anything on its own: the click is the point.
+              </p>
+            </div>
+            <p>
+              The session is stored in <code>~/.config/junkie/config.json</code> at mode
+              <code>0600</code> and lasts <strong>30 days from signing in</strong> without renewing,
+              so roughly once a month you will sign in again. <code>junkie logout</code> ends it
+              immediately, on the server as well as on disk, and so does changing your password.
+            </p>
+            <p class="muted">
+              <code>junkie login --password</code> asks for a username and password instead, for a
+              self-hosted server too old to offer the browser flow.
             </p>
 
             <h3>The desk</h3>
@@ -595,7 +629,7 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('discord')" id="discord" data-docs-section="discord" class="docs-section">
+          <section v-show="active === 'discord'" id="discord" data-docs-section="discord" class="docs-section">
             <h2>Discord bot</h2>
             <p>
               The bot runs a server's focus room from chat: live countdown messages showing who is
@@ -645,7 +679,7 @@ onUnmounted(() => observer?.disconnect());
             </div>
           </section>
 
-          <section v-show="shown('data')" id="data" data-docs-section="data" class="docs-section">
+          <section v-show="active === 'data'" id="data" data-docs-section="data" class="docs-section">
             <h2>Where your data lives</h2>
             <p>
               <strong>As a guest</strong> — in the browser, todos, solo timer state and your work map
@@ -671,11 +705,11 @@ onUnmounted(() => observer?.disconnect());
             </p>
           </section>
 
-          <section v-show="shown('admin')" id="admin" data-docs-section="admin" class="docs-section">
+          <section v-show="active === 'admin'" id="admin" data-docs-section="admin" class="docs-section">
             <h2>Admin and owner access</h2>
             <p>
               Site-wide account roles, separate from the per-room roles under
-              <a href="#room-people" @click.prevent="goTo('room-people')">Members, admins, ownership</a>.
+              <a href="#room-people" @click.prevent="go('room-people')">Members, admins, ownership</a>.
             </p>
             <table class="docs-table">
               <thead><tr><th>Role</th><th>Sees</th></tr></thead>
@@ -688,7 +722,7 @@ onUnmounted(() => observer?.disconnect());
             <p>Admin actions are audited.</p>
           </section>
 
-          <section v-show="shown('selfhost')" id="selfhost" data-docs-section="selfhost" class="docs-section">
+          <section v-show="active === 'selfhost'" id="selfhost" data-docs-section="selfhost" class="docs-section">
             <h2>Self-hosting</h2>
             <p>
               junkie is one Go binary with the frontend embedded in it, plus PostgreSQL. Running it

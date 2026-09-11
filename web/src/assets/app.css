@@ -3751,10 +3751,40 @@ body.menu-drawer-open {
    --------------------------------------------------------------------------- */
 .docs-page {
   max-width: 1080px;
-  margin: 0 auto;
+  /* Long-form reading, so the page sits on its own sheet rather than on the
+     body grid: the grid lines run straight through paragraphs and make a
+     screenful of prose harder to read than a card of it. Docs only -- the
+     rest of the app is short cards the grid sits behind happily. */
+  margin: var(--sp-6) auto var(--sp-12);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   /* .page carries no padding of its own, so the side gutter is this page's
      job -- without it the text runs into the edge of a phone screen. */
-  padding: var(--sp-6) var(--sp-5) var(--sp-12);
+  padding: var(--sp-8) var(--sp-8) var(--sp-12);
+}
+
+/* Blocks that sat on the grid need to lift off the sheet instead, or they
+   vanish into it. */
+.docs-page .docs-code,
+.docs-page .docs-flow,
+.docs-page .docs-search input,
+.docs-page .docs-inline-ui,
+.docs-page .docs-nav-toggle {
+  background: var(--surface-2);
+}
+
+@media (max-width: 640px) {
+  .docs-page {
+    /* Edge to edge on a phone: a rounded sheet with the grid down both sides
+       wastes the only width there is. */
+    margin: 0 0 var(--sp-8);
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+    padding: var(--sp-6) var(--sp-5) var(--sp-10);
+  }
 }
 .docs-hero {
   max-width: 660px;
@@ -3778,19 +3808,26 @@ body.menu-drawer-open {
   display: grid;
   grid-template-columns: 216px minmax(0, 1fr);
   gap: var(--sp-10);
-  align-items: start;
 }
 
 /* Contents rail */
 .docs-nav-toggle {
   display: none;
 }
+/* The rail sticks, so it is somewhere to go rather than somewhere you scroll
+   past. It sticks to the nav column, which has to be full height for that to
+   mean anything -- a grid item is only as tall as its content otherwise, and
+   sticky inside it has no room to travel. */
+.docs-nav {
+  align-self: stretch;
+}
 .docs-nav-inner {
   position: sticky;
-  top: var(--sp-6);
+  top: var(--sp-4);
   display: grid;
   gap: var(--sp-3);
-  max-height: calc(100vh - var(--sp-12));
+  /* Its own scroller, for the day the list outgrows a short window. */
+  max-height: calc(100svh - var(--sp-8));
   overflow-y: auto;
 }
 .docs-search input {
@@ -3851,13 +3888,15 @@ body.menu-drawer-open {
 }
 
 /* Content */
+.docs-section {
+  max-width: 68ch;
+}
 .docs-content {
   min-width: 0;
-}
-.docs-section {
-  margin-bottom: var(--sp-12);
-  scroll-margin-top: var(--sp-6);
-  max-width: 68ch;
+  scroll-margin-top: var(--sp-4);
+  /* A short section should not make the sheet collapse around it, which
+     would bounce the whole page every time you switch. */
+  min-height: 60vh;
 }
 .docs-section h2 {
   font-family: var(--font-serif);
