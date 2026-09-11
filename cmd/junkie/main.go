@@ -360,6 +360,7 @@ func main() {
 	mux.HandleFunc("GET /api/room/{code}/members", a.requireAuth(a.apiRoomMembers))
 	mux.HandleFunc("GET /api/room/{code}/embed", a.apiFocusEmbed)
 	mux.HandleFunc("GET /api/public-profile/{username}", a.requireAuth(a.apiPublicProfile))
+	mux.HandleFunc("GET /docs", a.spaPage)
 	mux.HandleFunc("GET /privacy", a.spaPage)
 	mux.HandleFunc("GET /terms", a.spaPage)
 	// The page is public shell (the Vue guard bounces guests to

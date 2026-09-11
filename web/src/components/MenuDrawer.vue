@@ -159,5 +159,10 @@ onUnmounted(() => {
         </form>
       </details>
     </template>
+
+    <!-- Shown to everyone: the documentation is public, and a guest looking
+         at a drawer full of things that need an account is exactly who it is
+         for. -->
+    <p class="label drawer-docs-link"><a href="/docs">How junkie works</a></p>
   </aside>
 </template>

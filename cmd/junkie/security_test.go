@@ -65,6 +65,23 @@ func TestValidUsername(t *testing.T) {
 	}
 }
 
+// Profiles are served at /<username>, so every single-segment page path has
+// to be unreservable -- otherwise adding a page silently takes over the
+// profile of whoever already holds that name. The list is easy to forget when
+// a route is added; this is the reminder.
+func TestSingleSegmentPagePathsAreReservedUsernames(t *testing.T) {
+	pages := []string{
+		"login", "signup", "logout", "profile", "todos", "rooms", "join",
+		"admin", "dashboard", "solo", "connections", "settings", "terms",
+		"privacy", "discord", "reset-password", "docs",
+	}
+	for _, page := range pages {
+		if validUsername(page) {
+			t.Errorf("%q is a page path but not a reserved username — it would shadow /%s", page, page)
+		}
+	}
+}
+
 func TestLimitRunes(t *testing.T) {
 	if got := limitRunes("hello", 10); got != "hello" {
 		t.Errorf("limitRunes short = %q", got)

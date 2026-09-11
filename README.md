@@ -12,126 +12,18 @@
 
 ## How to use junkie
 
+**[Full documentation lives at junkie-blin.onrender.com/docs](https://junkie-blin.onrender.com/docs)** — every screen, every setting, every command. The short version:
 
+- **A block** is one run of the timer: focus, break, focus, for as many sessions as you set. Everything else hangs off that.
+- **No account needed to try it.** Guest mode keeps todos, the solo timer and your work map in that browser's `localStorage`, on that device only. It never syncs, and it is never copied into an account you make later.
+- **Accounts** are a username and a password — junkie collects no email address, so password resets go through [Discord](#discord-bot). Link your Discord *before* you need it.
+- **Rooms** are shared spaces at `/r/{code}` with their own members, public todo board and timer. Up to 5 per account, 100 members each. Timer settings are open to every member; removing members and changing the room's sound need a room admin; deleting and transferring are the creator's.
+- **Temporary rooms** at `/f/{code}` are throwaway blocks for a few people: joined by link, joinable mid-block, and deleted the moment the run ends. They are also the one place the session count can be changed while the block runs — a stepper on each break, for when six sessions turns out to be four.
+- **Streaming** — a temporary room has an overlay twin at `/f/{code}/embed` for an OBS browser source, and the countdown can pop out into an always-on-top window.
+- **Sound** — the chime toggle is per-device and per-person; the sound itself belongs to the room, and an admin can upload one (15 s, 512 KB, MP3/OGG/WAV).
+- **Connections** are a mutual link between two accounts, made with a one-time link. Connected people see each other's focus heatmap and nothing else; profiles are invisible to everyone else.
 
-### Guest mode (no account)
-
-You can use junkie without signing up. Everything stays in **browser** `localStorage` **on this device only** — it is not stored on the server:
-
-- **Private todos** — add, complete, remove, and restore tasks on the desk. Completed and removed todos clean themselves up after 24 hours.
-- **Solo timer** — run private focus sessions with optional breaks.
-- **Work map** — a heatmap of focus minutes per day, stored locally.
-
-Guest data is tied to one browser profile on one device. Clearing site data or switching browsers starts you over. Guest data is **not** copied into an account when you sign up later.
-
-On the desk, the solo timer ring is adjustable before you start:
-
-- Scroll the ring or use arrow keys to change by **±1 minute**.
-- Use the **±5** buttons for larger steps.
-- Tap the ring or press Enter/Space to start.
-
-When a focus block ends, junkie offers a break. You can take it, adjust the break length on the ring, or **Skip break & continue** to start the next focus session immediately with the same duration.
-
-### Accounts
-
-Create an account when you want shared rooms or data that follows you across devices.
-
-- **Sign up / sign in** — username and password. Usernames are lowercase letters, numbers, dots, dashes, and underscores (2–32 characters).
-- **Username** — change it from Profile → Account.
-- **Password change** — Profile → Security. Updating your password **signs out all other devices**.
-- **Forgot your password?** — junkie never collects your email, so resets go through Discord. [Join the junkie Discord server](https://discord.gg/qEEzdXQHtK) and run `/junkie reset-password` in the `#junkie-bot` channel; the bot DMs you a single-use reset link that expires after 30 minutes (limited to 2 requests per account per day). (If your Discord is already linked, the command works from any server you share with the bot, or a DM with it.) If you can't use Discord at all, ask the admin in `#junkie-bot` or open a [GitHub issue](https://github.com/samnodier/junkie/issues) — the owner can issue you the same kind of reset link by hand. **Link your Discord before you need it**: linking requires being signed in, so it can't be done after the password is already forgotten.
-- **Account deletion** — Profile → Danger zone. Permanently deletes your account, rooms you created, todos, and activity history. Requires your current password.
-- **Profile picture** — upload or remove from Profile → Preferences.
-
-
-
-### Solo focus (signed in)
-
-Logged-in solo focus works like guest mode, but timer runs and completed focus minutes are stored in PostgreSQL and appear on your profile work map across devices.
-
-- Adjust the ring (scroll ±1, buttons ±5, tap to start) before each session.
-- Breaks can be taken, adjusted, or skipped with **Skip break & continue** to roll straight into the next focus block.
-- Other tabs or devices signed into the same account pick up private todo changes live; solo timer phase changes still reload the desk (same as starting a session in another tab).
-
-
-
-### Rooms
-
-Accounts are required to create or join shared rooms. Each room has a persistent code and lives at `/r/{code}`.
-
-**Joining and inviting**
-
-- Create a room from the menu, or join with a room code or invite link.
-- Each account can have up to **5 rooms**; deleting a room frees its slot.
-- Invite links land on a confirmation screen before you join.
-- When someone starts a focus lobby while junkie is in the background, you can get a **room invite notification** (toggle in Profile → Preferences).
-
-**Room todos**
-
-- Todos in a room are **public to every member**.
-- Lists are grouped into **yours** and **everyone else's**.
-- You can complete your own todos; you see teammates' todos read-only (with their display name and profile picture).
-- Edits, removes, restores, and deletes apply only to **your** todos.
-- Completed and removed todos are deleted automatically after 24 hours — the room board stays focused on current work.
-- Room todo lists update **live** across the room page and the homepage desk switcher without full page reloads. When someone completes a task, other members see a short toast.
-- On the homepage desk you can switch between **Private todos** and **Room todos** per room you belong to. Inside `/r/{code}` there is no switcher — that page is scoped to one room.
-
-**Room timers**
-
-- Shared focus runs from **server timestamps**; clients count down locally.
-- Flow: **lobby** (optional join window) → **focus** → **break** → next focus session, for the configured number of sessions.
-- The lobby card shows **who's joined so far** — an avatar stack and count right under the countdown ring, updated live.
-- Anyone in the room can rename the room and edit timer defaults (focus length, break length, session count, auto-roll).
-- Only the **room creator** can delete the room.
-- During focus, late joins are locked out until the next break.
-- **Pause / Resume** and **Skip break & continue** are available on breaks (any member, same as pause) — from the web room or as buttons on the Discord live message.
-- **Auto-start breaks** (room settings): when **on**, breaks start automatically after focus. When **off**, the break waits on an adjustable ring until someone starts it or skips.
-- **Abandoned pauses expire**: a break left paused for an hour — including a waiting break that nobody ever started — ends its run automatically, so the room is free for a fresh session instead of staying stuck on a resume that never comes. Nothing is lost: completed focus sessions were already credited.
-- **Queued joins don't outlive the wait**: tapping Join mid-focus (or while the room is idle) parks you to board automatically — at the next break, or when the next run starts. That parking clears when its run ends for any reason (everyone left, sessions finished, an abandoned pause expired) and lapses after an hour regardless, so a fresh session starts with only the people who actually showed up for it, not whoever tapped Join hours or days earlier. Tap Join again and you're back in.
-- **Session check-in** (room settings): when **on**, every participant must tap **"I'm here"** during each break to keep their seat in the next session — no-shows are dropped from the block when the next focus starts (they can rejoin at a later break). Joining, starting a run, or acting on the break (pause, resume, starting it) counts as your check-in; nobody is exempt, including whoever started the run. Skip break is disabled so the check-in window can't be cut short, and if nobody checks in the run ends. There's no check-in after the final session — the run ends when the last focus block does, with no trailing break. From Discord, tapping **Join** on the break message is your check-in (the break-control buttons count too, same as acting on the break from the web). During a check-in break the live message splits the room accordingly: the **In:** line names only those who have claimed the next session, and everyone still to check in is @mentioned on the reminder line beneath it, so the ping goes to exactly the people who need it (the first twenty, with a "+N more" note beyond that; anyone without a linked Discord account shows as a plain name).
-- **Leave focus block** ends your participation in the active timer. Hiding or closing a tab does **not** leave — participant rings show who intentionally joined the block, not who has a tab open.
-- **Focus mode** during an active session hides the full todo board so the timer stays central.
-
-
-
-### Temporary focus rooms
-
-Sometimes you just want a quick block with a few people, not a room that sticks around. From the menu, **Create temporary room** opens a config popup — set focus/break/sessions, whether breaks auto-run, and whether each session requires a check-in — and drops you onto a stripped-down screen at `/f/{code}` with a share link at the top.
-
-- **Joined by link** — anyone signed in who opens the link is added and queued for the block, no confirmation step. They land straight on the waiting screen, so you can see who's here before you start.
-- **Just the timer** — no todo board, no settings page, and the background grid is hidden for a distraction-free look. The invite link shows while you gather and during breaks, and disappears once focus starts.
-- **Disposable** — the room deletes itself the moment the run finishes or everyone leaves, and sends everyone back home. Focus minutes still count toward each participant's work map.
-- Temporary rooms **don't count** toward your 5-room limit and don't appear in your room list. Ones created but never started are cleaned up automatically.
-
-
-
-### Connections
-
-Connections are a separate, mutual link between two accounts — not room membership.
-
-- From Profile → Connections, copy a **one-time connect link** and send it to someone. Each link works once; generate a new one for the next person.
-- Opening a connect link shows a **confirmation screen** first — nothing is linked until the recipient clicks to accept (the Discord account link works the same way).
-- After connecting, you each see the other's **focus heatmap only** on `/connections` and on public profile pages at `/{username}`.
-- Profiles are **invisible to non-connections** — no public directory.
-- There is no in-app way to disconnect or remove a connection yet, and the feed shows heatmaps only (no todos, rooms, or timers).
-
-
-
-### Cross-device sync
-
-Sign in on each device with the same account.
-
-
-| What                | Sync                                          |
-| ------------------- | --------------------------------------------- |
-| Private todos       | Live across your tabs/devices (`/ws/me`)      |
-| Room todos & timers | Live for all room members (room WebSocket)    |
-| Solo timer phase    | Other tabs reload the desk when phase changes |
-| Work map / activity | Stored server-side; same on every device      |
-| Guest data          | Never syncs — local only                      |
-
-
-On supported mobile browsers, junkie requests a **screen wake lock** while a timer is visible or a focus session is active so the phone is less likely to lock mid-session.
+Signed in, everything syncs live between your devices — private todos over `/ws/me`, room todos and timers over the room socket, the work map server-side. Guest data never syncs.
 
 ## Install on your phone
 
@@ -170,7 +62,7 @@ That names the binary `junkie-cli`, because `go install` takes the name from the
 
 Releases are `vMAJOR.MINOR.PATCH` tags on this repository. Pushing one runs the `release-cli` workflow, which tests the module, builds the binary for Linux, macOS and Windows on both amd64 and arm64, and publishes them as a GitHub release with a `checksums.txt`. `junkie version` prints the version it was built from; a binary built from a checkout says `dev`.
 
-The repository also carries an `android` tag for the [TWA build](#install-it-as-an-app), which is not a CLI release. The installer asks for the newest `v*` tag by name rather than for whatever GitHub currently calls "latest", so publishing a new APK cannot break `curl | sh`.
+The repository also carries an `android` tag for the [TWA build](#install-on-your-phone), which is not a CLI release. The installer asks for the newest `v*` tag by name rather than for whatever GitHub currently calls "latest", so publishing a new APK cannot break `curl | sh`.
 
 ### Signing in
 
@@ -287,7 +179,7 @@ The live message states each phase's length and its deadline both as a wall-cloc
 
 Breaks are fully controllable from Discord too. During a break, the live message carries the same controls the web room has, next to Join: **Start break** when a break is waiting (auto-start breaks off), **Pause break** while it's running, **Resume break** while it's paused, and **Skip break** to jump straight to the next focus session (hidden in check-in rooms, same as the web). Tapping any of them requires a linked account that's a room member, and — like on the web — counts as your check-in when session check-in is on.
 
-Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [Accounts](#accounts)). This is why the public [junkie Discord server](https://discord.gg/qEEzdXQHtK) exists — joining it gives anyone a place to run these commands without needing their own server.
+Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [the docs](https://junkie-blin.onrender.com/docs#accounts)). This is why the public [junkie Discord server](https://discord.gg/qEEzdXQHtK) exists — joining it gives anyone a place to run these commands without needing their own server.
 
 Self-hosting? The bot is optional — it starts only when `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, and `PUBLIC_BASE_URL` are set (see `.env.example`), and you'd mint your own invite link with your application's client id.
 

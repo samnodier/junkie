@@ -3740,3 +3740,284 @@ body.menu-drawer-open {
     color: var(--warn);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Documentation (/docs)
+
+   A reading page, so it is set in the serif at a wider measure than the app's
+   cards, with a sticky contents rail beside it. The rail becomes a disclosure
+   under 900px rather than a drawer: it is a list of links, and a list of links
+   does not need chrome.
+   --------------------------------------------------------------------------- */
+.docs-page {
+  max-width: 1080px;
+  margin: 0 auto;
+  /* .page carries no padding of its own, so the side gutter is this page's
+     job -- without it the text runs into the edge of a phone screen. */
+  padding: var(--sp-6) var(--sp-5) var(--sp-12);
+}
+.docs-hero {
+  max-width: 660px;
+  margin-bottom: var(--sp-8);
+}
+.docs-hero h1 {
+  font-family: var(--font-serif);
+  font-size: var(--fs-display);
+  margin: var(--sp-2) 0 var(--sp-4);
+}
+.docs-lede {
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: var(--ink);
+}
+.docs-hero-meta {
+  font-size: var(--fs-small);
+  margin-top: var(--sp-4);
+}
+.docs-body {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: var(--sp-10);
+  align-items: start;
+}
+
+/* Contents rail */
+.docs-nav-toggle {
+  display: none;
+}
+.docs-nav-inner {
+  position: sticky;
+  top: var(--sp-6);
+  display: grid;
+  gap: var(--sp-3);
+  max-height: calc(100vh - var(--sp-12));
+  overflow-y: auto;
+}
+.docs-search input {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-small);
+  font-family: inherit;
+}
+.docs-search input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.docs-nav-count {
+  margin: 0;
+}
+.docs-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  border-left: 1px solid var(--border);
+}
+.docs-nav-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  margin-left: -1px;
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-small);
+  line-height: 1.35;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.docs-nav-link:hover {
+  color: var(--ink);
+}
+.docs-nav-link.is-active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+/* Filtered out, not removed: the rail keeps its shape so the page does not
+   jump around as you type. */
+.docs-nav-link.is-dim {
+  opacity: 0.35;
+}
+
+/* Content */
+.docs-content {
+  min-width: 0;
+}
+.docs-section {
+  margin-bottom: var(--sp-12);
+  scroll-margin-top: var(--sp-6);
+  max-width: 68ch;
+}
+.docs-section h2 {
+  font-family: var(--font-serif);
+  font-size: var(--fs-title);
+  margin: 0 0 var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.docs-section h3 {
+  font-size: var(--fs-card-title);
+  margin: var(--sp-8) 0 var(--sp-3);
+}
+.docs-section p {
+  line-height: 1.7;
+  margin: 0 0 var(--sp-4);
+}
+.docs-section ul {
+  margin: 0 0 var(--sp-4);
+  padding-left: var(--sp-5);
+  display: grid;
+  gap: var(--sp-2);
+}
+.docs-section li {
+  line-height: 1.65;
+}
+.docs-section code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.docs-section a {
+  color: var(--accent);
+}
+
+.docs-code {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-x: auto;
+}
+.docs-code code {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: var(--fs-small);
+  white-space: pre;
+}
+
+/* The phase flow, and the shape of a control described in prose. */
+.docs-flow {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.docs-inline-ui {
+  display: inline-block;
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+
+.docs-callout {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--accent-soft-border);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.docs-callout p:last-child {
+  margin-bottom: 0;
+}
+.docs-callout-warn {
+  border-color: var(--border-strong);
+  border-left-color: var(--warn);
+  background: var(--surface);
+}
+
+/* Tables scroll rather than squeeze; the page itself never does. */
+.docs-table {
+  width: 100%;
+  margin: 0 0 var(--sp-4);
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+  display: block;
+  overflow-x: auto;
+}
+.docs-table th,
+.docs-table td {
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.55;
+}
+.docs-table th {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.docs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.docs-empty {
+  margin-bottom: var(--sp-8);
+}
+
+@media (max-width: 900px) {
+  .docs-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-5);
+  }
+  .docs-nav-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+  }
+  .docs-nav-inner {
+    position: static;
+    max-height: none;
+    margin-top: var(--sp-3);
+  }
+  .docs-nav:not(.is-open) .docs-nav-inner {
+    display: none;
+  }
+  .docs-nav.is-open .drawer-chevron {
+    transform: rotate(180deg);
+  }
+  .docs-section {
+    margin-bottom: var(--sp-10);
+  }
+}
+
+.drawer-docs-link {
+  margin: var(--sp-4) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+.drawer-docs-link a {
+  color: var(--muted);
+}
+.drawer-docs-link a:hover {
+  color: var(--ink);
+}

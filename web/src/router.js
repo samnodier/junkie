@@ -34,6 +34,13 @@ const routes = [
     component: () => import('./views/ResetPasswordView.vue'),
   },
   {
+    // Public: the user documentation, and the one page someone may arrive on
+    // from outside with no session at all.
+    path: '/docs',
+    name: 'docs',
+    component: () => import('./views/DocsView.vue'),
+  },
+  {
     path: '/privacy',
     name: 'privacy',
     component: () => import('./views/PrivacyView.vue'),
