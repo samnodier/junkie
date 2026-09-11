@@ -37,13 +37,29 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  use: github
-  filters:
-    # The server and the web app share this repository; a CLI release should
-    # not recite their commits.
-    exclude:
-      - "^web:"
-      - "^docs:"
+  # The server, the web app and the terminal client share this tree, and the
+  # commit subjects carry no scope prefixes -- so no pattern reliably tells a
+  # CLI commit from a room-settings one. (The `^web:`/`^docs:` filters this
+  # replaces matched nothing for that reason.) Generating from tag history is
+  # worse than useless here: the first v* tag follows `android`, 148 commits
+  # back, nearly all of them server work. Release notes are written by hand.
+  disable: true
 
 release:
   name_template: "junkie {{ .Version }}"
+  # Every release page should say how to install what is on it, whatever the
+  # hand-written notes above it happen to cover.
+  footer: |
+    ## Install
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/samnodier/junkie/master/install.sh | sh
+    ```
+
+    Puts a `junkie` binary in `~/.local/bin` (set `JUNKIE_INSTALL_DIR` to
+    choose elsewhere) and verifies it against `checksums.txt` below. Works on
+    macOS and on any Linux distribution, WSL included — the binaries are
+    static, so there is no glibc requirement. On Windows, download
+    `junkie_windows_amd64.zip` and put `junkie.exe` on your PATH.
+
+    Re-running the same command upgrades in place.
