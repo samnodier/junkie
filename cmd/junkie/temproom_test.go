@@ -170,6 +170,46 @@ func TestTemporaryRoomSessionsCanBeRetargetedMidRun(t *testing.T) {
 	}
 }
 
+// Lowering during a break can't drop the session the break leads into:
+// break->focus advances unconditionally, so a lower target would only leave
+// the run reading "session 4 of 3".
+func TestBreakRetargetKeepsTheSessionTheBreakLeadsInto(t *testing.T) {
+	a := newTestApp(t)
+	host := makeUser(t, a, "Host")
+	ctx := context.Background()
+	rm := makeTempRoom(t, a, host)
+	if _, err := a.startRoomTimer(ctx, rm, host.ID, rm.FocusMinutes); err != nil {
+		t.Fatal(err)
+	}
+	// On the break after session 3 of 6.
+	if _, err := a.db.Exec(ctx,
+		`UPDATE timer_runs SET phase = 'break', current_session = 3, total_sessions = 6,
+		 phase_started_at = now(), phase_ends_at = now() + interval '5 minutes'
+		 WHERE room_id = $1 AND ended_at IS NULL`, rm.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	a.asUser(host)
+	// Four is reachable: the break leads into session 4, and the run ends there.
+	if _, errMsg := postRoomAction(t, a, rm.Code, "settings", url.Values{"auto_sessions": {"4"}}); errMsg != "" {
+		t.Fatalf("retarget to 4: %s", errMsg)
+	}
+	var total int
+	_ = a.db.QueryRow(ctx, `SELECT total_sessions FROM timer_runs WHERE room_id = $1 AND ended_at IS NULL`, rm.ID).Scan(&total)
+	if total != 4 {
+		t.Errorf("run is aiming at %d sessions, want 4", total)
+	}
+
+	// Three is not: session 4 starts regardless when the break ends.
+	if _, errMsg := postRoomAction(t, a, rm.Code, "settings", url.Values{"auto_sessions": {"3"}}); errMsg != "" {
+		t.Fatalf("retarget to 3: %s", errMsg)
+	}
+	_ = a.db.QueryRow(ctx, `SELECT total_sessions FROM timer_runs WHERE room_id = $1 AND ended_at IS NULL`, rm.ID).Scan(&total)
+	if total != 4 {
+		t.Errorf("run is aiming at %d, want the session the break leads into (4)", total)
+	}
+}
+
 // A normal room's settings still can't move mid-run.
 func TestNormalRoomSettingsStayLockedMidRun(t *testing.T) {
 	a := newTestApp(t)

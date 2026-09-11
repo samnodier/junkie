@@ -2263,22 +2263,30 @@ func (a *app) roomRunActive(ctx context.Context, roomID string) bool {
 
 // retargetRunSessions changes how many sessions a live run is aiming for.
 //
-// The session in progress always finishes on the old plan -- people are
-// inside it -- so only the target moves. Aiming at or below the session
-// already running means "stop after this one", which is what someone lowering
-// the number mid-run actually wants; the run then ends the way it always does
-// when the last session completes, rather than being cut short here.
+// Only the target moves; whatever is already committed finishes on the old
+// plan. During focus that is the session running -- people are inside it --
+// so aiming at or below it means "stop after this one", and the run then ends
+// the way it always does when the last session completes rather than being
+// cut short here. During a break the break itself has already committed the
+// session it leads into: break->focus advances unconditionally, so a target
+// below current+1 would not skip that session, it would only leave the run
+// reading "session 4 of 3". The floor moves up by one for that reason. Ending
+// a block outright is what leaving and skipping the break are for.
 func (a *app) retargetRunSessions(ctx context.Context, rm room, sessions int) (int, error) {
 	var current, total int
-	var runID string
+	var runID, phase string
 	if err := a.db.QueryRow(ctx, `
-		SELECT id, current_session, total_sessions FROM timer_runs
+		SELECT id, phase, current_session, total_sessions FROM timer_runs
 		WHERE room_id = $1 AND ended_at IS NULL AND phase <> 'ended'`, rm.ID).
-		Scan(&runID, &current, &total); err != nil {
+		Scan(&runID, &phase, &current, &total); err != nil {
 		return 0, errors.New("There's no run to change.")
 	}
-	if sessions < current {
-		sessions = current
+	floor := current
+	if phase == "break" {
+		floor = current + 1
+	}
+	if sessions < floor {
+		sessions = floor
 	}
 	if sessions == total {
 		return total, nil

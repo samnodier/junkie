@@ -2599,6 +2599,45 @@ body.menu-drawer-open {
   padding: var(--sp-8) var(--sp-5);
   text-align: center;
 }
+/* Break-time session retarget: how many sessions this block is still aiming
+   for. Sized to read on a stream at a glance, not to compete with the ring. */
+.session-retarget {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.session-retarget-count {
+  min-width: 9ch;
+}
+.session-retarget-count strong {
+  color: var(--ink);
+}
+.session-retarget-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-body);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.session-retarget-step:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.session-retarget-step:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.5;
+}
+
 /* Temporary focus room: the room pill plus a copyable invite link that hides
    during focus. */
 .focus-room-bar {

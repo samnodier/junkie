@@ -95,6 +95,40 @@ watch(
 function startBreak() {
   room.action('timer-break-length', { minutes: String(breakLength.value || timer.value.breakMinutes) });
 }
+
+// How many sessions this block is still aiming for. A temporary room is the
+// one place that can move while the run is live, and the break is where it
+// makes sense to decide: you have just seen how three of six felt. The floor
+// is what the run has already committed -- during a break that is the session
+// the break leads into, matching retargetRunSessions, so the stream never
+// shows a number the server would refuse.
+const sessionFloor = computed(() => Math.max(1, (timer.value?.currentSession || 0) + 1));
+const sessionTarget = ref(0);
+// While a change is in flight the local number is the honest one: a refresh
+// landing mid-debounce would otherwise snap the display back to the count
+// being abandoned.
+let retargetPending = false;
+let retargetTimer = null;
+watch(
+  () => timer.value?.totalSessions || 0,
+  (total) => {
+    if (!retargetPending) sessionTarget.value = total;
+  },
+  { immediate: true }
+);
+function retarget(delta) {
+  const next = Math.min(12, Math.max(sessionFloor.value, sessionTarget.value + delta));
+  if (next === sessionTarget.value) return;
+  sessionTarget.value = next;
+  retargetPending = true;
+  // Debounced, so walking 6 down to 4 is one change the room hears once
+  // rather than two it watches happen.
+  clearTimeout(retargetTimer);
+  retargetTimer = setTimeout(async () => {
+    await room.action('settings', { auto_sessions: String(sessionTarget.value) });
+    retargetPending = false;
+  }, 600);
+}
 async function leave() {
   // Leaving cancels a queued join or drops out of the run; either way this
   // person is done here, so head home. (If they were the last one, the room
@@ -140,6 +174,7 @@ onUnmounted(() => {
   room.close();
   document.body.classList.remove('focus-active', 'focus-room-open');
   clearTimeout(copyTimer);
+  clearTimeout(retargetTimer);
 });
 </script>
 
@@ -235,6 +270,27 @@ onUnmounted(() => {
               <RingIdle v-model="breakLength" :min="1" :max="60" ring-class="break-idle room-focus-ring" aria-label="Set break length" input-label="Break minutes" @submit="startBreak" />
             </form>
             <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
+            <!-- Sessions for this block, retargetable only here: a temporary
+                 room, on the break, where you know what you have left. -->
+            <div class="session-retarget">
+              <button
+                type="button"
+                class="session-retarget-step"
+                :disabled="sessionTarget <= sessionFloor"
+                aria-label="One session fewer"
+                @click="retarget(-1)"
+              >&minus;</button>
+              <p class="label session-retarget-count">
+                {{ timer.currentSession }} done of <strong>{{ sessionTarget }}</strong>
+              </p>
+              <button
+                type="button"
+                class="session-retarget-step"
+                :disabled="sessionTarget >= 12"
+                aria-label="One more session"
+                @click="retarget(1)"
+              >+</button>
+            </div>
             <button v-if="timer.breakPending || timer.paused" type="button" class="btn-primary" @click="startBreak">Start break</button>
             <ParticipantStack v-if="heads.length" :members="heads" :checkin="room.room?.requireCheckin" />
             <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
