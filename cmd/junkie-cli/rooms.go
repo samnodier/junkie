@@ -114,6 +114,11 @@ func cmdRoomJoin(args []string) error {
 			return nil
 		}
 	}
+	// The join went through, so the code was real -- it is simply not a
+	// room the desk can show. That is a temporary room, every time.
+	if c.isTemporaryRoom(code) {
+		return errTemporaryRoom(code)
+	}
 	return fmt.Errorf("no room joined — is %s the right code?", code)
 }
 
@@ -233,6 +238,9 @@ func resolveRoom(c *client, args []string) (deskRoom, error) {
 			return room, nil
 		}
 	}
+	if c.isTemporaryRoom(code) {
+		return deskRoom{}, errTemporaryRoom(code)
+	}
 	return deskRoom{}, fmt.Errorf("you're not in %s — `junkie room join %s` first", code, code)
 }
 
@@ -247,4 +255,23 @@ func normalizeCode(raw string) string {
 		raw = raw[:i]
 	}
 	return strings.ToUpper(raw)
+}
+
+// errTemporaryRoom is what every path says about a temporary room, so the
+// answer does not depend on which command you happened to reach for.
+//
+// The code is right and you may well be its creator — the desk simply has no
+// way to show a room that is not in your room list, and a temporary room
+// never is. Saying so is worth more than a correct-sounding "wrong code".
+func errTemporaryRoom(code string) error {
+	return fmt.Errorf("%s is a temporary room, and the terminal can't open one yet — "+
+		"use it in a browser at /f/%s. Following along here is issue #3", code, code)
+}
+
+// isTemporaryRoom asks the server what a code actually is. Best effort: if the
+// lookup fails, the caller falls back to its ordinary message rather than
+// claiming something it does not know.
+func (c *client) isTemporaryRoom(code string) bool {
+	out, err := c.room(code)
+	return err == nil && out.Room.Ephemeral
 }

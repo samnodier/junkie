@@ -594,7 +594,7 @@ watch(active, async () => {
               <tbody>
                 <tr><td><code>junkie</code></td><td>open the desk full-screen</td></tr>
                 <tr><td><code>junkie CODE</code></td><td>open it on that room's block</td></tr>
-                <tr><td><code>junkie watch CODE</code></td><td>follow a room without joining it</td></tr>
+                <tr><td><code>w</code> in the desk</td><td>zoom the timer pane to fill the window (<code>esc</code> returns)</td></tr>
                 <tr><td><code>junkie status</code></td><td>timer, todo counts and every room's activity in one glance</td></tr>
                 <tr><td><code>junkie todos</code></td><td>list your private todos</td></tr>
                 <tr><td><code>junkie stats</code></td><td>the work map — a year of focused days</td></tr>

@@ -56,6 +56,10 @@ type roomResponse struct {
 	Room struct {
 		Code string `json:"code"`
 		Name string `json:"name"`
+		// Ephemeral marks a temporary /f/{code} room. The desk cannot open
+		// one, so it is read only to explain why rather than to leave someone
+		// checking a code that was right all along.
+		Ephemeral bool `json:"ephemeral"`
 	} `json:"room"`
 	Timer       *roomTimer `json:"timer"`
 	Waiting     bool       `json:"waiting"`

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -73,5 +74,58 @@ func TestRoomSubcommandUsage(t *testing.T) {
 		if err := cmdRoom(args); err == nil {
 			t.Errorf("expected usage error for %v", args)
 		}
+	}
+}
+
+// A temporary room is not a mistyped code, and saying so is the difference
+// between "check what you typed" and "this isn't supported yet" -- which
+// matters most to the person who created the room and knows the code is right.
+func TestTemporaryRoomIsNamedRatherThanBlamedOnTheCode(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rooms/join":
+			w.WriteHeader(http.StatusSeeOther)
+		case strings.HasPrefix(r.URL.Path, "/api/room/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"room": map[string]any{"code": "ABC-123", "name": "Stream block", "ephemeral": true},
+			})
+		default:
+			// The desk never lists a temporary room, which is the whole gap.
+			_ = json.NewEncoder(w).Encode(map[string]any{"rooms": []any{}})
+		}
+	})
+	if !c.isTemporaryRoom("ABC-123") {
+		t.Fatal("a temporary room was not recognised as one")
+	}
+	err := errTemporaryRoom("ABC-123")
+	for _, want := range []string{"ABC-123", "temporary room", "/f/ABC-123", "#3"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message is missing %q: %s", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "right code") {
+		t.Error("the message still blames the code")
+	}
+}
+
+// An ordinary room the caller is simply not in must keep its own message.
+func TestANormalRoomIsNotCalledTemporary(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"room": map[string]any{"code": "ABC-123", "name": "Deep Work", "ephemeral": false},
+		})
+	})
+	if c.isTemporaryRoom("ABC-123") {
+		t.Error("a normal room was reported as temporary")
+	}
+}
+
+// A lookup that fails must not be read as proof of anything.
+func TestUnknownRoomIsNotGuessedAtTemporary(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	if c.isTemporaryRoom("ABC-123") {
+		t.Error("a failed lookup was treated as a temporary room")
 	}
 }

@@ -1404,6 +1404,11 @@ func runDashboard(zoom bool, want string) error {
 		return err
 	}
 	if want != "" && !hasRoom(desk, want) {
+		// `junkie CODE` is the likeliest way someone reaches for a temporary
+		// room, so it is the most important place not to blame the code.
+		if cfg, cfgErr := loadConfig(); cfgErr == nil && newClient(cfg).isTemporaryRoom(want) {
+			return errTemporaryRoom(want)
+		}
 		return fmt.Errorf("you're not in %s — `junkie status` lists the ones you are", want)
 	}
 	m := newDashModel(s, id, desk)
