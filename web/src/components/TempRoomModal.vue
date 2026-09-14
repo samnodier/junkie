@@ -3,7 +3,6 @@
 // auto-run-breaks toggle. Submitting native-posts to /rooms with ephemeral=1,
 // so the server creates the room and redirects to its /f/{code} screen.
 import { onMounted, onUnmounted, ref } from 'vue';
-import SoundPref from '@/components/SoundPref.vue';
 import { shortFileName } from '@/lib/fileName';
 
 const emit = defineEmits(['close']);
@@ -88,14 +87,14 @@ async function pickSound(event) {
               <span aria-hidden="true"></span>
             </label>
           </div>
-          <!-- The chime toggle is a per-device setting and posts nothing.
-               The room's own sound, below it, is the one field here that does
-               travel with the form. -->
-          <SoundPref />
+          <!-- No per-device chime toggle here: a temporary room plays its
+               sound for everyone who joins, so this browser's own switch has
+               no bearing on the room being made -- and offering it is what
+               made "I turned it on" look like it should reach the others. -->
           <div class="settings-auto-roll">
             <div>
               <strong>This room's sound</strong>
-              <p class="muted">Optional. Plays at the end of each block for anyone who has the chime switched on. Up to 15 seconds, 512 KB — an MP3 or OGG is much smaller than a WAV.</p>
+              <p class="muted">Optional. Plays for everyone in the room at the end of each block; without one, the built-in chime does. Up to 15 seconds, 512 KB — an MP3 or OGG is much smaller than a WAV.</p>
             </div>
             <label class="btn btn-ghost btn-compact sound-pref-upload">
               <span :title="soundName || null">{{ shortFileName(soundName) || 'Choose a file' }}</span>

@@ -440,6 +440,15 @@ watch(active, async () => {
               </li>
             </ul>
             <p>
+              <strong>Temporary rooms are the exception.</strong> You join one by following a link into
+              someone's block, and the chime is part of that block: it plays for everyone there,
+              whatever their own toggle says — the room's uploaded sound if it has one, the built-in
+              chime otherwise. If you would rather not hear it, mute the tab or leave. One thing no
+              website can get around: a browser only plays sound on a page you have touched, so if
+              you open the link and never click or tap anything, the first chime may be silent.
+              Any tap on the page unlocks it from then on.
+            </p>
+            <p>
               An uploaded clip can be up to <strong>15 seconds</strong> and <strong>512 KB</strong>,
               as MP3, OGG or WAV. There is no transcoding — what you upload is what plays.
             </p>

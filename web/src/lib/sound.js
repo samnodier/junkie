@@ -12,6 +12,15 @@
 // manifest, as one more entry, which is why nothing below needs a special
 // case for it -- and why the room decides *which* sounds are on offer while
 // this file still decides, per browser, whether any noise is made at all.
+//
+// The one exception is a temporary room. You join one of those by following
+// a link into someone's block, and the chime is part of the block: it plays
+// for everyone there, the room's own sound if it has one and the default
+// otherwise, and the per-browser switch does not apply. Anyone who would
+// rather not hear it mutes the tab or leaves. That is Sam's call -- the
+// setting exists so a shared link can't make noise on a machine that never
+// asked for it, and a temporary room is the case where you did ask, by
+// joining.
 const ENABLED_KEY = 'junkie:phaseSound';
 const CHOICE_KEY = 'junkie:phaseSoundId';
 const MANIFEST_URL = '/assets/sounds/sounds.json';
@@ -107,9 +116,21 @@ export function soundURL(pick) {
 let audio = null;
 let loadedFile = '';
 
-async function element() {
+// Which entry plays. Ordinarily the browser's own choice. When the room is
+// making the decision -- a temporary room -- its uploaded sound wins, then the
+// default, and whatever this browser picked for its private timer is beside
+// the point.
+const ROOM_SOUND_ID = 'room:sound';
+function pickSound(list, forced) {
+  if (forced) {
+    return list.find((s) => s?.id === ROOM_SOUND_ID) || list.find((s) => s?.id === DEFAULT_ID) || list[0];
+  }
+  return list.find((s) => s?.id === soundChoice()) || list[0];
+}
+
+async function element(forced = false) {
   const list = await loadSounds();
-  const pick = list.find((s) => s?.id === soundChoice()) || list[0];
+  const pick = pickSound(list, forced);
   const src = soundURL(pick);
   if (!src || typeof Audio === 'undefined') return null;
   if (!audio || loadedFile !== src) {
@@ -121,13 +142,13 @@ async function element() {
 }
 
 // Fetch and decode ahead of the transition. Cheap to call repeatedly.
-export function primeSound() {
-  if (!soundEnabled()) return;
-  element().catch(() => {});
+export function primeSound({ forced = false } = {}) {
+  if (!forced && !soundEnabled()) return;
+  element(forced).catch(() => {});
 }
 
-async function play() {
-  const el = await element();
+async function play(forced = false) {
+  const el = await element(forced);
   if (!el) return;
   try {
     el.currentTime = 0;
@@ -140,9 +161,39 @@ async function play() {
 }
 
 // Called for every focus->break and break->focus turn, via onTimerEnd.
-export function playPhaseSound() {
-  if (!soundEnabled()) return;
-  play();
+// forced is the temporary-room case: play whatever this browser's switch
+// says. See the note at the top.
+export function playPhaseSound({ forced = false } = {}) {
+  if (!forced && !soundEnabled()) return;
+  play(forced);
+}
+
+// Browsers only allow audio once the page has been touched, and they remember
+// that touch for the rest of the page's life. A temporary room's chime plays
+// without anyone reaching for a setting, so nothing else on the page is
+// guaranteed to have been clicked first -- this takes the first tap or key,
+// whatever it was for, and spends it on a silent play so the real chime is
+// allowed later. Returns a function that stops listening.
+export function unlockSoundOnFirstGesture() {
+  if (typeof document === 'undefined') return () => {};
+  const events = ['pointerdown', 'keydown', 'touchend'];
+  const stop = () => events.forEach((e) => document.removeEventListener(e, unlock, true));
+  const unlock = async () => {
+    stop();
+    try {
+      const el = await element(true);
+      if (!el) return;
+      el.muted = true;
+      await el.play();
+      el.pause();
+      el.currentTime = 0;
+      el.muted = false;
+    } catch {
+      /* not allowed even now -- nothing more this page can do */
+    }
+  };
+  events.forEach((e) => document.addEventListener(e, unlock, { capture: true, once: false }));
+  return stop;
 }
 
 // The settings "Test" button. Plays whether or not the setting is on, so you

@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useRoomStore } from '@/stores/room';
 import { requestPermission } from '@/lib/notify';
+import { primeSound, setSoundSource, unlockSoundOnFirstGesture } from '@/lib/sound';
 import { useWakeLock } from '@/composables/wakeLock';
 import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import { useFocusChrome } from '@/composables/focusChrome';
@@ -169,8 +170,18 @@ onMounted(async () => {
   // socket + first fetch. Idempotent, so this is safe for the creator too.
   await room.enter(code);
   await room.open(code, auth.user?.id);
+  // The chime here is the block's, played for everyone: point the catalogue
+  // at this room so its own sound is what plays if it has one, warm the
+  // element now rather than at the transition, and spend the first tap on
+  // unlocking audio -- there is no setting on this page for a click to
+  // land on, so nothing else guarantees the browser has been touched.
+  setSoundSource(code);
+  primeSound({ forced: true });
+  stopUnlocking = unlockSoundOnFirstGesture();
 });
+let stopUnlocking = () => {};
 onUnmounted(() => {
+  stopUnlocking();
   room.close();
   document.body.classList.remove('focus-active', 'focus-room-open');
   clearTimeout(copyTimer);

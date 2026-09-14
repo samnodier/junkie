@@ -87,9 +87,12 @@ export const useRoomStore = defineStore('room', {
         // End-of-phase notifications on observed transitions, matching the
         // legacy sessionStorage phase tracker.
         const phase = this.timer?.phase || 'idle';
+        // A temporary room's chime is the block's, not the viewer's: it
+        // plays for everyone who joined, whatever their own switch says.
+        const sound = { forcedSound: Boolean(this.room?.ephemeral) };
         if (this.lastPhase && this.lastPhase !== phase) {
-          if (this.lastPhase === 'focus' && (phase === 'break' || phase === 'idle')) onTimerEnd('focus');
-          else if (this.lastPhase === 'break' && phase === 'focus') onTimerEnd('break');
+          if (this.lastPhase === 'focus' && (phase === 'break' || phase === 'idle')) onTimerEnd('focus', sound);
+          else if (this.lastPhase === 'break' && phase === 'focus') onTimerEnd('break', sound);
         }
         this.lastPhase = phase;
 

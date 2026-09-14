@@ -85,12 +85,13 @@ export function notify(title, body, url) {
   });
 }
 
-export function onTimerEnd(phase) {
+export function onTimerEnd(phase, { forcedSound = false } = {}) {
   // Every phase turn in the app funnels through here -- rooms, the focus
   // room, solo, and the guest desk -- so the optional chime hangs off it
   // rather than being wired into each of them. It's a no-op unless the
-  // viewer switched it on. See lib/sound.js.
-  playPhaseSound();
+  // viewer switched it on, except in a temporary room, where the block
+  // plays it for everyone. See lib/sound.js.
+  playPhaseSound({ forced: forcedSound });
   if (phase === 'break') {
     notify("Break's over", 'Ready for your next focus block');
   } else {
