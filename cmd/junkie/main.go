@@ -1607,6 +1607,16 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Timer settings can't change while a run is active."), http.StatusSeeOther)
 				return
 			}
+			// A normal room's settings are open to every member on purpose:
+			// those are people you invited. A temporary room is joined by
+			// whoever has the link, so the one lever it exposes mid-run
+			// belongs to whoever started it -- and since ownership of a
+			// temporary room can't be transferred, that is always its
+			// creator.
+			if rm.CreatorID != u.ID {
+				http.Redirect(w, r, "/f/"+code+"?error="+url.QueryEscape("Only whoever started this room can change its sessions."), http.StatusSeeOther)
+				return
+			}
 			sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, rm.AutoSessions)
 			applied, err := a.retargetRunSessions(r.Context(), rm, sessions)
 			if err != nil {

@@ -170,6 +170,49 @@ func TestTemporaryRoomSessionsCanBeRetargetedMidRun(t *testing.T) {
 	}
 }
 
+// A normal room's settings are open to every member on purpose. A temporary
+// room is joined by whoever has the link, so the one lever it exposes
+// mid-run -- the session count -- belongs to whoever started it.
+func TestOnlyTheCreatorCanRetargetATemporaryRoom(t *testing.T) {
+	a := newTestApp(t)
+	host := makeUser(t, a, "Host")
+	guest := makeUser(t, a, "Guest")
+	ctx := context.Background()
+	rm := makeTempRoom(t, a, host)
+	if _, err := a.db.Exec(ctx, `UPDATE rooms SET auto_sessions = 6 WHERE id = $1`, rm.ID); err != nil {
+		t.Fatal(err)
+	}
+	rm, _ = a.findRoom(ctx, rm.Code)
+	if err := a.addRoomMember(ctx, rm.ID, guest.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.startRoomTimer(ctx, rm, host.ID, rm.FocusMinutes); err != nil {
+		t.Fatal(err)
+	}
+
+	// A joiner is refused, and nothing moves.
+	a.asUser(guest)
+	_, errMsg := postRoomAction(t, a, rm.Code, "settings", url.Values{"auto_sessions": {"2"}})
+	if errMsg == "" {
+		t.Fatal("a joiner changed the room's sessions")
+	}
+	var total int
+	_ = a.db.QueryRow(ctx, `SELECT total_sessions FROM timer_runs WHERE room_id = $1 AND ended_at IS NULL`, rm.ID).Scan(&total)
+	if total != 6 {
+		t.Errorf("run is aiming at %d after a refused change, want 6", total)
+	}
+
+	// The creator is not.
+	a.asUser(host)
+	if _, errMsg := postRoomAction(t, a, rm.Code, "settings", url.Values{"auto_sessions": {"3"}}); errMsg != "" {
+		t.Fatalf("creator was refused: %s", errMsg)
+	}
+	_ = a.db.QueryRow(ctx, `SELECT total_sessions FROM timer_runs WHERE room_id = $1 AND ended_at IS NULL`, rm.ID).Scan(&total)
+	if total != 3 {
+		t.Errorf("run is aiming at %d, want 3", total)
+	}
+}
+
 // Lowering during a break can't drop the session the break leads into:
 // break->focus advances unconditionally, so a lower target would only leave
 // the run reading "session 4 of 3".

@@ -271,9 +271,13 @@ onUnmounted(() => {
             </form>
             <p class="label">Next block · {{ timer.focusMinutes }}:00</p>
             <!-- Sessions for this block, retargetable only here: a temporary
-                 room, on the break, where you know what you have left. -->
+                 room, on the break, where you know what you have left. The
+                 count is everyone's to read; the buttons are the creator's,
+                 because the people here arrived by a shared link rather than
+                 an invitation, and the server refuses anyone else anyway. -->
             <div class="session-retarget">
               <button
+                v-if="room.isCreator"
                 type="button"
                 class="session-retarget-step"
                 :disabled="sessionTarget <= sessionFloor"
@@ -284,6 +288,7 @@ onUnmounted(() => {
                 {{ timer.currentSession }} done of <strong>{{ sessionTarget }}</strong>
               </p>
               <button
+                v-if="room.isCreator"
                 type="button"
                 class="session-retarget-step"
                 :disabled="sessionTarget >= 12"
