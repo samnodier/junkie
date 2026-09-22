@@ -77,11 +77,15 @@ async function show(title, options) {
   }
 }
 
-export function notify(title, body, url) {
+// `options` is how the phase-end alert borrows the ongoing timer's tag. Room
+// and break invites pass nothing and stay untagged, so an invite can never
+// replace the timer notification sitting in the shade.
+export function notify(title, body, url, options = {}) {
   show(title, {
     body: body || '',
     requireInteraction: true,
     data: { url: url || '/' },
+    ...options,
   });
 }
 
@@ -92,11 +96,28 @@ export function onTimerEnd(phase, { forcedSound = false } = {}) {
   // viewer switched it on, except in a temporary room, where the block
   // plays it for everyone. See lib/sound.js.
   playPhaseSound({ forced: forcedSound });
-  if (phase === 'break') {
-    notify("Break's over", 'Ready for your next focus block');
-  } else {
-    notify('Focus session complete', 'Time for a break');
-  }
+  const [title, body] =
+    phase === 'break'
+      ? ["Break's over", 'Ready for your next focus block']
+      : ['Focus session complete', 'Time for a break'];
+
+  // This alert and the ongoing timer notification are two halves of one
+  // moment: the store announces the turn here and then, a few lines later,
+  // posts the new phase's status through syncTimerNotification. Untagged, the
+  // desktop stacks both and a single phase turn reads as a duplicate -- which
+  // is exactly what it did. Sharing TIMER_TAG lets the status replace this
+  // alert in place, so the shade holds one junkie notification at a time.
+  //
+  // Claiming ownership first matters for the run that ends outright
+  // (focus -> idle): syncTimerNotification then has no state to show and would
+  // call clearTimerNotification, closing this alert a moment after it
+  // appeared. It only takes down a notification it owns, so claiming the tag
+  // here keeps the alert up until the viewer dismisses it.
+  claimTimerNotification(`alert:${title}`);
+
+  // renotify keeps this announcing itself the way an untagged notification
+  // always did; replacing a tag can otherwise land silently.
+  notify(title, body, '/', { tag: TIMER_TAG, renotify: true });
 }
 
 export function roomInvitesEnabled() {
@@ -162,6 +183,15 @@ function describe(timer, label) {
 let owner = '';
 let lastKey = '';
 let pendingSync = null; // last sync dropped because permission wasn't granted yet
+
+// claimTimerNotification hands the shade's single timer notification to
+// something that isn't a timer sync -- currently only the phase-end alert.
+// syncTimerNotification then treats it as somebody else's notification: it
+// will replace it when there's a new phase to show, but won't clear it.
+function claimTimerNotification(key) {
+  owner = 'alert';
+  lastKey = key;
+}
 
 function flushPendingSync() {
   const args = pendingSync;
