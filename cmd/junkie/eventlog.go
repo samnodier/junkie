@@ -33,6 +33,8 @@ const (
 	eventRoomTransferred   = "room.transferred"
 	eventRoomSettings      = "room.settings_changed"
 	eventRoomSound         = "room.sound_changed"
+	eventAPIKeyCreated     = "api_key.created"
+	eventAPIKeyRevoked     = "api_key.revoked"
 )
 
 // eventRetention is how long ordinary events are kept.

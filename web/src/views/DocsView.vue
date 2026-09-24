@@ -28,6 +28,7 @@ const sections = [
   { id: 'phone', title: 'On your phone' },
   { id: 'terminal', title: 'Terminal client' },
   { id: 'discord', title: 'Discord bot' },
+  { id: 'api', title: 'Adding todos by API' },
   { id: 'data', title: 'Where your data lives' },
   { id: 'admin', title: 'Admin and owner access' },
   { id: 'selfhost', title: 'Self-hosting' },
@@ -686,6 +687,71 @@ watch(active, async () => {
                 would mint your own invite link with your application's client id.
               </p>
             </div>
+          </section>
+
+          <section v-show="active === 'api'" id="api" data-docs-section="api" class="docs-section">
+            <h2>Adding todos by API</h2>
+            <p>
+              An API key lets something other than you — a meeting-notes automation, a script, a
+              shortcut on your phone — add todos to one of your lists. Make one under
+              <a href="/profile">Profile → API keys</a>, and choose whether it adds to your private
+              todos or to your todos in one room. The key is shown once; copy it then.
+            </p>
+            <p>
+              <strong>A key can only add.</strong> It cannot read your todos, complete them, or delete
+              them, so a key that leaks costs you some junk todos and nothing else. Revoke it from
+              the same place and it stops working at once.
+            </p>
+
+            <h3>The request</h3>
+            <pre class="docs-code"><code>POST /api/todos
+Authorization: Bearer jk_…
+Content-Type: application/json
+Idempotency-Key: zoom-meeting-987654321   (optional)
+
+{"todos": [
+  {"text": "Acme: Send revised October email campaign - Sep 26"},
+  {"text": "Acme: Check GHL campaign timezone - Sep 26"}
+]}</code></pre>
+            <p>
+              A successful call answers <code>201</code> with the todos it added. Either every todo
+              in the request is added or none is.
+            </p>
+            <table class="docs-table">
+              <thead><tr><th>Rule</th><th>Limit</th></tr></thead>
+              <tbody>
+                <tr><td>Todos per request</td><td>1 to 20</td></tr>
+                <tr><td>Length of one todo</td><td>500 characters — longer is refused, not cut</td></tr>
+                <tr><td>Requests per key</td><td>10 a minute, 100 a day — over that is <code>429</code> with <code>Retry-After</code></td></tr>
+                <tr><td>Keys per account</td><td>10</td></tr>
+              </tbody>
+            </table>
+            <p>
+              Line breaks and control characters in a todo become spaces: todos are one line, as they
+              are when typed.
+            </p>
+
+            <h3>Retrying safely</h3>
+            <p>
+              If a call times out you can't tell whether it landed. Send the same
+              <code>Idempotency-Key</code> header on the retry — anything unique to the batch, like
+              the meeting's id — and junkie answers with the original response instead of adding the
+              todos twice (the reply carries <code>Idempotent-Replayed: true</code>). A key is
+              remembered for 24 hours. Reusing one with different todos is refused with
+              <code>422</code>.
+            </p>
+
+            <h3>Errors</h3>
+            <table class="docs-table">
+              <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>400</code></td><td>The body is wrong; <code>error</code> says how</td></tr>
+                <tr><td><code>401</code></td><td>Missing, mistyped or revoked key</td></tr>
+                <tr><td><code>403</code></td><td>The key is for a room you've since left</td></tr>
+                <tr><td><code>422</code></td><td>Idempotency key reused with different todos</td></tr>
+                <tr><td><code>429</code></td><td>Too many requests; wait for <code>Retry-After</code> seconds</td></tr>
+              </tbody>
+            </table>
           </section>
 
           <section v-show="active === 'data'" id="data" data-docs-section="data" class="docs-section">

@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth';
 import AppShell from '@/components/AppShell.vue';
 import HeatmapChart from '@/components/HeatmapChart.vue';
 import SoundPref from '@/components/SoundPref.vue';
+import ApiKeys from '@/components/ApiKeys.vue';
 import { buildGuestHeatmap } from '@/lib/guestActivity';
 import { useConnectLink } from '@/composables/connectLink';
 import { askConfirm } from '@/composables/confirm';
@@ -265,6 +266,8 @@ onMounted(async () => {
           </form>
         </div>
       </article>
+
+      <ApiKeys />
 
       <article v-if="auth.user.role !== 'owner'" class="panel profile-card profile-card-danger">
         <p class="eyebrow eyebrow-danger">Danger zone</p>

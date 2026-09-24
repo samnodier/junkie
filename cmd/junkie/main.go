@@ -381,6 +381,12 @@ func main() {
 	// that would collide with them are reserved at signup.
 	mux.HandleFunc("GET /{username}", a.publicProfilePage)
 	mux.HandleFunc("POST /todos", a.requireAuth(a.createPersonalTodo))
+	// Bearer-key access for automations; see apikeys.go. The key routes below
+	// it are the profile page managing those keys with the usual session.
+	mux.HandleFunc("POST /api/todos", a.apiAddTodos)
+	mux.HandleFunc("GET /api/api-keys", a.requireAuth(a.apiListAPIKeys))
+	mux.HandleFunc("POST /api/api-keys", a.requireAuth(a.apiCreateAPIKey))
+	mux.HandleFunc("POST /api/api-keys/{id}/revoke", a.requireAuth(a.apiRevokeAPIKey))
 	// Private focus screen. Public shell like the pages above; the Vue guard
 	// bounces guests to /login?next=/solo and /api/desk keeps the auth.
 	mux.HandleFunc("GET /solo", a.spaPage)
