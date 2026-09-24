@@ -4092,3 +4092,143 @@ body.menu-drawer-open {
 .cli-link-note {
   font-size: var(--fs-small);
 }
+
+/* --- Landscape -----------------------------------------------------------
+   A phone on its side is wide and very short: 320-440px of height, less the
+   68px bar. Everything above is tuned for the other way round, so the ring
+   runs off the bottom, the desk clips (it is sized to the viewport with
+   overflow hidden), and the room's todo panel shrinks to a sliver.
+
+   The fix is the one a phone's own clock makes when you turn it: use the
+   width. Focus screens put the ring on the left and everything about it on
+   the right, sized to fit without scrolling; the desk and the room keep their
+   two columns and are allowed to scroll a little. Tablets held sideways
+   (coarse pointer) get the focus layout too -- it reads better there than
+   one tall column, and a desktop browser keeps the layout it had. */
+
+/* The drawer is a fixed-height flex column, so when it overflows, flexbox
+   shrinks its children to make room -- and the collapsible sections, which
+   clip their overflow, shrink to nothing. It scrolls instead. */
+.menu-drawer > * {
+  flex-shrink: 0;
+}
+
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 560px),
+  (orientation: landscape) and (hover: none) and (pointer: coarse) and (min-width: 900px) {
+  /* The ring's column is sized to the height it has; the other takes the
+     rest. The right column is a stack centered between two flexible rows:
+     the ::before claims the top one, so auto-placement starts below it and
+     the last explicit row is left over as the bottom one. */
+  .page:has(.room-focus-page) {
+    margin-bottom: 0;
+  }
+  .room-focus-page {
+    --ls-ring: min(44vw, calc(100svh - 68px - 2 * var(--sp-5)), 420px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) repeat(16, auto) minmax(0, 1fr);
+    justify-items: center;
+    column-gap: var(--sp-6);
+    height: calc(100svh - 68px);
+    min-height: 0;
+    padding: 0 clamp(16px, 4vw, 48px);
+    overflow-y: auto;
+    text-align: center;
+  }
+  .room-focus-page::before {
+    content: "";
+    grid-column: 2;
+    grid-row: 1;
+  }
+  /* The shell's children become the grid's, so the ring and the text beside
+     it are laid out together. Only in the page: a popped-out timer is in
+     its own window, which sizes itself. */
+  .room-focus-page .pip-stage[data-pip="in"] > .room-focus-shell {
+    display: contents;
+  }
+  .room-focus-page > .desk-room-bar,
+  .room-focus-page .room-focus-shell > * {
+    grid-column: 2;
+    margin: var(--sp-2) 0;
+  }
+  .room-focus-page > .desk-room-bar {
+    padding: 0;
+    margin-bottom: var(--sp-4);
+  }
+  .room-focus-page .room-focus-shell > :is(.circle-timer, .circle-timer-form),
+  .room-focus-page .pip-parked {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    align-self: center;
+    margin: 0;
+  }
+  .room-focus-page .room-focus-shell .circle-timer {
+    width: var(--ls-ring);
+  }
+  .room-focus-page .timer-cancel,
+  .room-focus-page .btn-ghost.timer-cancel {
+    width: auto;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 560px) {
+  /* Desk: scroll rather than clip. Its grid centers its content, so with the
+     height capped the cards overflowed upward over the room pill as well. */
+  .desk-shell:not(.desk-shell-focus) {
+    max-height: none;
+    overflow: visible;
+  }
+  .page:has(.desk-shell) {
+    margin-bottom: var(--sp-6);
+  }
+  .desk-grid,
+  .grid.two.room-desk-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--sp-5);
+  }
+  .desk-grid {
+    padding: var(--sp-3) clamp(16px, 4vw, 48px) 0;
+  }
+  /* Rings sized to the height, so one card is one screen. */
+  .desk-ring-column .circle-timer,
+  .room-timer-column .circle-timer {
+    width: min(300px, calc(100svh - 150px));
+  }
+  .desk-timer-card {
+    min-height: 0;
+  }
+  /* The desk's todo panel follows the timer card's height, as it does on a
+     desktop. */
+  .desk-todos-panel {
+    height: 0;
+    min-height: 100%;
+  }
+  /* The room's panel is otherwise capped at the viewport less the header
+     above it, which here left room for three or four todos. It runs the
+     height of the timer column beside it instead, the way the desk's does,
+     and a longer list scrolls inside. */
+  .grid.two.room-desk-grid {
+    align-items: stretch;
+  }
+  .room-todos-panel {
+    height: 0;
+    min-height: 100%;
+    max-height: none;
+  }
+  /* The right-hand stack has ~320px to fit in; a temporary room's waiting
+     screen is the tallest, so it drops the invite URL (as a portrait phone
+     does -- the button still copies it) and tightens the rhythm. */
+  .focus-room-share-url {
+    display: none;
+  }
+  .room-focus-page > .desk-room-bar,
+  .room-focus-page .room-focus-shell > * {
+    margin: var(--sp-1) 0;
+  }
+  .room-focus-page > .desk-room-bar {
+    margin-bottom: var(--sp-2);
+  }
+  .room-header-new {
+    margin-bottom: var(--sp-5);
+  }
+}
