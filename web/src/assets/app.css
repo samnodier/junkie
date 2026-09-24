@@ -4169,6 +4169,25 @@ body.menu-drawer-open {
   .room-focus-page .btn-ghost.timer-cancel {
     width: auto;
   }
+  /* The pill beside it already names the room, so the italic name under the
+     phase label only repeats it; its space goes to the rhythm instead. */
+  .room-focus-page .room-focus-name {
+    display: none;
+  }
+  /* While a block runs, the bar is faded or hidden, but it still holds its
+     strip -- so everything was centered in the space below it and sat low.
+     The page runs up under the bar and centers on the whole screen, as a
+     clock would; the bar stays on top and reachable, and the ring is kept
+     clear of it. */
+  body.focus-active .topbar {
+    position: relative;
+    z-index: 2;
+  }
+  body.focus-active .room-focus-page {
+    --ls-ring: min(44vw, calc(100svh - 2 * 60px), 420px);
+    margin-top: -68px;
+    height: 100svh;
+  }
 }
 
 @media (orientation: landscape) and (max-height: 540px) and (min-width: 560px) {
@@ -4223,10 +4242,36 @@ body.menu-drawer-open {
   }
   .room-focus-page > .desk-room-bar,
   .room-focus-page .room-focus-shell > * {
-    margin: var(--sp-1) 0;
+    margin: var(--sp-2) 0;
   }
   .room-focus-page > .desk-room-bar {
-    margin-bottom: var(--sp-2);
+    margin-bottom: var(--sp-3);
+  }
+  /* The actions stand a little apart from what describes the block. */
+  .room-focus-page .room-focus-shell > :is(form, button) {
+    margin-top: var(--sp-3);
+  }
+  .room-focus-page .room-focus-shell > :is(form, button) + :is(form, button) {
+    margin-top: var(--sp-1);
+  }
+  /* A temporary room carries its share buttons in the same stack, and waits
+     with the bar showing -- the one screen that needs the tighter rhythm. */
+  .room-focus-page:has(> .focus-room-bar) .room-focus-shell > * {
+    margin: var(--sp-1) 0;
+  }
+  .room-focus-page:has(> .focus-room-bar) .room-focus-shell > :is(form, button) {
+    margin-top: var(--sp-2);
+  }
+  /* The bar is 60px under 720px wide and 68px above; landscape phones
+     straddle that line, and the focus page's arithmetic assumes 68. */
+  .topbar {
+    min-height: 68px;
+  }
+  /* Running block: the card is alone in its column, and the panel margin
+     under it made the column -- and so the todo panel stretched beside
+     it -- 16px taller than the card. */
+  .room-timer-column:not(:has(> details)) .timer-card {
+    margin-bottom: 0;
   }
   .room-header-new {
     margin-bottom: var(--sp-5);
