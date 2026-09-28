@@ -198,6 +198,12 @@ func newDiscordBot(a *app) (*discordBot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create discord session: %w", err)
 	}
+	// Retry policy lives in one place, below discordgo, and never replays
+	// application handlers. Disable both library retry paths to avoid nested
+	// retry budgets and ambiguous retries of message-creation requests.
+	session.ShouldRetryOnRateLimit = false
+	session.MaxRestRetries = 0
+	session.Client.Transport = newDiscordRetryTransport(session.Client.Transport)
 	bot := &discordBot{app: a, session: session, appID: appID}
 	session.AddHandler(bot.onInteraction)
 	session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Ready) {
@@ -208,10 +214,6 @@ func newDiscordBot(a *app) (*discordBot, error) {
 	})
 	session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Disconnect) {
 		log.Printf("discord: gateway disconnected")
-	})
-	session.AddHandler(func(_ *discordgo.Session, r *discordgo.RateLimit) {
-		// Never log r.URL: interaction and webhook URLs contain tokens.
-		log.Printf("discord: REST rate limited retry_after=%s", r.RetryAfter)
 	})
 	return bot, nil
 }
@@ -231,7 +233,7 @@ func (b *discordBot) connect() error {
 	// updates to an already-registered command apply immediately.
 	for _, cmd := range discordCommands {
 		if _, err := b.session.ApplicationCommandCreate(b.appID, "", cmd); err != nil {
-			log.Printf("discord: register command %s: %v", cmd.Name, err)
+			log.Printf("discord: register command %s: %v", cmd.Name, discordError(err))
 		}
 	}
 	return nil
@@ -248,7 +250,7 @@ func (b *discordBot) startWithRetry() {
 		const maxBackoff = 5 * time.Minute
 		for attempt := 1; ; attempt++ {
 			if err := b.connect(); err != nil {
-				log.Printf("discord: connect attempt %d failed, retrying in %s: %v", attempt, backoff, err)
+				log.Printf("discord: connect attempt %d failed, retrying in %s: %v", attempt, backoff, discordError(err))
 				time.Sleep(backoff)
 				if backoff *= 2; backoff > maxBackoff {
 					backoff = maxBackoff
@@ -443,7 +445,15 @@ func discordInteractionAge(i *discordgo.InteractionCreate) string {
 func (b *discordBot) respondInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, response *discordgo.InteractionResponse) error {
 	started := time.Now()
 	log.Printf("discord: response starting id=%s command=%s age=%s", i.ID, discordInteractionName(i), discordInteractionAge(i))
-	err := s.InteractionRespond(i.Interaction, response)
+	// Reserve a little of Discord's three-second window for transit. Do not
+	// queue replies behind a cooldown that already exceeds their deadline.
+	deadline := started.Add(2500 * time.Millisecond)
+	if created, err := discordgo.SnowflakeTimestamp(i.ID); err == nil && created.Add(2500*time.Millisecond).Before(deadline) {
+		deadline = created.Add(2500 * time.Millisecond)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	err := s.InteractionRespond(i.Interaction, response, discordgo.WithContext(ctx))
 	log.Printf("discord: response finished id=%s command=%s elapsed=%s success=%t", i.ID, discordInteractionName(i), time.Since(started).Round(time.Millisecond), err == nil)
 	return err
 }
@@ -454,7 +464,7 @@ func (b *discordBot) reply(s *discordgo.Session, i *discordgo.InteractionCreate,
 		Data: &discordgo.InteractionResponseData{Content: content, Components: components},
 	})
 	if err != nil {
-		log.Printf("discord: reply: %v", err)
+		log.Printf("discord: reply: %v", discordError(err))
 	}
 }
 
@@ -464,7 +474,7 @@ func (b *discordBot) ephemeral(s *discordgo.Session, i *discordgo.InteractionCre
 		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral},
 	})
 	if err != nil {
-		log.Printf("discord: ephemeral reply: %v", err)
+		log.Printf("discord: ephemeral reply: %v", discordError(err))
 	}
 }
 
@@ -666,7 +676,7 @@ func (a *app) notifyDiscord(rm room, timer *timerRun, freshRun bool) {
 	}
 	msg, err := bot.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: content, Components: components})
 	if err != nil {
-		log.Printf("discord: notify %s: %v", rm.Code, err)
+		log.Printf("discord: notify %s: %v", rm.Code, discordError(err))
 		return
 	}
 	a.rememberDiscordLive(rm.ID, timer, content)
@@ -1410,7 +1420,7 @@ func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.Interaction
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	}); err != nil {
-		log.Printf("discord: status acknowledge: %v", err)
+		log.Printf("discord: status acknowledge: %v", discordError(err))
 		return
 	}
 	a := b.app
@@ -1447,7 +1457,7 @@ func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.Interaction
 // editStatusReply completes the already-acknowledged private response.
 func (b *discordBot) editStatusReply(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
 	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content}); err != nil {
-		log.Printf("discord: status edit: %v", err)
+		log.Printf("discord: status edit: %v", discordError(err))
 	}
 }
 
@@ -1457,12 +1467,12 @@ func (b *discordBot) publishStatusReply(s *discordgo.Session, i *discordgo.Inter
 	if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
 		Content: content, Components: components,
 	}); err != nil {
-		log.Printf("discord: status publish: %v", err)
+		log.Printf("discord: status publish: %v", discordError(err))
 		b.editStatusReply(s, i, "Couldn't post the timer status — try again.")
 		return
 	}
 	if err := s.InteractionResponseDelete(i.Interaction); err != nil {
-		log.Printf("discord: status acknowledgement cleanup: %v", err)
+		log.Printf("discord: status acknowledgement cleanup: %v", discordError(err))
 		b.editStatusReply(s, i, "Status posted in this channel.")
 	}
 }
@@ -1557,7 +1567,7 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 			},
 		})
 		if err != nil {
-			log.Printf("discord: stats map reply: %v", err)
+			log.Printf("discord: stats map reply: %v", discordError(err))
 		}
 		return
 	}
@@ -1711,7 +1721,7 @@ func (b *discordBot) handleResetPassword(s *discordgo.Session, i *discordgo.Inte
 		// anywhere but in its owner's DMs.
 		_, _ = a.db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE token_hash = $1`, tokenHash)
 		a.limiter.refund("pwreset:" + u.ID)
-		log.Printf("discord: DM reset link: %v", err)
+		log.Printf("discord: DM reset link: %v", discordError(err))
 		b.ephemeral(s, i, "I couldn't DM you — enable direct messages from members of this server (Server → Privacy Settings), then run `/junkie reset-password` again.")
 		return
 	}
