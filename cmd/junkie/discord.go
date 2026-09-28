@@ -200,6 +200,19 @@ func newDiscordBot(a *app) (*discordBot, error) {
 	}
 	bot := &discordBot{app: a, session: session, appID: appID}
 	session.AddHandler(bot.onInteraction)
+	session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Ready) {
+		log.Printf("discord: gateway ready")
+	})
+	session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Resumed) {
+		log.Printf("discord: gateway resumed")
+	})
+	session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Disconnect) {
+		log.Printf("discord: gateway disconnected")
+	})
+	session.AddHandler(func(_ *discordgo.Session, r *discordgo.RateLimit) {
+		// Never log r.URL: interaction and webhook URLs contain tokens.
+		log.Printf("discord: REST rate limited retry_after=%s", r.RetryAfter)
+	})
 	return bot, nil
 }
 
@@ -207,9 +220,11 @@ func newDiscordBot(a *app) (*discordBot, error) {
 // from newDiscordBot so a failure here is retryable: Discord being unreachable
 // or rate-limiting us must never stop junkie's web app from serving.
 func (b *discordBot) connect() error {
+	log.Printf("discord: opening gateway")
 	if err := b.session.Open(); err != nil {
 		return fmt.Errorf("open discord gateway: %w", err)
 	}
+	log.Printf("discord: gateway open; registering commands")
 	// Registered globally (guildID "") so the command shows up in any server
 	// the bot is invited to without a per-guild registration step. Discord
 	// can take up to ~1 hour to propagate a *new* global command to clients;
@@ -241,7 +256,7 @@ func (b *discordBot) startWithRetry() {
 				continue
 			}
 			b.app.discord.Store(b)
-			log.Printf("discord: gateway connected (attempt %d)", attempt)
+			log.Printf("discord: gateway connected and commands registered (attempt %d)", attempt)
 			return
 		}
 	}()
@@ -252,6 +267,11 @@ func (b *discordBot) Close() error {
 }
 
 func (b *discordBot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	started := time.Now()
+	log.Printf("discord: interaction received id=%s command=%s age=%s", i.ID, discordInteractionName(i), discordInteractionAge(i))
+	defer func() {
+		log.Printf("discord: interaction handled id=%s command=%s elapsed=%s", i.ID, discordInteractionName(i), time.Since(started).Round(time.Millisecond))
+	}()
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
 		b.handleCommand(s, i)
@@ -396,8 +416,40 @@ func timerComponents(rm room, timer *timerRun) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: buttons}}
 }
 
+// These diagnostics identify latency without logging interaction tokens,
+// command arguments, user IDs, or response contents.
+func discordInteractionName(i *discordgo.InteractionCreate) string {
+	if i.Type == discordgo.InteractionApplicationCommand {
+		data := i.ApplicationCommandData()
+		if len(data.Options) > 0 {
+			return data.Name + "/" + data.Options[0].Name
+		}
+		return data.Name
+	}
+	if i.Type == discordgo.InteractionMessageComponent {
+		return i.MessageComponentData().CustomID
+	}
+	return "unknown"
+}
+
+func discordInteractionAge(i *discordgo.InteractionCreate) string {
+	created, err := discordgo.SnowflakeTimestamp(i.ID)
+	if err != nil {
+		return "unknown"
+	}
+	return time.Since(created).Round(time.Millisecond).String()
+}
+
+func (b *discordBot) respondInteraction(s *discordgo.Session, i *discordgo.InteractionCreate, response *discordgo.InteractionResponse) error {
+	started := time.Now()
+	log.Printf("discord: response starting id=%s command=%s age=%s", i.ID, discordInteractionName(i), discordInteractionAge(i))
+	err := s.InteractionRespond(i.Interaction, response)
+	log.Printf("discord: response finished id=%s command=%s elapsed=%s success=%t", i.ID, discordInteractionName(i), time.Since(started).Round(time.Millisecond), err == nil)
+	return err
+}
+
 func (b *discordBot) reply(s *discordgo.Session, i *discordgo.InteractionCreate, content string, components []discordgo.MessageComponent) {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	err := b.respondInteraction(s, i, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Content: content, Components: components},
 	})
@@ -407,7 +459,7 @@ func (b *discordBot) reply(s *discordgo.Session, i *discordgo.InteractionCreate,
 }
 
 func (b *discordBot) ephemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	err := b.respondInteraction(s, i, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Content: content, Flags: discordgo.MessageFlagsEphemeral},
 	})
@@ -1343,27 +1395,41 @@ func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionC
 	b.ephemeral(s, i, "You've left the run.")
 }
 
-// handleStatus privately shows where the room's timer is right now — focus
+// handleStatus shows where the room's timer is right now — focus
 // with time remaining, break with a Join button, or idle — for someone who
 // walked in late. Linked accounts only; the nudge to link is ephemeral so
 // unlinked users cause no channel noise.
 func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// Acknowledge before any database work so slow queries cannot exhaust
+	// Discord's three-second initial-response deadline. Keep this message
+	// private so account-link and registration errors remain private too.
+	if err := b.respondInteraction(s, i, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "Checking the room's status…",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		log.Printf("discord: status acknowledge: %v", err)
+		return
+	}
 	a := b.app
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
 	if !linked {
-		b.replyLinkRequired(s, i)
+		b.editStatusReply(s, i, "Link your Discord account to junkie first — run `/junkie link` and open the link it gives you.")
 		return
 	}
 	rm, _, ok := a.discordRoom(ctx, i.GuildID)
 	if !ok {
-		b.replyNotRegistered(s, i)
+		b.editStatusReply(s, i, "This server doesn't have a junkie room yet. An account-linked member can run `/junkie register` in the channel you want it to post in.")
 		return
 	}
 	timer, transitioned, err := a.normalizeTimer(ctx, rm.ID, u.ID)
 	if err != nil {
 		log.Printf("discord: status %s: %v", rm.Code, err)
-		b.ephemeral(s, i, "Couldn't read the timer — try again.")
+		b.editStatusReply(s, i, "Couldn't read the timer — try again.")
 		return
 	}
 	if transitioned {
@@ -1375,7 +1441,30 @@ func (b *discordBot) handleStatus(s *discordgo.Session, i *discordgo.Interaction
 	}
 	// Public on purpose: the asker wants the room to see where things stand,
 	// and the Join button is useful to everyone else scrolling past.
-	b.reply(s, i, content, timerComponents(rm, timer))
+	b.publishStatusReply(s, i, content, timerComponents(rm, timer))
+}
+
+// editStatusReply completes the already-acknowledged private response.
+func (b *discordBot) editStatusReply(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content}); err != nil {
+		log.Printf("discord: status edit: %v", err)
+	}
+}
+
+func (b *discordBot) publishStatusReply(s *discordgo.Session, i *discordgo.InteractionCreate, content string, components []discordgo.MessageComponent) {
+	// A followup can be public even though the initial acknowledgement was
+	// private. Only remove the acknowledgement once the public post succeeds.
+	if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: content, Components: components,
+	}); err != nil {
+		log.Printf("discord: status publish: %v", err)
+		b.editStatusReply(s, i, "Couldn't post the timer status — try again.")
+		return
+	}
+	if err := s.InteractionResponseDelete(i.Interaction); err != nil {
+		log.Printf("discord: status acknowledgement cleanup: %v", err)
+		b.editStatusReply(s, i, "Status posted in this channel.")
+	}
 }
 
 // formatFocusMinutes renders a minute count the way people say it: "45 min"
@@ -1460,7 +1549,7 @@ func (b *discordBot) handleStats(s *discordgo.Session, i *discordgo.InteractionC
 			b.ephemeral(s, i, "Couldn't draw the map — try again.")
 			return
 		}
-		err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		err = b.respondInteraction(s, i, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Content: fmt.Sprintf("**%s** — %s focused this past year", u.DisplayName, formatFocusMinutes(heat.TotalMinutes)),
