@@ -201,6 +201,12 @@ func newDiscordBot(a *app) (*discordBot, error) {
 	// Retry policy lives in one place, below discordgo, and never replays
 	// application handlers. Disable both library retry paths to avoid nested
 	// retry budgets and ambiguous retries of message-creation requests.
+	// discordgo defaults to every non-privileged intent, which streams every
+	// message, reaction, typing and voice event in every server the bot sits
+	// in. junkie reads none of them: interactions arrive regardless of
+	// intents, and IntentGuilds alone keeps the channel/role state that the
+	// send-permission check reads. Render meters that stream as bandwidth.
+	session.Identify.Intents = discordgo.IntentGuilds
 	session.ShouldRetryOnRateLimit = false
 	session.MaxRestRetries = 0
 	session.Client.Transport = newDiscordRetryTransport(session.Client.Transport)
