@@ -403,6 +403,11 @@ watch(active, async () => {
               It is the countdown and nothing else: no chrome, transparent background, and no login,
               so it drops straight into an OBS browser source.
             </p>
+            <p>
+              Add <code>?theme=light</code> to the overlay URL for dark text over a light scene
+              (<code>/f/{code}/embed?theme=light</code>), or <code>?theme=dark</code> for light text
+              over a dark scene. Dark is the default when omitted; the background stays transparent.
+            </p>
             <div class="docs-callout">
               <p>
                 Share the <em>plain</em> room link with people and keep the overlay link for your

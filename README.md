@@ -19,7 +19,7 @@
 - **Accounts** are a username and a password — junkie collects no email address, so password resets go through [Discord](#discord-bot). Link your Discord *before* you need it.
 - **Rooms** are shared spaces at `/r/{code}` with their own members, public todo board and timer. Up to 5 per account, 100 members each. Timer settings are open to every member; removing members and changing the room's sound need a room admin; deleting and transferring are the creator's.
 - **Temporary rooms** at `/f/{code}` are throwaway blocks for a few people: joined by link, joinable mid-block, and deleted the moment the run ends. They are also the one place the session count can be changed while the block runs — a stepper on each break, for when six sessions turns out to be four.
-- **Streaming** — a temporary room has an overlay twin at `/f/{code}/embed` for an OBS browser source, and the countdown can pop out into an always-on-top window.
+- **Streaming** — a temporary room has an overlay twin at `/f/{code}/embed` for an OBS browser source, and the countdown can pop out into an always-on-top window. Add `?theme=light` for dark text over a light scene, or `?theme=dark` for light text over a dark scene (the default); the background stays transparent.
 - **Sound** — the chime toggle is per-device and per-person; the sound itself belongs to the room, and an admin can upload one (15 s, 512 KB, MP3/OGG/WAV).
 - **Connections** are a mutual link between two accounts, made with a one-time link. Connected people see each other's focus heatmap and nothing else; profiles are invisible to everyone else.
 
