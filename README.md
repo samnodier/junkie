@@ -19,6 +19,8 @@
 - **Accounts** are a username and a password — junkie collects no email address, so password resets go through [Discord](#discord-bot). Link your Discord *before* you need it.
 - **Rooms** are shared spaces at `/r/{code}` with their own members, public todo board and timer. Up to 5 per account, 100 members each. Timer settings are open to every member; removing members and changing the room's sound need a room admin; deleting and transferring are the creator's.
 - **Temporary rooms** at `/f/{code}` are throwaway blocks for a few people: joined by link, joinable mid-block, and deleted the moment the run ends. They are also the one place the session count can be changed while the block runs — a stepper on each break, for when six sessions turns out to be four.
+- **Stopwatch** — private focus and temporary rooms have **Timer | Stopwatch** tabs. A stopwatch counts up until you stop it and banks the time it counted; in a temporary room everyone is credited from when they joined, leaving keeps your time, and only the creator can stop it for everyone. It stops itself at 3 hours. Ordinary rooms stay countdown-only.
+- **Waves** — a row of one-tap greetings under a room's timer (👋 Hi!, 🍀 Good luck, …), shown briefly to everyone there and stored nowhere. Not a chat, and refused during focus. Rooms linked to Discord relay them to the channel, and `/junkie wave` sends one back.
 - **Streaming** — a temporary room has an overlay twin at `/f/{code}/embed` for an OBS browser source, and the countdown can pop out into an always-on-top window. Add `?theme=light` for dark text over a light scene, or `?theme=dark` for light text over a dark scene (the default); the background stays transparent.
 - **Sound** — the chime toggle is per-device and per-person; the sound itself belongs to the room, and an admin can upload one (15 s, 512 KB, MP3/OGG/WAV).
 - **Connections** are a mutual link between two accounts, made with a one-time link. Connected people see each other's focus heatmap and nothing else; profiles are invisible to everyone else.
@@ -91,6 +93,7 @@ The desk is three panes — the block, the todos and the rooms. `tab` moves betw
 | todos | `space` | complete or un-complete |
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` | start focus · take the break · skip it |
+| block | `t` | start a stopwatch (signed in) — it counts up, and `x` stops it and banks the time |
 | block | `x` | end the block on screen — your own, or leave a room's. Asks first either way; ending your own banks none of its minutes |
 | desk | `A` | join a room by code, without leaving the desk |
 | desk | `tab` `shift+tab` | move the focus between the three panes |
@@ -180,6 +183,8 @@ Room settings are fully manageable from Discord with `/junkie config` — the ti
 The live message states each phase's length and its deadline both as a wall-clock time and as a countdown ("session 1 of 2 · 80 min. Break at 21:19 · in an hour"), each rendered in your own timezone and kept current by Discord itself. Both are needed: the countdown alone rounds to one coarse unit, so a long block reads as "in an hour" for most of its length.
 
 Breaks are fully controllable from Discord too. During a break, the live message carries the same controls the web room has, next to Join: **Start break** when a break is waiting (auto-start breaks off), **Pause break** while it's running, **Resume break** while it's paused, and **Skip break** to jump straight to the next focus session (hidden in check-in rooms, same as the web). Tapping any of them requires a linked account that's a room member, and — like on the web — counts as your check-in when session check-in is on.
+
+`/junkie wave [greeting]` sends one of the room's quick greetings to the channel and to everyone looking at the room on the web; a wave sent on the web is posted in the channel in turn. Waves are refused during focus.
 
 Linking Discord is also your password lifeline: `/junkie reset-password` DMs a single-use reset link to the linked account, so a forgotten password never needs an email (see [the docs](https://junkie-blin.onrender.com/docs#accounts)). This is why the public [junkie Discord server](https://discord.gg/qEEzdXQHtK) exists — joining it gives anyone a place to run these commands without needing their own server.
 

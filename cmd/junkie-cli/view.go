@@ -67,6 +67,12 @@ func renderSoloLine(t *soloTimer, width int) string {
 			styleFaint.Render(" · open `junkie`: b takes it, s skips it")) + "\n"
 	}
 	total := phaseSeconds(t)
+	if t.Stopwatch && t.Phase == "focus" {
+		// A stopwatch has no end to count towards and no bar to fill.
+		return labeled("timer", style.Render("stopwatch")+
+			fmt.Sprintf(" · %s so far", formatDuration(total-t.SecondsLeft))+
+			styleFaint.Render(" · open `junkie`: x stops it and banks the time")) + "\n"
+	}
 	line := labeled("timer", style.Render(phaseLabel(t))+
 		fmt.Sprintf(" · %s left", formatDuration(t.SecondsLeft))+
 		styleFaint.Render(" · ends "+t.EndsAt.Local().Format("15:04")))

@@ -142,6 +142,8 @@ async function leave() {
   // Leaving cancels a queued join or drops out of the run; either way this
   // person is done here, so head home. (If they were the last one, the room
   // deletes itself and everyone else is sent home too.)
+  // Walking out is not finishing: no end-of-block chime for the leaver.
+  room.quietExit = true;
   await room.action('timer-leave');
   goHome();
 }

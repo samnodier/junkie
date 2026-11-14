@@ -32,6 +32,9 @@ export const useRoomStore = defineStore('room', {
     refreshTimer: null,
     _refreshQueued: null,
     lastPhase: '',
+    // Set by a deliberate exit (Leave), so the room closing behind the
+    // person who walked out doesn't ring as though they finished.
+    quietExit: false,
   }),
   actions: {
     // Coalesce a burst of refreshes into one fetch.
@@ -64,7 +67,7 @@ export const useRoomStore = defineStore('room', {
           credentials: 'same-origin',
         });
         if (res.status === 404) {
-          this.deleted = true;
+          this.markDeleted();
           return;
         }
         if (!res.ok) return;
@@ -110,6 +113,22 @@ export const useRoomStore = defineStore('room', {
       }
     },
 
+    // The room is gone. For a temporary room that is how a block ends: its
+    // last session ran out, or its stopwatch was stopped, and the room is
+    // deleted in the same breath -- so there is never a later refresh to
+    // notice the focus phase turning into something else. Whoever was in
+    // that focus phase gets the end-of-block chime here instead. Both the
+    // socket signal and a 404 arrive for the same ending; `deleted` makes
+    // the second one a no-op.
+    markDeleted() {
+      if (this.deleted) return;
+      this.deleted = true;
+      const wasFocusing = this.lastPhase === 'focus' && this.timer?.participant;
+      if (this.room?.ephemeral && wasFocusing && !this.quietExit) {
+        onTimerEnd('focus', { forcedSound: true, finished: true });
+      }
+    },
+
     async action(name, fields = {}) {
       const ok = await postForm(`/r/${encodeURIComponent(this.code)}/${name}`, fields);
       await this.refresh();
@@ -140,7 +159,7 @@ export const useRoomStore = defineStore('room', {
 
     async open(code, meId) {
       this.close();
-      this.$patch({ code, loaded: false, deleted: false, invite: null, lastPhase: '' });
+      this.$patch({ code, loaded: false, deleted: false, invite: null, lastPhase: '', quietExit: false });
       const toasts = useToastStore();
 
       // Fetch first: the room socket 403s non-members, so opening it before
@@ -150,7 +169,7 @@ export const useRoomStore = defineStore('room', {
 
       this.socket = connectSignals(`/ws/r/${encodeURIComponent(code)}`, (type, event) => {
         if (type === 'deleted') {
-          this.deleted = true;
+          this.markDeleted();
           return;
         }
         if (type === 'todo-done') {

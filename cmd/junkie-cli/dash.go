@@ -495,6 +495,11 @@ func (m *dashModel) handleSignal(sig signal) (tea.Model, tea.Cmd) {
 			m.note(firstNonEmpty(sig.str("actor"), "Someone") + " completed: " + sig.str("text"))
 		}
 
+	case "wave":
+		if label := waveLabels[sig.str("kind")]; label != "" && sig.str("actorId") != m.userID {
+			m.note(firstNonEmpty(sig.str("actor"), "Someone") + " in " + sig.room + ": " + label)
+		}
+
 	case "deleted":
 		m.note(sig.room + " was deleted")
 	}
@@ -652,6 +657,18 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.do("/solo/start", nil, "focus block started")
+	case "t":
+		if t != nil {
+			m.note("a block is already running")
+			return m, nil
+		}
+		// The guest desk keeps its own timer on this machine and has no
+		// stopwatch; the count lives on the server.
+		if m.identity.Guest {
+			m.note("the stopwatch needs an account — L signs in")
+			return m, nil
+		}
+		return m, m.do("/solo/start", url.Values{"mode": {"stopwatch"}}, "stopwatch started")
 	case "b":
 		if t == nil || !t.BreakPending {
 			m.note("no break is waiting")
@@ -671,6 +688,11 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if t == nil || t.Phase != "focus" {
 			m.note("no running block to end")
 			return m, nil
+		}
+		// A stopwatch is the opposite of a countdown here: stopping it is
+		// how its time gets banked, so there is nothing to warn about.
+		if t.Stopwatch {
+			return m, m.do("/solo/stop", nil, "stopwatch stopped — time banked")
 		}
 		// Ending a block banks none of its minutes, which is worth one
 		// keystroke of warning -- and it is the same question x asks over a
@@ -1297,7 +1319,7 @@ func (m *dashModel) groupedKeys() string {
 	}
 	todos := keyLine{"list", []string{"j/k scroll", "g/G ends", "space done", "a add", "e edit", "d remove", "u undo"}}
 
-	block := keyLine{"block", []string{"f focus", "b break", "s skip", "x end it"}}
+	block := keyLine{"block", []string{"f focus", "t stopwatch", "b break", "s skip", "x end it"}}
 	if _, ok := m.currentRoom(); ok {
 		// A room's block is joined and left, and cancelling is not on
 		// offer: c would end your own private block, not the room's.

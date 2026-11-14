@@ -35,6 +35,10 @@ type soloTimer struct {
 	EndsAt       time.Time `json:"endsAt"`
 	SecondsLeft  int       `json:"secondsLeft"`
 	BreakPending bool      `json:"breakPending"`
+	// Stopwatch marks a focus phase that counts up: EndsAt is then only
+	// the ceiling it stops itself at, and FocusMinutes the length of that
+	// ceiling, so elapsed time is the ceiling less what is left.
+	Stopwatch bool `json:"stopwatch"`
 }
 
 type apiTodo struct {

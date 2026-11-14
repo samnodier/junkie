@@ -120,6 +120,9 @@ func (m *watchModel) countdownText() string {
 		// An idle room has no number at all; the pane says so in words.
 		return ""
 	}
+	if m.timer.CountUp {
+		return formatDuration(m.timer.TotalSeconds - m.remaining())
+	}
 	return formatDuration(m.remaining())
 }
 
@@ -158,6 +161,9 @@ func (m *watchModel) viewFull() []string {
 
 	if m.timer.BreakPending {
 		body = append(body, styleFaint.Render(pendingHint(m.width)))
+	} else if m.timer.CountUp {
+		// Nothing to measure against and no end to name: say what it is.
+		body = append(body, styleFaint.Render(clip("counting up · x stops it and banks the time", m.width)))
 	} else {
 		total := m.timer.TotalSeconds
 		barWidth := clamp(m.width-20, 10, 48)
@@ -200,6 +206,9 @@ func (m *watchModel) viewCompact() []string {
 
 	if m.timer.BreakPending {
 		return append(body, "", styleFaint.Render("waiting"))
+	}
+	if m.timer.CountUp {
+		return append(body, "", styleFaint.Render("counting up"))
 	}
 	barWidth := clamp(m.width-6, 6, 24)
 	return append(body, "",

@@ -167,10 +167,46 @@ type timerRun struct {
 	Stopwatch bool
 }
 
-// roomWaves is the whole vocabulary of a wave. The server only carries the
-// key; the wording and emoji live with the client (web/src/lib/waves.js), so
-// nothing a member types ever reaches another member's screen.
-var roomWaves = map[string]bool{"hi": true, "luck": true, "go": true, "nice": true, "back": true}
+// roomWaves is the whole vocabulary of a wave. Web and terminal clients are
+// sent only the key and word it themselves (web/src/lib/waves.js,
+// cmd/junkie-cli/waves.go); the wording here is what the Discord relay
+// posts. Either way nothing a member types reaches another member's screen.
+var roomWaves = map[string]string{
+	"hi":   "👋 Hi!",
+	"luck": "🍀 Good luck",
+	"go":   "💪 Let's go",
+	"nice": "🎉 Nice work",
+	"back": "☕ Back soon",
+}
+
+// sendWave delivers one member's greeting to everyone in the room: over the
+// room socket to the web and terminal clients, and -- unless it came from
+// Discord, where the command's own reply is already the channel message --
+// into the room's Discord channel if it has one. It returns the reason when
+// the wave was refused, for the caller to show in its own way.
+//
+// A wave is closed during focus for the same reason todos are -- the block
+// is the quiet part -- and open in the lobby, the breaks and an idle room,
+// which is when people actually arrive.
+func (a *app) sendWave(ctx context.Context, rm room, u user, kind string, fromDiscord bool) string {
+	label, ok := roomWaves[kind]
+	if !ok {
+		return "That isn't one of the greetings."
+	}
+	if timer, err := a.activeTimer(ctx, rm.ID, u.ID); err == nil && timer != nil && timer.Phase == "focus" {
+		return "Waves wait for the break — it's focus time."
+	}
+	if !a.limiter.allow("wave:"+u.ID, maxWavesPerMinute, time.Minute) {
+		return "That's plenty of waving for now."
+	}
+	a.hub.broadcastJSON(rm.Code, map[string]string{
+		"type": "wave", "actorId": u.ID, "actor": u.DisplayName, "kind": kind,
+	})
+	if !fromDiscord {
+		go a.relayWaveToDiscord(rm, u.DisplayName, label)
+	}
+	return ""
+}
 
 // maxWavesPerMinute keeps a greeting from becoming a way to buzz the room.
 const maxWavesPerMinute = 5
@@ -1916,25 +1952,16 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 	case "wave":
 		// A wave is a greeting, not a chat: one of a fixed handful of
 		// phrases, shown to whoever is in the room right now and kept
-		// nowhere. It is closed during focus for the same reason todos are
-		// -- the block is the quiet part -- and open in the lobby, the
-		// breaks and an idle room, which is when people actually arrive.
+		// nowhere. The rules live in sendWave, shared with Discord.
 		kind := r.FormValue("kind")
-		if !roomWaves[kind] {
+		if _, known := roomWaves[kind]; !known {
 			http.NotFound(w, r)
 			return
 		}
-		if timer, err := a.activeTimer(r.Context(), rm.ID, u.ID); err == nil && timer != nil && timer.Phase == "focus" {
-			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Waves wait for the break — it's focus time."), http.StatusSeeOther)
+		if refusal := a.sendWave(r.Context(), rm, u, kind, false); refusal != "" {
+			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape(refusal), http.StatusSeeOther)
 			return
 		}
-		if !a.limiter.allow("wave:"+u.ID, maxWavesPerMinute, time.Minute) {
-			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("That's plenty of waving for now."), http.StatusSeeOther)
-			return
-		}
-		a.hub.broadcastJSON(code, map[string]string{
-			"type": "wave", "actorId": u.ID, "actor": u.DisplayName, "kind": kind,
-		})
 		action = ""
 	case "timer-stop":
 		// Stopping ends the stopwatch for everyone in it and, in a temporary

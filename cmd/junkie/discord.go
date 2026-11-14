@@ -143,6 +143,19 @@ var discordCommands = []*discordgo.ApplicationCommand{
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "wave",
+				Description: "Send a quick greeting to everyone in the room, here and on the web",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "greeting",
+						Description: "Which one (default: Hi!)",
+						Choices:     discordWaveChoices(),
+					},
+				},
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Name:        "stats",
 				Description: "Your focus stats: today, this week, total, and streak",
 				Options: []*discordgo.ApplicationCommandOption{
@@ -326,6 +339,12 @@ func (b *discordBot) handleCommand(s *discordgo.Session, i *discordgo.Interactio
 		b.handleJoin(s, i)
 	case "leave":
 		b.handleLeave(s, i)
+	case "wave":
+		kind := "hi"
+		if len(sub.Options) > 0 {
+			kind, _ = sub.Options[0].Value.(string)
+		}
+		b.handleWave(s, i, kind)
 	case "status":
 		b.handleStatus(s, i)
 	case "stats":
@@ -1411,6 +1430,84 @@ func (b *discordBot) handleLeave(s *discordgo.Session, i *discordgo.InteractionC
 	b.ephemeral(s, i, "You've left the run.")
 }
 
+// discordWaveOrder fixes the order the greetings are offered in; a map
+// would shuffle the menu on every registration.
+var discordWaveOrder = []string{"hi", "luck", "go", "nice", "back"}
+
+func discordWaveChoices() []*discordgo.ApplicationCommandOptionChoice {
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(discordWaveOrder))
+	for _, kind := range discordWaveOrder {
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: roomWaves[kind], Value: kind})
+	}
+	return choices
+}
+
+// discordNameEscaper keeps a display name from being read as formatting or
+// as a mention when it is quoted back into a channel.
+var discordNameEscaper = strings.NewReplacer(
+	"\\", "\\\\", "*", "\\*", "_", "\\_", "~", "\\~", "`", "\\`", "|", "\\|", "@", "@\u200b",
+)
+
+func discordWaveLine(displayName, label string) string {
+	return "**" + discordNameEscaper.Replace(displayName) + "**: " + label
+}
+
+// handleWave is `/junkie wave`: the same greeting the web's wave bar sends,
+// from Discord. The reply is the channel's copy of it; the web and terminal
+// clients get theirs over the room socket.
+func (b *discordBot) handleWave(s *discordgo.Session, i *discordgo.InteractionCreate, kind string) {
+	a := b.app
+	ctx := context.Background()
+	u, linked := a.discordLinkedUser(ctx, interactionUserID(i))
+	if !linked {
+		b.replyLinkRequired(s, i)
+		return
+	}
+	rm, _, ok := a.discordRoom(ctx, i.GuildID)
+	if !ok {
+		b.replyNotRegistered(s, i)
+		return
+	}
+	if refusal := a.sendWave(ctx, rm, u, kind, true); refusal != "" {
+		b.ephemeral(s, i, refusal)
+		return
+	}
+	err := b.respondInteraction(s, i, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content:         discordWaveLine(u.DisplayName, roomWaves[kind]),
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		},
+	})
+	if err != nil {
+		log.Printf("discord: wave reply: %v", discordError(err))
+	}
+}
+
+// relayWaveToDiscord posts a wave sent from the web or the terminal into the
+// room's Discord channel, when the room is linked to one. One short line,
+// no mentions: it is there to be seen by whoever is around, not to ping.
+// A failed post is logged and dropped -- a greeting is not worth a retry.
+func (a *app) relayWaveToDiscord(rm room, displayName, label string) {
+	bot := a.discord.Load()
+	if bot == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var channelID string
+	if err := a.db.QueryRow(ctx, `SELECT channel_id FROM discord_guilds WHERE room_id = $1`, rm.ID).Scan(&channelID); err != nil || channelID == "" {
+		return
+	}
+	_, err := bot.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Content:         discordWaveLine(displayName, label),
+		AllowedMentions: &discordgo.MessageAllowedMentions{},
+	})
+	if err != nil {
+		log.Printf("discord: wave %s: %v", rm.Code, discordError(err))
+	}
+}
+
 // handleStatus shows where the room's timer is right now — focus
 // with time remaining, break with a Join button, or idle — for someone who
 // walked in late. Linked accounts only; the nudge to link is ephemeral so
@@ -1779,6 +1876,7 @@ func (b *discordBot) handleHelp(s *discordgo.Session, i *discordgo.InteractionCr
 		"`/junkie join` — join now, or be queued in for the next break/run (in a check-in room, tapping Join each break is how you stay in)\n"+
 		"`/junkie leave` — leave the run (or cancel a queued join)\n"+
 		"`/junkie status` — where the timer is right now\n"+
+		"`/junkie wave [greeting]` — say hi to everyone in the room, here and on the web (not during focus)\n"+
 		"`/junkie stats [day|week|month|year|alltime|map]` — your focus stats, or your year as a heatmap picture")
 }
 

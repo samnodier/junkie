@@ -236,6 +236,18 @@ watch(active, async () => {
               ring, or hit <strong>Skip break &amp; continue</strong> to roll straight into another
               focus session of the same length.
             </p>
+            <h3>Stopwatch</h3>
+            <p>
+              Signed in, the ring has two tabs: <strong>Timer</strong> and
+              <strong>Stopwatch</strong>. The stopwatch counts up from zero instead of down from a
+              length you picked — for when you don't know how long something will take.
+            </p>
+            <ul>
+              <li>Tap the ring to start; <strong>Stop &amp; save</strong> banks the whole minutes it counted to your work map and offers the usual break.</li>
+              <li>Unlike ending a countdown early, stopping a stopwatch always keeps the time.</li>
+              <li>It stops itself at <strong>3 hours</strong>, the longest a focus block can be.</li>
+              <li>The tab you last used is remembered in that browser.</li>
+            </ul>
             <p>
               Signed in, runs and completed minutes are stored server-side and show up on your work
               map from any device. Private todo changes sync live between your tabs; a solo timer
@@ -332,6 +344,19 @@ watch(active, async () => {
               <li><strong>Focus mode</strong> hides the todo board during a session so the timer stays central.</li>
             </ul>
 
+            <h3>Waves</h3>
+            <p>
+              Under the timer is a row of one-tap greetings — <span class="docs-inline-ui">👋 Hi!</span>
+              <span class="docs-inline-ui">🍀 Good luck</span> <span class="docs-inline-ui">💪 Let's go</span>
+              <span class="docs-inline-ui">🎉 Nice work</span> <span class="docs-inline-ui">☕ Back soon</span>.
+              Tapping one shows it briefly to everyone in the room. It is a greeting, not a chat:
+              there is nothing to type and nothing is kept.
+            </p>
+            <ul>
+              <li>Available in an idle room, the lobby and breaks — never during focus.</li>
+              <li>In a room linked to Discord the wave is also posted in the room's channel, and <code>/junkie wave</code> sends one from Discord to the web.</li>
+            </ul>
+
             <h3>Auto-start breaks</h3>
             <p>
               <strong>On</strong>: breaks begin by themselves and the whole block is hands-free.
@@ -372,6 +397,19 @@ watch(active, async () => {
               <li><strong>Joinable mid-block</strong> — unlike a normal room, a temporary one lets people in during focus rather than making them wait for the break. Sharing it while it runs is the whole point.</li>
               <li><strong>Disposable</strong> — it deletes itself the moment the run finishes or everyone leaves, and sends everyone home. Focus minutes still count toward each person's work map.</li>
               <li>They do not count toward your 5-room limit, never appear in your room list, and ones created but never started are cleaned up automatically.</li>
+            </ul>
+
+            <h3>Stopwatch rooms</h3>
+            <p>
+              The popup has <strong>Timer</strong> and <strong>Stopwatch</strong> tabs at the top.
+              A stopwatch room has no lengths, breaks or sessions to set: one shared clock counts
+              up for everyone until it is stopped.
+            </p>
+            <ul>
+              <li><strong>Join any time</strong> — each person is credited from the moment they arrived.</li>
+              <li><strong>Leaving keeps your time</strong> — walk out early and what you put in still counts.</li>
+              <li><strong>Only the creator can stop it for everyone</strong>, which credits whoever is still in, rings the room's chime for them, and closes the room.</li>
+              <li>It stops itself at 3 hours. Ordinary rooms don't have a stopwatch — they are built around the countdown.</li>
             </ul>
 
             <h3>Changing the session count mid-block</h3>
@@ -581,6 +619,7 @@ watch(active, async () => {
                 <tr><td>todos</td><td><code>space</code></td><td>complete or un-complete</td></tr>
                 <tr><td>todos</td><td><code>a</code> <code>e</code> <code>d</code> <code>u</code></td><td>add · edit · remove · undo the last remove</td></tr>
                 <tr><td>block</td><td><code>f</code> <code>b</code> <code>s</code></td><td>start focus · take the break · skip it</td></tr>
+                <tr><td>block</td><td><code>t</code></td><td>start a stopwatch (signed in); <code>x</code> stops it and banks the time</td></tr>
                 <tr><td>block</td><td><code>i</code></td><td>I'm in — join a room's block, or check in for the next session</td></tr>
                 <tr><td>block</td><td><code>x</code></td><td>end the block on screen — your own, or leave a room's. Asks first either way</td></tr>
                 <tr><td>desk</td><td><code>A</code></td><td>join a room by code without leaving the desk</td></tr>
@@ -678,6 +717,11 @@ watch(active, async () => {
               <strong>Resume</strong>, and <strong>Skip break</strong> (hidden in check-in rooms,
               same as the web). Using any of them requires a linked account that is a room member,
               and counts as your check-in.
+            </p>
+            <p>
+              <code>/junkie wave</code> sends one of the room's quick greetings — to the channel and
+              to everyone looking at the room on the web. Waves sent from the web show up in the
+              channel too. Like everywhere else, they are refused during focus.
             </p>
             <p>
               The live message states each phase's length and its deadline both as a wall-clock time

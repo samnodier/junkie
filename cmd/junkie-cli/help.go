@@ -206,6 +206,7 @@ func writeOverview(w io.Writer) {
   Inside the desk — everything happens here
 
     Your block   f  start   b  break   s  skip break   x  end it
+                 t  stopwatch (counts up; x stops it and banks the time)
     A room's     f  start   b  break   s  skip break   i  I'm in   x  leave
     Todos        a  add   space  done   e  edit   d  remove   u  undo
 

@@ -43,6 +43,9 @@ type face struct {
 	EndsAt       time.Time
 	BreakPending bool
 	BreakMinutes int
+	// CountUp marks a running stopwatch: the digits show time elapsed
+	// (TotalSeconds less what is left) and there is no end to announce.
+	CountUp bool
 
 	// Note is the room detail the solo timer has no equivalent of: which
 	// session of how many, and how many people are in it.
@@ -76,6 +79,7 @@ func soloFace(t *soloTimer) *face {
 		EndsAt:       t.EndsAt,
 		BreakPending: t.BreakPending,
 		BreakMinutes: t.BreakMinutes,
+		CountUp:      t.Stopwatch && t.Phase == "focus",
 	}
 }
 

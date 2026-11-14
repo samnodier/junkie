@@ -116,3 +116,58 @@ describe('one phase turn, one notification', () => {
     expect(close).not.toHaveBeenCalled();
   });
 });
+
+// A temporary room is deleted the moment its block ends, so the usual
+// "focus turned into something else" refresh never happens there. The chime
+// has to come from the deletion itself -- for the people who were in the
+// block, and not for someone who simply left.
+describe('temporary room ending', () => {
+  let sound;
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    stubEnvironment();
+    sound = (await import('@/lib/sound')).playPhaseSound;
+    sound.mockClear();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const inFocus = (store, participant) => {
+    store.$patch({
+      code: 'ABC123',
+      room: { code: 'ABC123', name: 'Temp', ephemeral: true },
+      timer: { phase: 'focus', participant, stopwatch: true },
+      lastPhase: 'focus',
+    });
+  };
+
+  it('rings once for someone who was in the block', () => {
+    const room = useRoomStore();
+    inFocus(room, true);
+    room.markDeleted();
+    room.markDeleted(); // the 404 that follows the socket signal
+    expect(sound).toHaveBeenCalledTimes(1);
+    expect(sound).toHaveBeenCalledWith({ forced: true });
+  });
+
+  it('stays quiet for a watcher and for someone who left', () => {
+    const watcher = useRoomStore();
+    inFocus(watcher, false);
+    watcher.markDeleted();
+    expect(sound).not.toHaveBeenCalled();
+
+    setActivePinia(createPinia());
+    const leaver = useRoomStore();
+    inFocus(leaver, true);
+    leaver.quietExit = true;
+    leaver.markDeleted();
+    expect(sound).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when an ordinary room is deleted mid-block', () => {
+    const room = useRoomStore();
+    inFocus(room, true);
+    room.room.ephemeral = false;
+    room.markDeleted();
+    expect(sound).not.toHaveBeenCalled();
+  });
+});

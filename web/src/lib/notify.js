@@ -89,17 +89,22 @@ export function notify(title, body, url, options = {}) {
   });
 }
 
-export function onTimerEnd(phase, { forcedSound = false } = {}) {
+export function onTimerEnd(phase, { forcedSound = false, finished = false } = {}) {
   // Every phase turn in the app funnels through here -- rooms, the focus
   // room, solo, and the guest desk -- so the optional chime hangs off it
   // rather than being wired into each of them. It's a no-op unless the
   // viewer switched it on, except in a temporary room, where the block
   // plays it for everyone. See lib/sound.js.
   playPhaseSound({ forced: forcedSound });
+  // `finished` is a focus phase that ended the whole thing -- a temporary
+  // room's last session, or a stopwatch being stopped -- so there is no
+  // break to announce.
   const [title, body] =
     phase === 'break'
       ? ["Break's over", 'Ready for your next focus block']
-      : ['Focus session complete', 'Time for a break'];
+      : finished
+        ? ['Focus session complete', 'That block is done — nice work']
+        : ['Focus session complete', 'Time for a break'];
 
   // This alert and the ongoing timer notification are two halves of one
   // moment: the store announces the turn here and then, a few lines later,

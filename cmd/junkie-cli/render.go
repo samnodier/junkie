@@ -157,6 +157,8 @@ func phaseLabel(t *soloTimer) string {
 		return "break ready"
 	case t.Phase == "break":
 		return "break"
+	case t.Stopwatch:
+		return "stopwatch"
 	default:
 		return "focus"
 	}
