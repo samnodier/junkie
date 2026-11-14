@@ -94,6 +94,9 @@ type room struct {
 	// didn't. Nobody is exempt after session 1 — presence is proven by
 	// actions (starting, joining, checking in), never by role.
 	RequireCheckin bool
+	// Stopwatch marks a temporary room created in stopwatch mode: its run
+	// counts up until the creator stops it rather than counting down.
+	Stopwatch bool
 
 	// PendingOwnerID and OwnershipTransferAt hold an ownership transfer that
 	// has been started but not yet settled. Both are zero for the vast
@@ -159,7 +162,24 @@ type timerRun struct {
 	// Kicked lists user IDs dropped at a break->focus transition for not
 	// checking in, so the caller can broadcast who was removed.
 	Kicked []string
+	// Stopwatch marks a run that counts up. Its focus phase carries the
+	// stopwatch ceiling as its deadline until somebody stops it.
+	Stopwatch bool
 }
+
+// roomWaves is the whole vocabulary of a wave. The server only carries the
+// key; the wording and emoji live with the client (web/src/lib/waves.js), so
+// nothing a member types ever reaches another member's screen.
+var roomWaves = map[string]bool{"hi": true, "luck": true, "go": true, "nice": true, "back": true}
+
+// maxWavesPerMinute keeps a greeting from becoming a way to buzz the room.
+const maxWavesPerMinute = 5
+
+// stopwatchMaxMinutes is how long a stopwatch may run before it stops
+// itself: the longest focus block a countdown can be set to. A stopwatch
+// nobody came back to therefore credits no more than a forgotten countdown
+// of the same length would.
+const stopwatchMaxMinutes = 180
 
 // BreakPending reports a break that arrived with auto-roll off and hasn't
 // been started yet: it was paused at the exact moment it began. A break
@@ -392,6 +412,7 @@ func main() {
 	mux.HandleFunc("GET /solo", a.spaPage)
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
+	mux.HandleFunc("POST /solo/stop", a.requireAuth(a.stopSoloStopwatch))
 	mux.HandleFunc("POST /solo/break/start", a.requireAuth(a.startSoloBreak))
 	mux.HandleFunc("POST /solo/break/skip", a.requireAuth(a.skipSoloBreak))
 	mux.HandleFunc("POST /todo/", a.requireAuth(a.todoAction))
@@ -1037,9 +1058,48 @@ func (a *app) startSoloTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	focus := clampInt(r.FormValue("focus_minutes"), 5, 180, 50)
-	ends := time.Now().Add(time.Duration(focus) * time.Minute)
-	_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_runs (user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at) VALUES ($1, 'focus', $2, 0, 1, $3)`, u.ID, focus, ends)
+	stopwatch := r.FormValue("mode") == "stopwatch"
+	if stopwatch {
+		focus = stopwatchMaxMinutes
+	}
+	a.insertSoloRun(r.Context(), u.ID, focus, stopwatch)
 	a.hub.broadcast(userChannel(u.ID), "solo-timer")
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// insertSoloRun starts a private focus run. A stopwatch is the same row with
+// the ceiling as its length and the flag that makes screens count up.
+func (a *app) insertSoloRun(ctx context.Context, userID string, focusMinutes int, stopwatch bool) {
+	ends := time.Now().Add(time.Duration(focusMinutes) * time.Minute)
+	_, _ = a.db.Exec(ctx, `INSERT INTO timer_runs (user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at, stopwatch) VALUES ($1, 'focus', $2, 0, 1, $3, $4)`, userID, focusMinutes, ends, stopwatch)
+}
+
+// stopSoloStopwatch ends a private stopwatch and banks what it counted.
+//
+// The run is rewritten into the countdown it turned out to be -- its length
+// becomes the whole minutes that elapsed, its deadline becomes now -- and
+// normalizeSoloTimer then does what it does for any finished focus block:
+// credits the minutes once and offers the break. Under half a minute rounds
+// to nothing, so the run just ends.
+func (a *app) stopSoloStopwatch(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	var runID string
+	var minutes int
+	err := a.db.QueryRow(r.Context(), `
+		UPDATE timer_runs
+		SET focus_minutes = LEAST($2, GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - phase_started_at)) / 60)))::int,
+			phase_ends_at = now() - interval '1 second'
+		WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'focus'
+			AND stopwatch AND phase_ends_at > now()
+		RETURNING id, focus_minutes`, u.ID, stopwatchMaxMinutes).Scan(&runID, &minutes)
+	if err == nil {
+		if minutes == 0 {
+			_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND phase = 'focus'`, runID)
+		} else {
+			_, _ = a.normalizeSoloTimer(r.Context(), u.ID)
+		}
+		a.hub.broadcast(userChannel(u.ID), "solo-timer")
+	}
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
@@ -1086,8 +1146,12 @@ func (a *app) skipSoloBreak(w http.ResponseWriter, r *http.Request) {
 	// same duration. Solo runs are single-session, so "next session" is a
 	// fresh run rather than bumping current_session.
 	_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND phase = 'break' AND ended_at IS NULL`, timer.ID)
-	ends := time.Now().Add(time.Duration(focus) * time.Minute)
-	_, _ = a.db.Exec(r.Context(), `INSERT INTO timer_runs (user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at) VALUES ($1, 'focus', $2, 0, 1, $3)`, u.ID, focus, ends)
+	// "Back to it" after a stopwatch is another stopwatch, not a countdown of
+	// however long the last one happened to run.
+	if timer.Stopwatch {
+		focus = stopwatchMaxMinutes
+	}
+	a.insertSoloRun(r.Context(), u.ID, focus, timer.Stopwatch)
 	a.hub.broadcast(userChannel(u.ID), "solo-timer")
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
@@ -1277,6 +1341,13 @@ func (a *app) createEphemeralRoom(w http.ResponseWriter, r *http.Request, u user
 	sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, 4)
 	autoRoll := r.FormValue("auto_roll") == "1"
 	requireCheckin := r.FormValue("require_checkin") == "1"
+	// Stopwatch mode has no blocks to configure: one open-ended session, no
+	// breaks to check in during. The countdown fields are overridden rather
+	// than trusted so the room's stored settings describe what it will do.
+	stopwatch := r.FormValue("mode") == "stopwatch"
+	if stopwatch {
+		focus, sessions, requireCheckin = stopwatchMaxMinutes, 1, false
+	}
 	name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)
 	if name == "" {
 		name = u.DisplayName + "'s focus room"
@@ -1286,9 +1357,9 @@ func (a *app) createEphemeralRoom(w http.ResponseWriter, r *http.Request, u user
 	for range 5 {
 		code = randomCode()
 		err = a.db.QueryRow(r.Context(), `
-			INSERT INTO rooms (code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8) RETURNING id`,
-			code, name, u.ID, focus, breaks, sessions, autoRoll, requireCheckin).Scan(&roomID)
+			INSERT INTO rooms (code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin, stopwatch)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9) RETURNING id`,
+			code, name, u.ID, focus, breaks, sessions, autoRoll, requireCheckin, stopwatch).Scan(&roomID)
 		if err == nil || !isUniqueViolation(err) {
 			break
 		}
@@ -1842,6 +1913,54 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 				a.notifyDiscord(rm, timer, false)
 			}
 		}
+	case "wave":
+		// A wave is a greeting, not a chat: one of a fixed handful of
+		// phrases, shown to whoever is in the room right now and kept
+		// nowhere. It is closed during focus for the same reason todos are
+		// -- the block is the quiet part -- and open in the lobby, the
+		// breaks and an idle room, which is when people actually arrive.
+		kind := r.FormValue("kind")
+		if !roomWaves[kind] {
+			http.NotFound(w, r)
+			return
+		}
+		if timer, err := a.activeTimer(r.Context(), rm.ID, u.ID); err == nil && timer != nil && timer.Phase == "focus" {
+			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("Waves wait for the break — it's focus time."), http.StatusSeeOther)
+			return
+		}
+		if !a.limiter.allow("wave:"+u.ID, maxWavesPerMinute, time.Minute) {
+			http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("That's plenty of waving for now."), http.StatusSeeOther)
+			return
+		}
+		a.hub.broadcastJSON(code, map[string]string{
+			"type": "wave", "actorId": u.ID, "actor": u.DisplayName, "kind": kind,
+		})
+		action = ""
+	case "timer-stop":
+		// Stopping ends the stopwatch for everyone in it and, in a temporary
+		// room, closes the room -- the same lever as changing a live run's
+		// sessions, so it belongs to the same person. Everyone else has
+		// Leave, which banks their own time without touching the others'.
+		if rm.CreatorID != u.ID {
+			http.Redirect(w, r, "/f/"+code+"?error="+url.QueryEscape("Only whoever started this room can stop it for everyone — you can leave instead and keep your time."), http.StatusSeeOther)
+			return
+		}
+		stopped, err := a.stopRoomStopwatch(r.Context(), rm.ID)
+		if err != nil {
+			http.Error(w, "could not stop the stopwatch", http.StatusInternalServerError)
+			return
+		}
+		action = ""
+		if stopped {
+			timer, transitioned, _ := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+			if transitioned {
+				a.broadcastTimerPhase(rm, timer)
+			}
+			if timer == nil && rm.Ephemeral {
+				http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+				return
+			}
+		}
 	case "timer-leave":
 		if ended, _ := a.leaveTimer(r.Context(), rm, u.ID); ended {
 			// The last participant left: for a temporary room that empties the
@@ -1966,7 +2085,8 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 	err = tx.QueryRow(ctx, `
 		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session,
 			tr.phase_started_at, tr.phase_ends_at, tr.paused_at, tr.paused_remaining_seconds,
-			COALESCE((SELECT tp.confirmed_session FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2), 0)
+			COALESCE((SELECT tp.confirmed_session FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2), 0),
+			tr.stopwatch
 		FROM timer_runs tr
 		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
 		ORDER BY tr.created_at DESC
@@ -1974,7 +2094,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 		FOR UPDATE`, roomID, userID).Scan(
 		&timer.ID, &timer.Phase, &timer.FocusMinutes, &timer.BreakMinutes, &timer.TotalSessions,
 		&timer.CurrentSession, &timer.PhaseStartedAt, &timer.PhaseEndsAt, &timer.PausedAt,
-		&timer.PausedRemainingSeconds, &timer.ViewerConfirmedSession,
+		&timer.PausedRemainingSeconds, &timer.ViewerConfirmedSession, &timer.Stopwatch,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
@@ -2030,7 +2150,7 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			// rooms therefore never count the same minute twice and never
 			// drop a real one; whichever session completes first claims the
 			// time. Solo timers are separate and unaffected.
-			if err = creditFocusSession(ctx, tx, timer.ID, timer.PhaseStartedAt, timer.PhaseEndsAt); err != nil {
+			if err = creditFocusSession(ctx, tx, timer.ID, timer.PhaseStartedAt, timer.PhaseEndsAt, ""); err != nil {
 				return nil, false, err
 			}
 			if timer.CurrentSession >= timer.TotalSessions {
@@ -2176,7 +2296,11 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 // claims its own full window so later completions subtract it in turn. Runs
 // inside normalizeTimer's transaction — the caller holds the run's row lock,
 // so one session can never be credited twice.
-func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end time.Time) error {
+//
+// onlyUser narrows the credit to one participant -- someone leaving a
+// stopwatch run early, who keeps the time they put in. Empty credits
+// everyone, which is what a session ending does.
+func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end time.Time, onlyUser string) error {
 	if !end.After(start) {
 		return nil
 	}
@@ -2192,8 +2316,8 @@ func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end
 		FROM timer_participants tp
 		LEFT JOIN focus_credits fc ON fc.user_id = tp.user_id
 			AND fc.ended_at > $2 AND fc.started_at < $3
-		WHERE tp.timer_run_id = $1
-		ORDER BY tp.user_id, fc.started_at`, runID, start, end)
+		WHERE tp.timer_run_id = $1 AND ($4 = '' OR tp.user_id::text = $4)
+		ORDER BY tp.user_id, fc.started_at`, runID, start, end, onlyUser)
 	if err != nil {
 		return err
 	}
@@ -2253,7 +2377,8 @@ func creditFocusSession(ctx context.Context, tx pgx.Tx, runID string, start, end
 	// actually credited here.
 	if _, err = tx.Exec(ctx, `
 		INSERT INTO focus_credits (user_id, started_at, ended_at)
-		SELECT user_id, GREATEST($2, joined_at), $3 FROM timer_participants WHERE timer_run_id = $1`, runID, start, end); err != nil {
+		SELECT user_id, GREATEST($2, joined_at), $3 FROM timer_participants
+		WHERE timer_run_id = $1 AND ($4 = '' OR user_id::text = $4)`, runID, start, end, onlyUser); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `DELETE FROM focus_credits WHERE ended_at < now() - interval '2 days'`)
@@ -2439,10 +2564,61 @@ func (a *app) leaveTimer(ctx context.Context, rm room, userID string) (ended boo
 	if err != nil || timer == nil || !timer.Participant {
 		return false, err
 	}
+	if timer.Stopwatch && timer.Phase == "focus" {
+		if err := a.creditStopwatchLeaver(ctx, timer.ID, userID); err != nil {
+			return false, err
+		}
+	}
 	if _, err := a.db.Exec(ctx, `DELETE FROM timer_participants WHERE timer_run_id = $1 AND user_id = $2`, timer.ID, userID); err != nil {
 		return false, err
 	}
 	return a.endTimerIfNoParticipants(ctx, timer.ID), nil
+}
+
+// creditStopwatchLeaver banks the time one participant spent in a running
+// stopwatch before they leave it.
+//
+// Leaving a countdown mid-block forfeits the block, because the block is the
+// unit: you either finished it or you didn't. A stopwatch has no such unit --
+// the time on it is simply time worked -- so walking out keeps what was
+// earned. The run's row is locked for the same reason normalizeTimer locks
+// it: a stop landing at the same moment must not credit this person twice.
+func (a *app) creditStopwatchLeaver(ctx context.Context, runID, userID string) error {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var started time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT phase_started_at FROM timer_runs
+		WHERE id = $1 AND stopwatch AND phase = 'focus' AND ended_at IS NULL
+		FOR UPDATE`, runID).Scan(&started)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // already stopped: whoever stopped it did the crediting
+	}
+	if err != nil {
+		return err
+	}
+	if err = creditFocusSession(ctx, tx, runID, started, time.Now(), userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// stopRoomStopwatch ends a room's running stopwatch by pulling its deadline
+// in to now. It deliberately does nothing else: the next normalizeTimer finds
+// a focus phase that has reached its end and credits and closes it exactly
+// as it would a countdown that ran out.
+func (a *app) stopRoomStopwatch(ctx context.Context, roomID string) (bool, error) {
+	tag, err := a.db.Exec(ctx, `
+		UPDATE timer_runs SET phase_ends_at = now() - interval '1 second'
+		WHERE room_id = $1 AND stopwatch AND phase = 'focus' AND ended_at IS NULL
+			AND phase_ends_at > now()`, roomID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // confirmCheckin marks userID as staying for the room's next session while
@@ -2535,12 +2711,20 @@ func (a *app) startRoomTimer(ctx context.Context, rm room, userID string, focusM
 		return false, tx.Commit(ctx)
 	}
 
+	// A stopwatch room's run is one open-ended session: whatever length the
+	// request carried is ignored in favour of the ceiling, and there is no
+	// second session for a break to lead to.
+	sessions := rm.AutoSessions
+	if rm.Stopwatch {
+		focusMinutes = stopwatchMaxMinutes
+		sessions = 1
+	}
 	ends := time.Now().Add(30 * time.Second)
 	var runID string
 	if err = tx.QueryRow(ctx, `
-		INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at)
-		VALUES ($1, $2, 'lobby', $3, $4, $5, $6)
-		RETURNING id`, rm.ID, userID, focusMinutes, rm.BreakMinutes, rm.AutoSessions, ends).Scan(&runID); err != nil {
+		INSERT INTO timer_runs (room_id, host_user_id, phase, focus_minutes, break_minutes, total_sessions, phase_ends_at, stopwatch)
+		VALUES ($1, $2, 'lobby', $3, $4, $5, $6, $7)
+		RETURNING id`, rm.ID, userID, focusMinutes, rm.BreakMinutes, sessions, ends, rm.Stopwatch).Scan(&runID); err != nil {
 		return false, err
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO timer_participants (timer_run_id, user_id) VALUES ($1, $2)`, runID, userID); err != nil {
@@ -2805,11 +2989,11 @@ func (a *app) normalizeSoloTimer(ctx context.Context, userID string) (*timerRun,
 func (a *app) activeSoloTimer(ctx context.Context, userID string) (*timerRun, error) {
 	var t timerRun
 	err := a.db.QueryRow(ctx, `
-		SELECT id, phase, focus_minutes, break_minutes, total_sessions, current_session, phase_started_at, phase_ends_at
+		SELECT id, phase, focus_minutes, break_minutes, total_sessions, current_session, phase_started_at, phase_ends_at, stopwatch
 		FROM timer_runs
 		WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL
 		ORDER BY created_at DESC
-		LIMIT 1`, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt)
+		LIMIT 1`, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.Stopwatch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -2824,11 +3008,12 @@ func (a *app) activeTimer(ctx context.Context, roomID, userID string) (*timerRun
 	err := a.db.QueryRow(ctx, `
 		SELECT tr.id, tr.phase, tr.focus_minutes, tr.break_minutes, tr.total_sessions, tr.current_session, tr.phase_started_at, tr.phase_ends_at,
 			tr.paused_at, tr.paused_remaining_seconds,
-			COALESCE((SELECT tp.confirmed_session FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2), 0)
+			COALESCE((SELECT tp.confirmed_session FROM timer_participants tp WHERE tp.timer_run_id = tr.id AND tp.user_id = $2), 0),
+			tr.stopwatch
 		FROM timer_runs tr
 		WHERE tr.room_id = $1 AND tr.ended_at IS NULL AND tr.phase <> 'ended'
 		ORDER BY tr.created_at DESC
-		LIMIT 1`, roomID, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.PausedAt, &t.PausedRemainingSeconds, &t.ViewerConfirmedSession)
+		LIMIT 1`, roomID, userID).Scan(&t.ID, &t.Phase, &t.FocusMinutes, &t.BreakMinutes, &t.TotalSessions, &t.CurrentSession, &t.PhaseStartedAt, &t.PhaseEndsAt, &t.PausedAt, &t.PausedRemainingSeconds, &t.ViewerConfirmedSession, &t.Stopwatch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -3096,7 +3281,7 @@ func (a *app) findRoom(ctx context.Context, code string) (room, bool) {
 	var rm room
 	var pendingOwner *string
 	var transferAt *time.Time
-	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin, pending_owner_id, ownership_transfer_at FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral, &rm.RequireCheckin, &pendingOwner, &transferAt)
+	err := a.db.QueryRow(ctx, `SELECT id, code, name, creator_id, focus_minutes, break_minutes, auto_sessions, auto_roll, ephemeral, require_checkin, pending_owner_id, ownership_transfer_at, stopwatch FROM rooms WHERE UPPER(code) = $1`, code).Scan(&rm.ID, &rm.Code, &rm.Name, &rm.CreatorID, &rm.FocusMinutes, &rm.BreakMinutes, &rm.AutoSessions, &rm.AutoRoll, &rm.Ephemeral, &rm.RequireCheckin, &pendingOwner, &transferAt, &rm.Stopwatch)
 	if err != nil {
 		return room{}, false
 	}

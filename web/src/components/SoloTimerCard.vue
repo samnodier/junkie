@@ -11,7 +11,10 @@ import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
 import RingIdle from './RingIdle.vue';
 import RingCountdown from './RingCountdown.vue';
 import BreakReadyRing from './BreakReadyRing.vue';
+import ModeTabs from './ModeTabs.vue';
+import StopwatchIdle from './StopwatchIdle.vue';
 import { askConfirm } from '@/composables/confirm';
+import { useSoloMode } from '@/lib/soloMode';
 
 const auth = useAuthStore();
 const desk = useDeskStore();
@@ -19,9 +22,15 @@ const timer = computed(() => desk.soloTimer);
 const { endsAt } = useTimerDeadline(timer);
 const phaseKey = () => `${timer.value?.phase || 'idle'}:${timer.value?.breakPending ? 1 : 0}`;
 
+const mode = useSoloMode();
+
 function start(minutes) {
   requestPermission();
   desk.soloStart(minutes);
+}
+function startStopwatch() {
+  requestPermission();
+  desk.soloStopwatchStart();
 }
 async function cancel() {
   const ok = await askConfirm({
@@ -42,7 +51,12 @@ function expired(phase) {
 <template>
   <div class="desk-timer-view" data-mode="private">
     <article v-if="timer" class="timer-card panel desk-timer-card solo-timer" :class="timer.phase">
-      <template v-if="timer.phase === 'focus'">
+      <template v-if="timer.phase === 'focus' && timer.stopwatch">
+        <p class="label label-accent">Private stopwatch</p>
+        <RingCountdown key="solo-stopwatch" count-up :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running" aria-label="Private stopwatch" @expired="expired('focus')" />
+        <form @submit.prevent="desk.soloStopwatchStop()"><button type="submit" class="btn-primary">Stop &amp; save</button></form>
+      </template>
+      <template v-else-if="timer.phase === 'focus'">
         <p class="label label-accent">Private focus</p>
         <RingCountdown key="solo-focus" :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running" aria-label="Private focus countdown" @expired="expired('focus')" />
         <form @submit.prevent="cancel"><button type="submit" class="btn-ghost timer-cancel">End early</button></form>
@@ -59,10 +73,17 @@ function expired(phase) {
       </template>
     </article>
     <article v-else class="circle-timer-wrap timer-card panel idle desk-timer-card">
-      <form class="circle-timer-form" @submit.prevent>
-        <RingIdle :model-value="50" aria-label="Set private focus duration" @submit="start" />
-      </form>
-      <p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to focus</p>
+      <ModeTabs v-model="mode" />
+      <template v-if="mode === 'stopwatch'">
+        <StopwatchIdle @start="startStopwatch" />
+        <p class="label desk-ring-hint">Counts up until you stop · tap ring to start</p>
+      </template>
+      <template v-else>
+        <form class="circle-timer-form" @submit.prevent>
+          <RingIdle :model-value="50" aria-label="Set private focus duration" @submit="start" />
+        </form>
+        <p class="label desk-ring-hint">Scroll ±1 · buttons ±5 · tap ring to focus</p>
+      </template>
     </article>
   </div>
 </template>

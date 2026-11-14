@@ -3,6 +3,7 @@ import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
 import { applyTodoAction } from '@/lib/optimisticTodo';
+import { waveMessage } from '@/lib/waves';
 import { onRoomInvite, onBreakInvite, syncTimerNotification } from '@/lib/notify';
 import { isWatching } from '@/lib/presence';
 
@@ -76,6 +77,15 @@ export const useDeskStore = defineStore('desk', {
       await postForm('/solo/start', { focus_minutes: String(minutes) });
       await this.refresh();
     },
+    // A stopwatch has no length to send; stopping it banks what it counted.
+    async soloStopwatchStart() {
+      await postForm('/solo/start', { mode: 'stopwatch' });
+      await this.refresh();
+    },
+    async soloStopwatchStop() {
+      await postForm('/solo/stop');
+      await this.refresh();
+    },
     async soloCancel() {
       await postForm('/solo/cancel');
       await this.refresh();
@@ -124,6 +134,13 @@ export const useDeskStore = defineStore('desk', {
                 toasts.show(`${event?.actor || 'Someone'} completed: ${short}`);
               }
               this.refresh();
+              return;
+            }
+            if (type === 'wave') {
+              // A greeting from a room you're not looking at: worth a toast
+              // while you're idle at the desk, not while you're in a block.
+              const message = event?.actorId === meId ? '' : waveMessage(event, meId, name);
+              if (message && this.soloTimer?.phase !== 'focus') toasts.show(message);
               return;
             }
             if (type === 'timer-lobby') {

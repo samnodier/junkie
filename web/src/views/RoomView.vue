@@ -21,6 +21,7 @@ import TodoGroups from '@/components/TodoGroups.vue';
 import JoinPromptModal from '@/components/JoinPromptModal.vue';
 import StartConfirmModal from '@/components/StartConfirmModal.vue';
 import PipTimer from '@/components/PipTimer.vue';
+import WaveBar from '@/components/WaveBar.vue';
 import SoundPref from '@/components/SoundPref.vue';
 import { askConfirm } from '@/composables/confirm';
 
@@ -320,6 +321,9 @@ onUnmounted(() => {
                 </template>
               </article>
             </PipTimer>
+
+            <!-- Greetings live around the block, never inside it. -->
+            <WaveBar v-if="phase !== 'focus'" />
 
             <template v-if="!timer">
               <details class="room-details panel" data-room-section="settings" :open="sections.settings.value" @toggle="toggleSection('settings', $event.target.open)">

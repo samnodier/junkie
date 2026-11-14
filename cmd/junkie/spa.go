@@ -271,6 +271,9 @@ func apiRoomTimer(timer *timerRun) map[string]any {
 		"participants":   participants,
 		"paused":         paused,
 		"breakPending":   timer.BreakPending(),
+		// A stopwatch counts up from startedAt; endsAt is only its ceiling.
+		"stopwatch": timer.Stopwatch,
+		"startedAt": timer.PhaseStartedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -313,6 +316,8 @@ func (a *app) apiDesk(w http.ResponseWriter, r *http.Request) {
 			"endsAt":       soloTimer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
 			"secondsLeft":  seconds,
 			"breakPending": soloBreakPending(soloTimer),
+			"stopwatch":    soloTimer.Stopwatch,
+			"startedAt":    soloTimer.PhaseStartedAt.UTC().Format(time.RFC3339Nano),
 		}
 	}
 
@@ -439,6 +444,7 @@ func (a *app) apiRoom(w http.ResponseWriter, r *http.Request) {
 			"autoSessions":   rm.AutoSessions,
 			"autoRoll":       rm.AutoRoll,
 			"ephemeral":      rm.Ephemeral,
+			"stopwatch":      rm.Stopwatch,
 			"requireCheckin": rm.RequireCheckin,
 		},
 		"isCreator": rm.CreatorID == u.ID,

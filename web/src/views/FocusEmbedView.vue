@@ -65,6 +65,7 @@ const caption = computed(() => {
   if (!t) return { label: 'Ready', detail: '' };
   if (t.phase === 'lobby') return { label: 'Starting', detail: '' };
   if (t.phase === 'focus') {
+    if (t.stopwatch) return { label: 'Stopwatch', detail: '' };
     return { label: 'Focus', detail: `${t.currentSession}/${t.totalSessions}` };
   }
   if (t.breakPending || t.paused) return { label: 'Break ready', detail: '' };
@@ -164,6 +165,7 @@ onUnmounted(() => {
         :key="`${timer.runId}-${phase}`"
         :ends-at="endsAt"
         :total-seconds="totalSeconds"
+        :count-up="phase === 'focus' && Boolean(timer.stopwatch)"
         :ring-class="ringClass"
         :aria-label="captionText"
         @expired="expired"

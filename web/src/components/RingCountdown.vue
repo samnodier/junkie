@@ -15,6 +15,11 @@ const props = defineProps({
   totalSeconds: { type: Number, required: true },
   ringClass: { type: String, default: 'running' },
   ariaLabel: { type: String, default: 'Focus countdown' },
+  // Stopwatch: show the time elapsed instead of the time left. The deadline
+  // is then the stopwatch's ceiling and totalSeconds the length of that
+  // ceiling, so elapsed is still derived from the same anchored deadline --
+  // and the ring still expires, once, if the ceiling is ever reached.
+  countUp: { type: Boolean, default: false },
 });
 const emit = defineEmits(['expired']);
 
@@ -29,13 +34,25 @@ const left = computed(() => {
   return Math.max(0, Math.floor((deadline.value - now.value) / 1000));
 });
 
+const elapsed = computed(() => Math.max(0, props.totalSeconds - left.value));
+
 const display = computed(() => {
-  const m = String(Math.floor(left.value / 60)).padStart(2, '0');
-  const s = String(left.value % 60).padStart(2, '0');
-  return `${m}:${s}`;
+  const value = props.countUp ? elapsed.value : left.value;
+  const s = String(value % 60).padStart(2, '0');
+  // Only a stopwatch can pass the hour mark in one phase; minutes alone
+  // would read 61:00, which is harder to take in than 1:01:00.
+  if (props.countUp && value >= 3600) {
+    const m = String(Math.floor((value % 3600) / 60)).padStart(2, '0');
+    return `${Math.floor(value / 3600)}:${m}:${s}`;
+  }
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${s}`;
 });
+// A countdown drains the ring. A stopwatch has no total to drain towards,
+// so its ring fills once an hour instead.
 const dashOffset = computed(() =>
-  CIRC * (1 - Math.max(0, Math.min(1, left.value / props.totalSeconds)))
+  props.countUp
+    ? CIRC * (1 - (elapsed.value % 3600) / 3600)
+    : CIRC * (1 - Math.max(0, Math.min(1, left.value / props.totalSeconds)))
 );
 
 // Fire once per deadline. Callers key this component per phase so it normally
@@ -57,7 +74,7 @@ watch(
 </script>
 
 <template>
-  <div class="circle-timer" :class="ringClass" role="timer" :aria-label="ariaLabel">
+  <div class="circle-timer" :class="[ringClass, { 'count-up': countUp }]" role="timer" :aria-label="ariaLabel">
     <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
       <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
       <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" :stroke-dashoffset="dashOffset"/>

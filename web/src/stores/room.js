@@ -3,6 +3,7 @@ import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
 import { applyTodoAction } from '@/lib/optimisticTodo';
+import { waveMessage } from '@/lib/waves';
 import { onRoomInvite, onBreakInvite, onTimerEnd, syncTimerNotification } from '@/lib/notify';
 import { isWatching } from '@/lib/presence';
 
@@ -122,6 +123,11 @@ export const useRoomStore = defineStore('room', {
     async addTodo(text) {
       await this.action('todos', { text });
     },
+    // No refresh: a wave changes nothing in the room's state. Everyone,
+    // the sender included, hears about it over the socket.
+    async wave(kind) {
+      return postForm(`/r/${encodeURIComponent(this.code)}/wave`, { kind });
+    },
     async todoAction(id, action) {
       applyTodoAction(this.mine, id, action);
       await postForm(`/todo/${encodeURIComponent(id)}/${action}`);
@@ -154,6 +160,11 @@ export const useRoomStore = defineStore('room', {
             toasts.show(`${event?.actor || 'Someone'} completed: ${short}`);
           }
           this.scheduleRefresh();
+          return;
+        }
+        if (type === 'wave') {
+          const message = waveMessage(event, meId);
+          if (message) toasts.show(message);
           return;
         }
         if (type === 'timer-lobby') {

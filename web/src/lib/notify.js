@@ -171,6 +171,11 @@ function describe(timer, label) {
   if (phase === 'focus' || phase === 'break') {
     const heading = phase === 'focus' ? 'Focusing' : 'On a break';
     if (timer.paused) return { title: `${heading}${where}`, body: 'Paused' };
+    // A stopwatch has no end to announce; say when it began instead.
+    if (phase === 'focus' && timer.stopwatch) {
+      const since = clockTime(timer.startedAt);
+      return { title: `${heading}${where}`, body: since ? `Stopwatch · since ${since}` : 'Stopwatch running' };
+    }
     const until = clockTime(timer.endsAt);
     return { title: `${heading}${where}`, body: until ? `Until ${until}` : 'In progress' };
   }

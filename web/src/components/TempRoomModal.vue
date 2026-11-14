@@ -4,9 +4,13 @@
 // so the server creates the room and redirects to its /f/{code} screen.
 import { onMounted, onUnmounted, ref } from 'vue';
 import { shortFileName } from '@/lib/fileName';
+import ModeTabs from './ModeTabs.vue';
 
 const emit = defineEmits(['close']);
 const firstField = ref(null);
+// Timer is the default; the stopwatch tab swaps the settings for its own
+// explanation, since there is nothing to set.
+const mode = ref('timer');
 
 function onKey(event) {
   if (event.key === 'Escape') emit('close');
@@ -56,12 +60,22 @@ async function pickSound(event) {
   <Teleport to="body">
     <div class="join-prompt-backdrop" @click.self="emit('close')">
       <div class="join-prompt-card panel temp-room-card" role="dialog" aria-labelledby="temp-room-title">
+        <ModeTabs v-model="mode" />
         <h2 id="temp-room-title">Start a temporary focus room</h2>
-        <p class="muted temp-room-blurb">A throwaway room for a single block. Share the link, focus together, and it disappears when you're done.</p>
+        <p v-if="mode === 'timer'" class="muted temp-room-blurb">A throwaway room for a single block. Share the link, focus together, and it disappears when you're done.</p>
+        <p v-else class="muted temp-room-blurb">A throwaway room with a shared stopwatch. Share the link, work for as long as it takes, and it disappears when you stop it.</p>
         <!-- multipart because the room can be created with its own sound
              already attached; the server parses either encoding. -->
         <form class="stack temp-room-form" method="post" action="/rooms" enctype="multipart/form-data">
           <input type="hidden" name="ephemeral" value="1">
+          <input type="hidden" name="mode" :value="mode">
+          <ul v-if="mode === 'stopwatch'" class="stopwatch-notes">
+            <li><strong>Counts up from zero.</strong> No length to choose, no breaks, no sessions — it runs until you stop it.</li>
+            <li><strong>Everyone's time counts.</strong> Each person is credited for the time they were in, from when they joined.</li>
+            <li><strong>Leaving keeps your time.</strong> Anyone can leave early; only you can stop it for the whole room.</li>
+            <li><strong>Stops itself at 3 hours</strong>, the longest a focus block can be.</li>
+          </ul>
+          <template v-else>
           <div class="timer-fields">
             <label>Focus<input ref="firstField" type="number" name="focus_minutes" min="5" max="180" value="25" inputmode="numeric"></label>
             <label>Break<input type="number" name="break_minutes" min="1" max="60" value="5" inputmode="numeric"></label>
@@ -107,6 +121,7 @@ async function pickSound(event) {
               >
             </label>
           </div>
+          </template>
           <div class="join-prompt-actions">
             <button type="submit" class="btn-primary">Create &amp; get link</button>
             <button type="button" class="btn-ghost" @click="emit('close')">Cancel</button>

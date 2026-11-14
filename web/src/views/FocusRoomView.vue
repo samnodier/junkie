@@ -20,6 +20,7 @@ import RingCountdown from '@/components/RingCountdown.vue';
 import RingIdle from '@/components/RingIdle.vue';
 import ParticipantStack from '@/components/ParticipantStack.vue';
 import PipTimer from '@/components/PipTimer.vue';
+import WaveBar from '@/components/WaveBar.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -82,6 +83,13 @@ async function copyLink(which) {
 function start() {
   requestPermission();
   room.action('timer-start');
+}
+// A stopwatch room: set when the room was made, and carried on its run.
+const stopwatch = computed(() => Boolean(room.room?.stopwatch));
+async function stopForEveryone() {
+  // Stopping credits everyone still in and closes the room; the socket's
+  // "deleted" signal is what takes each of them home, this tab included.
+  await room.action('timer-stop');
 }
 // The startable break ring owns its value via v-model (see BreakReadyRing
 // for why :model-value plus a listener freezes it); seed it each time a
@@ -229,20 +237,22 @@ onUnmounted(() => {
         <section class="room-focus-shell">
           <!-- Waiting room: no run yet, gather and start -->
           <template v-if="phase === 'idle'">
-            <p class="label label-accent">Ready · {{ room.room?.autoSessions }} × {{ room.room?.focusMinutes }}/{{ room.room?.breakMinutes }}</p>
+            <p v-if="stopwatch" class="label label-accent">Ready · stopwatch</p>
+            <p v-else class="label label-accent">Ready · {{ room.room?.autoSessions }} × {{ room.room?.focusMinutes }}/{{ room.room?.breakMinutes }}</p>
             <p class="room-focus-name">{{ room.room?.name }}</p>
-            <div class="circle-timer room-focus-ring" role="img" :aria-label="`${room.room?.focusMinutes} minute focus block, ready to start`">
+            <div class="circle-timer room-focus-ring" role="img" :aria-label="stopwatch ? 'Stopwatch, ready to start' : `${room.room?.focusMinutes} minute focus block, ready to start`">
               <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
                 <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
                 <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
               </svg>
               <div class="circle-timer-core">
-                <div class="circle-timer-countdown">{{ room.room?.focusMinutes }}:00</div>
+                <div class="circle-timer-countdown">{{ stopwatch ? '00' : room.room?.focusMinutes }}:00</div>
               </div>
             </div>
             <ParticipantStack v-if="heads.length" :members="heads" />
             <p class="label">{{ heads.length === 1 ? 'Just you so far' : `${heads.length} here` }} · waiting to start</p>
-            <form @submit.prevent="start"><button type="submit" class="btn-primary big-action">Start focus block</button></form>
+            <form @submit.prevent="start"><button type="submit" class="btn-primary big-action">{{ stopwatch ? 'Start stopwatch' : 'Start focus block' }}</button></form>
+            <WaveBar />
             <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
           </template>
 
@@ -253,7 +263,22 @@ onUnmounted(() => {
             <RingCountdown :key="`${timer.runId}-lobby`" :ends-at="endsAt" :total-seconds="30" ring-class="running room-focus-ring" aria-label="Starting countdown" @expired="expired" />
             <ParticipantStack v-if="heads.length" :members="heads" />
             <p class="label">{{ heads.length }} in · here when it starts</p>
+            <WaveBar />
             <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
+          </template>
+
+          <!-- Stopwatch: counts up for everyone until the creator stops it -->
+          <template v-else-if="phase === 'focus' && timer.stopwatch">
+            <p class="label label-accent">Stopwatch</p>
+            <p class="room-focus-name">{{ room.room?.name }}</p>
+            <RingCountdown :key="`${timer.runId}-stopwatch`" count-up :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring focus-chrome-toggle" aria-label="Stopwatch" @expired="expired" @click="toggleChrome" />
+            <ParticipantStack v-if="heads.length > 1" :members="heads" />
+            <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
+            <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join the stopwatch</button>
+            <template v-else>
+              <button v-if="room.isCreator" type="button" class="btn-primary" @click="stopForEveryone">{{ heads.length === 1 ? 'Stop & save' : 'Stop for everyone' }}</button>
+              <button type="button" class="btn-ghost timer-cancel" @click="leave">{{ room.isCreator && heads.length === 1 ? 'Leave' : 'Leave · keep your time' }}</button>
+            </template>
           </template>
 
           <!-- Focus: the distraction-free block -->
@@ -316,6 +341,7 @@ onUnmounted(() => {
             </template>
             <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join this block</button>
             <button v-if="canSkipBreak" type="button" class="btn-ghost" @click="room.action('timer-skip-break')">Skip break</button>
+            <WaveBar />
             <button v-if="timer.participant" type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
           </template>
         </section>
