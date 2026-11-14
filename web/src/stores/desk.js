@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
+import { applyTodoAction } from '@/lib/optimisticTodo';
 import { onRoomInvite, onBreakInvite, syncTimerNotification } from '@/lib/notify';
 import { isWatching } from '@/lib/presence';
 
@@ -55,6 +56,9 @@ export const useDeskStore = defineStore('desk', {
       await this.refresh();
     },
     async todoAction(id, action) {
+      // The id lives in exactly one of these lists; the others ignore it.
+      applyTodoAction(this.todos, id, action);
+      for (const room of this.rooms) applyTodoAction(room.mine || [], id, action);
       await postForm(`/todo/${encodeURIComponent(id)}/${action}`);
       await this.refresh();
     },

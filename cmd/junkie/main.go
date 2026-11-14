@@ -443,7 +443,7 @@ func main() {
 	// Reject state-changing requests from other origins (CSRF). Requests
 	// without browser origin metadata (curl, health checks) still pass.
 	csrf := http.NewCrossOriginProtection()
-	handler := securityHeaders(csrf.Handler(mux))
+	handler := securityHeaders(csrf.Handler(formActionJSON(mux)))
 
 	addr := getenv("ADDR", ":8080")
 	srv := &http.Server{
@@ -3021,9 +3021,18 @@ func (a *app) roomMembersPage(w http.ResponseWriter, r *http.Request) {
 	a.spaPage(w, r)
 }
 
+// ctxUserKey carries the signed-in user through a request once requireAuth
+// has resolved the session, so the handler's own currentUser call is free.
+type ctxUserKey struct{}
+
 func (a *app) currentUser(r *http.Request) (user, bool) {
 	if a.currentUserOverride != nil {
 		return a.currentUserOverride(r)
+	}
+	// requireAuth already looked this session up; handlers asking again for
+	// the same request get that answer instead of a second database trip.
+	if u, ok := r.Context().Value(ctxUserKey{}).(user); ok {
+		return u, true
 	}
 	cookie, err := r.Cookie("junkie_session")
 	if err != nil {
@@ -3041,11 +3050,12 @@ func (a *app) currentUser(r *http.Request) (user, bool) {
 
 func (a *app) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := a.currentUser(r); !ok {
+		u, ok := a.currentUser(r)
+		if !ok {
 			http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
 			return
 		}
-		next(w, r)
+		next(w, r.WithContext(context.WithValue(r.Context(), ctxUserKey{}, u)))
 	}
 }
 

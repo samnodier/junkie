@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { connectSignals } from '@/lib/ws';
 import { useToastStore } from '@/stores/toasts';
 import { postForm } from '@/lib/postForm';
+import { applyTodoAction } from '@/lib/optimisticTodo';
 import { onRoomInvite, onBreakInvite, onTimerEnd, syncTimerNotification } from '@/lib/notify';
 import { isWatching } from '@/lib/presence';
 
@@ -122,6 +123,7 @@ export const useRoomStore = defineStore('room', {
       await this.action('todos', { text });
     },
     async todoAction(id, action) {
+      applyTodoAction(this.mine, id, action);
       await postForm(`/todo/${encodeURIComponent(id)}/${action}`);
       await this.refresh();
     },
