@@ -96,8 +96,11 @@ export const useRoomStore = defineStore('room', {
         // plays for everyone who joined, whatever their own switch says.
         const sound = { forcedSound: Boolean(this.room?.ephemeral) };
         if (this.lastPhase && this.lastPhase !== phase) {
-          if (this.lastPhase === 'focus' && (phase === 'break' || phase === 'idle')) onTimerEnd('focus', sound);
-          else if (this.lastPhase === 'break' && phase === 'focus') onTimerEnd('break', sound);
+          // A stopwatch at its ceiling pauses rather than finishes, and
+          // continuing it is not a break ending -- nothing to announce there.
+          if (this.lastPhase === 'focus' && (phase === 'break' || phase === 'idle')) {
+            onTimerEnd('focus', { ...sound, stopwatchPaused: Boolean(this.timer?.stopwatchPaused) });
+          } else if (this.lastPhase === 'break' && phase === 'focus' && !this.timer?.stopwatch) onTimerEnd('break', sound);
         }
         this.lastPhase = phase;
 

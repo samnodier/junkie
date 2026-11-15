@@ -19,7 +19,7 @@
 - **Accounts** are a username and a password — junkie collects no email address, so password resets go through [Discord](#discord-bot). Link your Discord *before* you need it.
 - **Rooms** are shared spaces at `/r/{code}` with their own members, public todo board and timer. Up to 5 per account, 100 members each. Timer settings are open to every member; removing members and changing the room's sound need a room admin; deleting and transferring are the creator's.
 - **Temporary rooms** at `/f/{code}` are throwaway blocks for a few people: joined by link, joinable mid-block, and deleted the moment the run ends. They are also the one place the session count can be changed while the block runs — a stepper on each break, for when six sessions turns out to be four.
-- **Stopwatch** — private focus and temporary rooms have **Timer | Stopwatch** tabs. A stopwatch counts up until you stop it and banks the time it counted; in a temporary room everyone is credited from when they joined, leaving keeps your time, and only the creator can stop it for everyone. It stops itself at 3 hours. Ordinary rooms stay countdown-only.
+- **Stopwatch** — private focus and temporary rooms have **Timer | Stopwatch** tabs. A stopwatch counts up until you stop it and banks the time it counted; in a temporary room everyone is credited from when they joined, leaving keeps your time, and only the creator can stop it for everyone. It shows no ring, since there is no end to measure against. At 6 hours it pauses itself with the time saved: **Continue** runs it for up to another 6 hours (where it pauses again), **Stop** ends it, and a pause left for an hour ends it on its own. Ordinary rooms stay countdown-only.
 - **Waves** — a row of one-tap greetings under a room's timer (👋 Hi!, 🍀 Good luck, …), shown briefly to everyone there and stored nowhere. Not a chat, and refused during focus. Rooms linked to Discord relay them to the channel, and `/junkie wave` sends one back.
 - **Streaming** — a temporary room has an overlay twin at `/f/{code}/embed` for an OBS browser source, and the countdown can pop out into an always-on-top window. Add `?theme=light` for dark text over a light scene, or `?theme=dark` for light text over a dark scene (the default); the background stays transparent.
 - **Sound** — the chime toggle is per-device and per-person; the sound itself belongs to the room, and an admin can upload one (15 s, 512 KB, MP3/OGG/WAV).
@@ -93,7 +93,7 @@ The desk is three panes — the block, the todos and the rooms. `tab` moves betw
 | todos | `space` | complete or un-complete |
 | todos | `a` / `e` / `d` / `u` | add · edit · remove · undo the last remove |
 | block | `f` / `b` / `s` | start focus · take the break · skip it |
-| block | `t` | start a stopwatch (signed in) — it counts up, and `x` stops it and banks the time |
+| block | `t` | start a stopwatch (signed in) — it counts up, and `x` stops it and banks the time. It pauses itself at 6 hours: `t` continues, `x` stops |
 | block | `x` | end the block on screen — your own, or leave a room's. Asks first either way; ending your own banks none of its minutes |
 | desk | `A` | join a room by code, without leaving the desk |
 | desk | `tab` `shift+tab` | move the focus between the three panes |

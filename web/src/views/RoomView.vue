@@ -4,7 +4,7 @@
 // (ready/lobby/focus/break with join/leave/pause/skip and the focus-mode
 // fullscreen), settings/share/controls sections, and the room todos board.
 import { computed, onMounted, onUnmounted, provide, ref, watch, watchEffect } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useRoomStore } from '@/stores/room';
 import { useToastStore } from '@/stores/toasts';
@@ -26,6 +26,7 @@ import SoundPref from '@/components/SoundPref.vue';
 import { askConfirm } from '@/composables/confirm';
 
 const route = useRoute();
+const router = useRouter();
 const auth = useAuthStore();
 const room = useRoomStore();
 const wakeLock = useWakeLock();
@@ -33,6 +34,18 @@ provide('todoApi', {
   todoAction: (id, action) => room.todoAction(id, action),
   editTodo: (id, text, patch) => room.editTodo(id, text, patch),
 });
+
+// A temporary room belongs on its own screen (/f/CODE): this one has no
+// stopwatch, stop or session stepper, and would draw a stopwatch as a
+// countdown from its ceiling. The server sends page loads there; this
+// catches the navigations that never leave the app.
+watch(
+  () => room.room?.ephemeral && room.room?.code,
+  (code) => {
+    if (code) router.replace({ path: `/f/${code}`, query: route.query });
+  },
+  { immediate: true }
+);
 
 const draft = ref('');
 const renaming = ref(false);
@@ -186,7 +199,7 @@ onUnmounted(() => {
       </form>
     </ConfirmCard>
 
-    <template v-else-if="room.loaded">
+    <template v-else-if="room.loaded && !room.room?.ephemeral">
       <!-- Focus mode: fullscreen ring, todos hidden -->
       <div v-if="focusMode" class="room-focus-page" data-room-page :data-room-sync="room.code">
         <div class="desk-room-bar">

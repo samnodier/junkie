@@ -21,6 +21,8 @@ import BreakReadyRing from '@/components/BreakReadyRing.vue';
 import PipTimer from '@/components/PipTimer.vue';
 import ModeTabs from '@/components/ModeTabs.vue';
 import StopwatchIdle from '@/components/StopwatchIdle.vue';
+import StopwatchPaused from '@/components/StopwatchPaused.vue';
+import { stretchWords } from '@/lib/elapsed';
 import { askConfirm } from '@/composables/confirm';
 import { useSoloMode } from '@/lib/soloMode';
 
@@ -54,7 +56,8 @@ async function cancel() {
   desk.soloCancel();
 }
 function expired(phase) {
-  onTimerEnd(phase);
+  // A stopwatch reaching its ceiling pauses; it hasn't finished anything.
+  onTimerEnd(phase, { stopwatchPaused: Boolean(timer.value?.stopwatch) });
   expireNudge(() => desk.refresh(), phaseKey);
 }
 
@@ -106,7 +109,7 @@ onUnmounted(() => {
             <p class="room-focus-name">{{ auth.privateRoomName }}</p>
             <template v-if="mode === 'stopwatch'">
               <StopwatchIdle ring-class="room-focus-ring" @start="startStopwatch" />
-              <p class="label desk-ring-hint">Counts up until you stop · tap ring to start</p>
+              <p class="label desk-ring-hint">Counts up until you stop it</p>
             </template>
             <template v-else>
               <form class="circle-timer-form" @submit.prevent>
@@ -120,9 +123,19 @@ onUnmounted(() => {
           <template v-else-if="timer.phase === 'focus' && timer.stopwatch">
             <p class="label label-accent">Private stopwatch</p>
             <p class="room-focus-name">{{ auth.privateRoomName }}</p>
-            <RingCountdown key="solo-stopwatch" count-up :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running room-focus-ring focus-chrome-toggle" aria-label="Private stopwatch" @expired="expired('focus')" @click="toggleChrome" />
+            <RingCountdown key="solo-stopwatch" count-up :base-seconds="timer.stopwatchBaseSeconds || 0" :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running room-focus-ring focus-chrome-toggle" aria-label="Private stopwatch" @expired="expired('focus')" @click="toggleChrome" />
             <p class="label">Focusing solo · your time counts when you stop</p>
             <button type="button" class="btn-primary" @click="desk.soloStopwatchStop()">Stop &amp; save</button>
+          </template>
+
+          <!-- Stopwatch paused at its ceiling: continue or stop -->
+          <template v-else-if="timer.stopwatchPaused">
+            <p class="label label-warn">Private stopwatch · paused</p>
+            <p class="room-focus-name">{{ auth.privateRoomName }}</p>
+            <StopwatchPaused :seconds="timer.stopwatchBaseSeconds" ring-class="room-focus-ring" />
+            <p class="label stopwatch-paused-note">Saved so far. Continue for up to {{ stretchWords(timer.focusMinutes) }} more, or stop. Left paused for an hour, it ends.</p>
+            <button type="button" class="btn-primary" @click="desk.soloStopwatchContinue()">Continue</button>
+            <button type="button" class="btn-ghost timer-cancel" @click="desk.soloStopwatchStop()">Stop &amp; save</button>
           </template>
 
           <!-- Focus: the distraction-free block -->

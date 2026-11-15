@@ -15,6 +15,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { connectSignals } from '@/lib/ws';
 import { useTimerDeadline, expireNudge } from '@/composables/timerDeadline';
+import { formatElapsed } from '@/lib/elapsed';
 import RingCountdown from '@/components/RingCountdown.vue';
 import ParticipantStack from '@/components/ParticipantStack.vue';
 
@@ -68,6 +69,7 @@ const caption = computed(() => {
     if (t.stopwatch) return { label: 'Stopwatch', detail: '' };
     return { label: 'Focus', detail: `${t.currentSession}/${t.totalSessions}` };
   }
+  if (t.stopwatchPaused) return { label: 'Stopwatch', detail: 'paused' };
   if (t.breakPending || t.paused) return { label: 'Break ready', detail: '' };
   return { label: 'Break', detail: '' };
 });
@@ -77,8 +79,15 @@ const captionText = computed(() =>
 
 // A pending or paused break has no deadline to count down, so the ring would
 // read 00:00; show the length that's waiting instead.
+// A stopwatch that isn't counting -- not started yet, or paused at its
+// ceiling: no ring, and the count it stands at rather than a length.
+const stopwatchIdle = computed(
+  () => (!timer.value && Boolean(room.value?.stopwatch)) || Boolean(timer.value?.stopwatchPaused)
+);
 const stillRing = computed(() => {
   const t = timer.value;
+  if (t?.stopwatchPaused) return formatElapsed(t.stopwatchBaseSeconds);
+  if (stopwatchIdle.value) return '00:00';
   if (!t) return `${room.value?.focusMinutes ?? 25}:00`;
   if (t.phase === 'break' && (t.breakPending || t.paused)) return `${t.breakMinutes}:00`;
   return `${t.focusMinutes}:00`;
@@ -166,12 +175,13 @@ onUnmounted(() => {
         :ends-at="endsAt"
         :total-seconds="totalSeconds"
         :count-up="phase === 'focus' && Boolean(timer.stopwatch)"
+        :base-seconds="timer.stopwatchBaseSeconds || 0"
         :ring-class="ringClass"
         :aria-label="captionText"
         @expired="expired"
       />
-      <div v-else class="circle-timer room-focus-ring" role="img" :aria-label="captionText">
-        <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+      <div v-else class="circle-timer room-focus-ring" :class="{ ringless: stopwatchIdle }" role="img" :aria-label="captionText">
+        <svg v-if="!stopwatchIdle" class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
           <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
           <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
         </svg>

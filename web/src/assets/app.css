@@ -4327,13 +4327,28 @@ body.menu-drawer-open {
 body.focus-active .mode-tabs {
   display: none;
 }
-.stopwatch-idle {
+/* A stopwatch has no ring: nothing to measure progress against. The box
+   keeps the ring's width, so the digits stay the size they are inside one,
+   but gives up the square -- an empty circle's worth of space reads as
+   something missing. */
+.circle-timer.ringless,
+.circle-timer.ringless.idle {
+  aspect-ratio: auto;
+  padding-block: var(--sp-6);
+  cursor: default;
+}
+.circle-timer.ringless.focus-chrome-toggle {
   cursor: pointer;
 }
-.stopwatch-idle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-  border-radius: 50%;
+/* Paused at its ceiling: the count stands still and says so by going quiet. */
+.stopwatch-paused-count {
+  color: var(--muted);
+}
+.stopwatch-paused-note {
+  max-width: 34ch;
+  margin-inline: auto;
+  text-align: center;
+  text-wrap: balance;
 }
 .stopwatch-notes {
   display: grid;

@@ -274,6 +274,10 @@ func apiRoomTimer(timer *timerRun) map[string]any {
 		// A stopwatch counts up from startedAt; endsAt is only its ceiling.
 		"stopwatch": timer.Stopwatch,
 		"startedAt": timer.PhaseStartedAt.UTC().Format(time.RFC3339Nano),
+		// Paused at its ceiling, waiting to be continued or stopped; and
+		// what it counted in earlier stretches, which the clock adds on.
+		"stopwatchPaused":      timer.StopwatchPaused(),
+		"stopwatchBaseSeconds": timer.StopwatchBankedSeconds(),
 	}
 }
 
@@ -310,14 +314,16 @@ func (a *app) apiDesk(w http.ResponseWriter, r *http.Request) {
 			seconds = 0
 		}
 		solo = map[string]any{
-			"phase":        soloTimer.Phase,
-			"focusMinutes": soloTimer.FocusMinutes,
-			"breakMinutes": soloTimer.BreakMinutes,
-			"endsAt":       soloTimer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
-			"secondsLeft":  seconds,
-			"breakPending": soloBreakPending(soloTimer),
-			"stopwatch":    soloTimer.Stopwatch,
-			"startedAt":    soloTimer.PhaseStartedAt.UTC().Format(time.RFC3339Nano),
+			"phase":                soloTimer.Phase,
+			"focusMinutes":         soloTimer.FocusMinutes,
+			"breakMinutes":         soloTimer.BreakMinutes,
+			"endsAt":               soloTimer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
+			"secondsLeft":          seconds,
+			"breakPending":         soloBreakPending(soloTimer),
+			"stopwatch":            soloTimer.Stopwatch,
+			"startedAt":            soloTimer.PhaseStartedAt.UTC().Format(time.RFC3339Nano),
+			"stopwatchPaused":      soloTimer.StopwatchPaused(),
+			"stopwatchBaseSeconds": soloTimer.StopwatchBankedSeconds(),
 		}
 	}
 

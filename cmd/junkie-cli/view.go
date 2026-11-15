@@ -61,6 +61,12 @@ func renderSoloLine(t *soloTimer, width int) string {
 			fit("nothing running · open `junkie` and press f", width-labelWidth))) + "\n"
 	}
 	style := lipgloss.NewStyle().Foreground(phaseColor(t.Phase)).Bold(true)
+	if t.StopwatchPaused {
+		// Held at its ceiling: the time is banked, and it waits for a choice.
+		return labeled("timer", style.Render("stopwatch paused")+
+			fmt.Sprintf(" · %s saved", formatDuration(t.StopwatchBaseSeconds))+
+			styleFaint.Render(" · open `junkie`: t continues, x stops · ends itself after an hour")) + "\n"
+	}
 	if t.BreakPending {
 		return labeled("timer", style.Render("break ready")+
 			fmt.Sprintf(" · %d min offered", t.BreakMinutes)+
@@ -70,7 +76,7 @@ func renderSoloLine(t *soloTimer, width int) string {
 	if t.Stopwatch && t.Phase == "focus" {
 		// A stopwatch has no end to count towards and no bar to fill.
 		return labeled("timer", style.Render("stopwatch")+
-			fmt.Sprintf(" · %s so far", formatDuration(total-t.SecondsLeft))+
+			fmt.Sprintf(" · %s so far", formatDuration(t.StopwatchBaseSeconds+total-t.SecondsLeft))+
 			styleFaint.Render(" · open `junkie`: x stops it and banks the time")) + "\n"
 	}
 	line := labeled("timer", style.Render(phaseLabel(t))+

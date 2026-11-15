@@ -46,6 +46,11 @@ type face struct {
 	// CountUp marks a running stopwatch: the digits show time elapsed
 	// (TotalSeconds less what is left) and there is no end to announce.
 	CountUp bool
+	// BaseSeconds is what a stopwatch counted before the stretch now
+	// running; Held marks one paused at its ceiling, standing at exactly
+	// that, waiting to be continued or stopped.
+	BaseSeconds int
+	Held        bool
 
 	// Note is the room detail the solo timer has no equivalent of: which
 	// session of how many, and how many people are in it.
@@ -80,6 +85,8 @@ func soloFace(t *soloTimer) *face {
 		BreakPending: t.BreakPending,
 		BreakMinutes: t.BreakMinutes,
 		CountUp:      t.Stopwatch && t.Phase == "focus",
+		BaseSeconds:  t.StopwatchBaseSeconds,
+		Held:         t.StopwatchPaused,
 	}
 }
 

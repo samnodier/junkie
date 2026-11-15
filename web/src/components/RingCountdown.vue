@@ -7,6 +7,7 @@
 // than wrong.
 import { computed, watch } from 'vue';
 import { useClock } from '@/composables/clock';
+import { formatElapsed } from '@/lib/elapsed';
 
 const CIRC = 2 * Math.PI * 88;
 
@@ -18,8 +19,12 @@ const props = defineProps({
   // Stopwatch: show the time elapsed instead of the time left. The deadline
   // is then the stopwatch's ceiling and totalSeconds the length of that
   // ceiling, so elapsed is still derived from the same anchored deadline --
-  // and the ring still expires, once, if the ceiling is ever reached.
+  // and it still expires, once, if the ceiling is ever reached. A stopwatch
+  // draws no ring: a ring measures progress towards an end, and it has none.
   countUp: { type: Boolean, default: false },
+  // What a stopwatch counted in earlier stretches (it pauses at its ceiling
+  // and can be continued): the clock carries on from there, not from zero.
+  baseSeconds: { type: Number, default: 0 },
 });
 const emit = defineEmits(['expired']);
 
@@ -34,25 +39,17 @@ const left = computed(() => {
   return Math.max(0, Math.floor((deadline.value - now.value) / 1000));
 });
 
-const elapsed = computed(() => Math.max(0, props.totalSeconds - left.value));
+const elapsed = computed(() => props.baseSeconds + Math.max(0, props.totalSeconds - left.value));
 
 const display = computed(() => {
-  const value = props.countUp ? elapsed.value : left.value;
-  const s = String(value % 60).padStart(2, '0');
-  // Only a stopwatch can pass the hour mark in one phase; minutes alone
-  // would read 61:00, which is harder to take in than 1:01:00.
-  if (props.countUp && value >= 3600) {
-    const m = String(Math.floor((value % 3600) / 60)).padStart(2, '0');
-    return `${Math.floor(value / 3600)}:${m}:${s}`;
-  }
-  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${s}`;
+  // Only a stopwatch can pass the hour mark in one phase.
+  if (props.countUp) return formatElapsed(elapsed.value);
+  const value = left.value;
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 });
-// A countdown drains the ring. A stopwatch has no total to drain towards,
-// so its ring fills once an hour instead.
-const dashOffset = computed(() =>
-  props.countUp
-    ? CIRC * (1 - (elapsed.value % 3600) / 3600)
-    : CIRC * (1 - Math.max(0, Math.min(1, left.value / props.totalSeconds)))
+// A countdown drains the ring.
+const dashOffset = computed(
+  () => CIRC * (1 - Math.max(0, Math.min(1, left.value / props.totalSeconds)))
 );
 
 // Fire once per deadline. Callers key this component per phase so it normally
@@ -74,8 +71,8 @@ watch(
 </script>
 
 <template>
-  <div class="circle-timer" :class="[ringClass, { 'count-up': countUp }]" role="timer" :aria-label="ariaLabel">
-    <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+  <div class="circle-timer" :class="[ringClass, { ringless: countUp }]" role="timer" :aria-label="ariaLabel">
+    <svg v-if="!countUp" class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
       <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
       <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" :stroke-dashoffset="dashOffset"/>
     </svg>

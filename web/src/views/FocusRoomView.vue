@@ -21,6 +21,8 @@ import RingIdle from '@/components/RingIdle.vue';
 import ParticipantStack from '@/components/ParticipantStack.vue';
 import PipTimer from '@/components/PipTimer.vue';
 import WaveBar from '@/components/WaveBar.vue';
+import StopwatchPaused from '@/components/StopwatchPaused.vue';
+import { stretchWords } from '@/lib/elapsed';
 
 const route = useRoute();
 const router = useRouter();
@@ -242,8 +244,8 @@ onUnmounted(() => {
             <p v-if="stopwatch" class="label label-accent">Ready · stopwatch</p>
             <p v-else class="label label-accent">Ready · {{ room.room?.autoSessions }} × {{ room.room?.focusMinutes }}/{{ room.room?.breakMinutes }}</p>
             <p class="room-focus-name">{{ room.room?.name }}</p>
-            <div class="circle-timer room-focus-ring" role="img" :aria-label="stopwatch ? 'Stopwatch, ready to start' : `${room.room?.focusMinutes} minute focus block, ready to start`">
-              <svg class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
+            <div class="circle-timer room-focus-ring" :class="{ ringless: stopwatch }" role="img" :aria-label="stopwatch ? 'Stopwatch, ready to start' : `${room.room?.focusMinutes} minute focus block, ready to start`">
+              <svg v-if="!stopwatch" class="circle-timer-svg" viewBox="0 0 200 200" aria-hidden="true">
                 <circle class="circle-timer-track" cx="100" cy="100" r="88" fill="none"/>
                 <circle class="circle-timer-progress" cx="100" cy="100" r="88" fill="none" stroke-dasharray="553" stroke-dashoffset="0"/>
               </svg>
@@ -273,13 +275,29 @@ onUnmounted(() => {
           <template v-else-if="phase === 'focus' && timer.stopwatch">
             <p class="label label-accent">Stopwatch</p>
             <p class="room-focus-name">{{ room.room?.name }}</p>
-            <RingCountdown :key="`${timer.runId}-stopwatch`" count-up :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring focus-chrome-toggle" aria-label="Stopwatch" @expired="expired" @click="toggleChrome" />
+            <RingCountdown :key="`${timer.runId}-stopwatch-${timer.currentSession}`" count-up :base-seconds="timer.stopwatchBaseSeconds || 0" :ends-at="endsAt" :total-seconds="totalSeconds" ring-class="running room-focus-ring focus-chrome-toggle" aria-label="Stopwatch" @expired="expired" @click="toggleChrome" />
             <ParticipantStack v-if="heads.length > 1" :members="heads" />
             <p class="label">{{ heads.length === 1 ? 'Focusing solo' : `${heads.length} focusing` }}</p>
             <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join the stopwatch</button>
             <template v-else>
               <button v-if="room.isCreator" type="button" class="btn-primary" @click="stopForEveryone">{{ heads.length === 1 ? 'Stop & save' : 'Stop for everyone' }}</button>
               <button type="button" class="btn-ghost timer-cancel" @click="leave">{{ room.isCreator && heads.length === 1 ? 'Leave' : 'Leave · keep your time' }}</button>
+            </template>
+          </template>
+
+          <!-- Stopwatch paused at its ceiling: anyone in it can continue,
+               the creator can stop, and an hour of nobody doing either ends it -->
+          <template v-else-if="timer.stopwatchPaused">
+            <p class="label label-warn">Stopwatch · paused</p>
+            <p class="room-focus-name">{{ room.room?.name }}</p>
+            <StopwatchPaused :seconds="timer.stopwatchBaseSeconds" ring-class="room-focus-ring" />
+            <ParticipantStack v-if="heads.length > 1" :members="heads" />
+            <p class="label stopwatch-paused-note">Everyone's time so far is saved. Continue for up to {{ stretchWords(timer.focusMinutes) }} more, or stop. Left paused for an hour, the room closes.</p>
+            <button v-if="!timer.participant" type="button" class="btn-primary" @click="room.action('timer-join')">Join the stopwatch</button>
+            <template v-else>
+              <button type="button" class="btn-primary" @click="room.action('timer-continue')">Continue</button>
+              <button v-if="room.isCreator" type="button" class="btn-ghost timer-cancel" @click="stopForEveryone">{{ heads.length === 1 ? 'Stop & save' : 'Stop for everyone' }}</button>
+              <button type="button" class="btn-ghost timer-cancel" @click="leave">Leave</button>
             </template>
           </template>
 

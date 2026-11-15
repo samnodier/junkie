@@ -82,6 +82,11 @@ export const useDeskStore = defineStore('desk', {
       await postForm('/solo/start', { mode: 'stopwatch' });
       await this.refresh();
     },
+    // Off its ceiling pause, for another stretch.
+    async soloStopwatchContinue() {
+      await postForm('/solo/continue');
+      await this.refresh();
+    },
     async soloStopwatchStop() {
       await postForm('/solo/stop');
       await this.refresh();

@@ -113,6 +113,9 @@ func (m *watchModel) countdownText() string {
 	if m.timer == nil {
 		return ""
 	}
+	if m.timer.Held {
+		return formatDuration(m.timer.BaseSeconds)
+	}
 	if m.timer.BreakPending {
 		return fmt.Sprintf("%02d:00", m.timer.BreakMinutes)
 	}
@@ -121,7 +124,7 @@ func (m *watchModel) countdownText() string {
 		return ""
 	}
 	if m.timer.CountUp {
-		return formatDuration(m.timer.TotalSeconds - m.remaining())
+		return formatDuration(m.timer.BaseSeconds + m.timer.TotalSeconds - m.remaining())
 	}
 	return formatDuration(m.remaining())
 }
@@ -159,7 +162,9 @@ func (m *watchModel) viewFull() []string {
 	}
 	body = append(body, "")
 
-	if m.timer.BreakPending {
+	if m.timer.Held {
+		body = append(body, styleFaint.Render(clip("saved so far · t continues, x stops · ends itself after an hour", m.width)))
+	} else if m.timer.BreakPending {
 		body = append(body, styleFaint.Render(pendingHint(m.width)))
 	} else if m.timer.CountUp {
 		// Nothing to measure against and no end to name: say what it is.
@@ -204,6 +209,9 @@ func (m *watchModel) viewCompact() []string {
 		body = append(body, colour.Bold(true).Render(m.countdownText()))
 	}
 
+	if m.timer.Held {
+		return append(body, "", styleFaint.Render("paused"))
+	}
 	if m.timer.BreakPending {
 		return append(body, "", styleFaint.Render("waiting"))
 	}

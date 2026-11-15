@@ -89,7 +89,7 @@ export function notify(title, body, url, options = {}) {
   });
 }
 
-export function onTimerEnd(phase, { forcedSound = false, finished = false } = {}) {
+export function onTimerEnd(phase, { forcedSound = false, finished = false, stopwatchPaused = false } = {}) {
   // Every phase turn in the app funnels through here -- rooms, the focus
   // room, solo, and the guest desk -- so the optional chime hangs off it
   // rather than being wired into each of them. It's a no-op unless the
@@ -99,9 +99,13 @@ export function onTimerEnd(phase, { forcedSound = false, finished = false } = {}
   // `finished` is a focus phase that ended the whole thing -- a temporary
   // room's last session, or a stopwatch being stopped -- so there is no
   // break to announce.
+  // `stopwatchPaused` is a stopwatch reaching its ceiling: it holds there
+  // until someone continues or stops it, so neither of the above is true.
   const [title, body] =
     phase === 'break'
       ? ["Break's over", 'Ready for your next focus block']
+      : stopwatchPaused
+        ? ['Stopwatch paused', 'Your time so far is saved — continue or stop']
       : finished
         ? ['Focus session complete', 'That block is done — nice work']
         : ['Focus session complete', 'Time for a break'];
@@ -170,6 +174,9 @@ function describe(timer, label) {
   const phase = timer.phase || 'idle';
   const where = label ? ` · ${label}` : '';
 
+  if (timer.stopwatchPaused) {
+    return { title: `Stopwatch paused${where}`, body: 'Continue or stop — it ends after an hour' };
+  }
   if (phase === 'break_offer' || timer.breakPending) {
     return { title: `Break ready${where}`, body: "Start it when you're ready" };
   }

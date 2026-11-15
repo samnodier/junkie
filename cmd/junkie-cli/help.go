@@ -207,6 +207,7 @@ func writeOverview(w io.Writer) {
 
     Your block   f  start   b  break   s  skip break   x  end it
                  t  stopwatch (counts up; x stops it and banks the time)
+                    it pauses itself at 6 hours: t continues, x stops
     A room's     f  start   b  break   s  skip break   i  I'm in   x  leave
     Todos        a  add   space  done   e  edit   d  remove   u  undo
 

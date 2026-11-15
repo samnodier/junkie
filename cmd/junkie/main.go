@@ -211,11 +211,42 @@ func (a *app) sendWave(ctx context.Context, rm room, u user, kind string, fromDi
 // maxWavesPerMinute keeps a greeting from becoming a way to buzz the room.
 const maxWavesPerMinute = 5
 
-// stopwatchMaxMinutes is how long a stopwatch may run before it stops
-// itself: the longest focus block a countdown can be set to. A stopwatch
-// nobody came back to therefore credits no more than a forgotten countdown
-// of the same length would.
-const stopwatchMaxMinutes = 180
+// stopwatchMaxMinutes is how long a stopwatch runs before it pauses itself:
+// six hours. It does not end there. The stretch it just counted is banked,
+// the clock holds, and whoever is there chooses to continue -- for at most
+// another stretch of the same length, where it pauses again -- or to stop.
+// A pause nobody answers within stalePauseTimeout ends the run like any
+// other abandoned pause, so a stopwatch nobody came back to credits one
+// stretch and no more.
+//
+// In the table a paused stopwatch is a pending break (the only phase the
+// pause columns are allowed on), and each stretch is a session:
+// current_session counts them, focus_minutes is the length of one. A run
+// stopped by hand has total_sessions = 0, which is what tells a deliberate
+// stop apart from the ceiling being reached.
+const stopwatchMaxMinutes = 360
+
+// StopwatchPaused reports a stopwatch holding at its ceiling, waiting to be
+// continued or stopped. Solo runs keep no pause columns, so the pending
+// test is on the phase's own bounds, which holds for both kinds.
+func (t *timerRun) StopwatchPaused() bool {
+	return t != nil && t.Stopwatch && t.Phase == "break" && t.TotalSessions > 0 &&
+		!t.PhaseEndsAt.After(t.PhaseStartedAt)
+}
+
+// StopwatchBankedSeconds is what a stopwatch counted in the stretches before
+// the one now running: what the clock starts from after a continue, and
+// what it holds at while paused.
+func (t *timerRun) StopwatchBankedSeconds() int {
+	if t == nil || !t.Stopwatch {
+		return 0
+	}
+	stretches := t.CurrentSession - 1
+	if t.StopwatchPaused() {
+		stretches = t.CurrentSession
+	}
+	return max(stretches, 0) * t.FocusMinutes * 60
+}
 
 // BreakPending reports a break that arrived with auto-roll off and hasn't
 // been started yet: it was paused at the exact moment it began. A break
@@ -449,6 +480,7 @@ func main() {
 	mux.HandleFunc("POST /solo/start", a.requireAuth(a.startSoloTimer))
 	mux.HandleFunc("POST /solo/cancel", a.requireAuth(a.cancelSoloTimer))
 	mux.HandleFunc("POST /solo/stop", a.requireAuth(a.stopSoloStopwatch))
+	mux.HandleFunc("POST /solo/continue", a.requireAuth(a.continueSoloStopwatch))
 	mux.HandleFunc("POST /solo/break/start", a.requireAuth(a.startSoloBreak))
 	mux.HandleFunc("POST /solo/break/skip", a.requireAuth(a.skipSoloBreak))
 	mux.HandleFunc("POST /todo/", a.requireAuth(a.todoAction))
@@ -1117,23 +1149,61 @@ func (a *app) insertSoloRun(ctx context.Context, userID string, focusMinutes int
 // normalizeSoloTimer then does what it does for any finished focus block:
 // credits the minutes once and offers the break. Under half a minute rounds
 // to nothing, so the run just ends.
+//
+// Only the stretch now running is rewritten: earlier ones were banked when
+// they paused. Stopping a stopwatch that is paused at its ceiling has
+// nothing left to bank, so it just turns the pause into the same break
+// offer. Either way total_sessions = 0 marks the run as stopped by hand.
 func (a *app) stopSoloStopwatch(w http.ResponseWriter, r *http.Request) {
 	u, _ := a.currentUser(r)
+	// Settle a ceiling that was reached but not yet recorded, so the stop
+	// below sees the pause rather than a focus phase past its deadline.
+	_, _ = a.normalizeSoloTimer(r.Context(), u.ID)
 	var runID string
 	var minutes int
 	err := a.db.QueryRow(r.Context(), `
 		UPDATE timer_runs
-		SET focus_minutes = LEAST($2, GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - phase_started_at)) / 60)))::int,
-			phase_ends_at = now() - interval '1 second'
+		SET focus_minutes = LEAST(focus_minutes, GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - phase_started_at)) / 60)))::int,
+			phase_ends_at = now() - interval '1 second',
+			total_sessions = 0
 		WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'focus'
 			AND stopwatch AND phase_ends_at > now()
-		RETURNING id, focus_minutes`, u.ID, stopwatchMaxMinutes).Scan(&runID, &minutes)
+		RETURNING id, focus_minutes`, u.ID).Scan(&runID, &minutes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		tag, pausedErr := a.db.Exec(r.Context(), `
+			UPDATE timer_runs SET total_sessions = 0
+			WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'break'
+				AND stopwatch AND total_sessions > 0 AND phase_ends_at <= phase_started_at`, u.ID)
+		if pausedErr == nil && tag.RowsAffected() > 0 {
+			a.hub.broadcast(userChannel(u.ID), "solo-timer")
+		}
+	}
 	if err == nil {
 		if minutes == 0 {
 			_, _ = a.db.Exec(r.Context(), `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1 AND phase = 'focus'`, runID)
 		} else {
 			_, _ = a.normalizeSoloTimer(r.Context(), u.ID)
 		}
+		a.hub.broadcast(userChannel(u.ID), "solo-timer")
+	}
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// continueSoloStopwatch takes a private stopwatch off its ceiling pause for
+// another stretch. The stretch that paused is already banked, so this only
+// opens the next one; the clock picks up from where it held.
+func (a *app) continueSoloStopwatch(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.currentUser(r)
+	// Normalize first: a pause left for an hour has already ended the run,
+	// and a stale tab's Continue must not bring it back.
+	_, _ = a.normalizeSoloTimer(r.Context(), u.ID)
+	tag, err := a.db.Exec(r.Context(), `
+		UPDATE timer_runs
+		SET phase = 'focus', current_session = current_session + 1,
+			phase_started_at = now(), phase_ends_at = now() + make_interval(mins => focus_minutes)
+		WHERE user_id = $1 AND room_id IS NULL AND ended_at IS NULL AND phase = 'break'
+			AND stopwatch AND total_sessions > 0 AND phase_ends_at <= phase_started_at`, u.ID)
+	if err == nil && tag.RowsAffected() > 0 {
 		a.hub.broadcast(userChannel(u.ID), "solo-timer")
 	}
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
@@ -1543,11 +1613,23 @@ func (a *app) roomPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// A temporary room has its own screen, and this one doesn't know what
+	// one is: no stopwatch, no stop, no session stepper -- a stopwatch here
+	// drew as a countdown from its ceiling. Plenty of paths still point at
+	// /r/ (joining by code, an action's error redirect, a pasted link), so
+	// they are all sent on from this one place, query string and all.
+	if rm.Ephemeral {
+		dest := "/f/" + rm.Code
+		if r.URL.RawQuery != "" {
+			dest += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, dest, http.StatusSeeOther)
+		return
+	}
 	// The SPA fetches /api/room/{code}, which re-runs the member gate and
 	// answers with either the invite card or the room state. The 404 gates
 	// above keep their exact HTTP semantics.
 	_ = u
-	_ = rm
 	a.spaPage(w, r)
 }
 
@@ -1702,6 +1784,15 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/r/"+code+"?error="+url.QueryEscape("You're doing that too quickly — give it a moment."), http.StatusSeeOther)
 		return
 	}
+	// A stopwatch's pause is stored as a break but isn't one: it has no
+	// length to set, nothing to pause or resume, and only one way forward.
+	if rm.Stopwatch {
+		switch action {
+		case "timer-pause", "timer-resume", "timer-skip-break", "timer-break-length", "timer-checkin":
+			http.Redirect(w, r, "/f/"+code, http.StatusSeeOther)
+			return
+		}
+	}
 	switch action {
 	case "rename":
 		name := limitRunes(strings.TrimSpace(r.FormValue("name")), maxRoomNameLen)
@@ -1728,6 +1819,12 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			// creator.
 			if rm.CreatorID != u.ID {
 				http.Redirect(w, r, "/f/"+code+"?error="+url.QueryEscape("Only whoever started this room can change its sessions."), http.StatusSeeOther)
+				return
+			}
+			// A stopwatch has no sessions to retarget; its session columns
+			// count stretches and carry the stopped-by-hand mark.
+			if rm.Stopwatch {
+				http.Redirect(w, r, "/f/"+code, http.StatusSeeOther)
 				return
 			}
 			sessions := clampInt(r.FormValue("auto_sessions"), 1, 12, rm.AutoSessions)
@@ -1963,6 +2060,25 @@ func (a *app) roomAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		action = ""
+	case "timer-continue":
+		// Take a stopwatch off its ceiling pause for another stretch. Open to
+		// anyone in it, like starting a break: it only keeps going what they
+		// were all already doing, and stopping stays with the creator.
+		timer, _, err := a.normalizeTimer(r.Context(), rm.ID, u.ID)
+		if err != nil {
+			http.Error(w, "could not continue the stopwatch", http.StatusInternalServerError)
+			return
+		}
+		action = ""
+		if timer.StopwatchPaused() && timer.Participant {
+			if next, changed, err := a.skipRoomBreak(r.Context(), rm.ID, u.ID); err != nil {
+				http.Error(w, "could not continue the stopwatch", http.StatusInternalServerError)
+				return
+			} else if changed {
+				action = "timer-phase"
+				a.notifyDiscord(rm, next, false)
+			}
+		}
 	case "timer-stop":
 		// Stopping ends the stopwatch for everyone in it and, in a temporary
 		// room, closes the room -- the same lever as changing a live run's
@@ -2092,7 +2208,7 @@ func (a *app) broadcastTimerPhase(rm room, timer *timerRun) {
 			"type": "timer-checkin-kick", "roomCode": rm.Code, "userIds": timer.Kicked,
 		})
 	}
-	if timer != nil && timer.Phase == "break" {
+	if timer != nil && timer.Phase == "break" && !timer.Stopwatch {
 		a.hub.broadcastJSON(rm.Code, map[string]interface{}{
 			"type": "timer-break-invite", "roomCode": rm.Code, "roomName": rm.Name,
 			"breakDeadline": timer.PhaseEndsAt.UTC().Format(time.RFC3339Nano),
@@ -2180,6 +2296,30 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 			if err = creditFocusSession(ctx, tx, timer.ID, timer.PhaseStartedAt, timer.PhaseEndsAt, ""); err != nil {
 				return nil, false, err
 			}
+			if timer.Stopwatch && timer.TotalSessions > 0 {
+				// A stopwatch that reached its ceiling pauses rather than
+				// ends: the stretch is banked just above, and the run waits
+				// as a pending break for someone to continue or stop it.
+				// The pause is dated at the ceiling, not at this read, so
+				// the hour it may sit there runs from when it happened.
+				boundary := timer.PhaseEndsAt
+				zero := 0
+				if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'break', phase_started_at = $1, phase_ends_at = $1, paused_at = $1, paused_remaining_seconds = 0 WHERE id = $2`, boundary, timer.ID); err != nil {
+					return nil, false, err
+				}
+				timer.Phase = "break"
+				timer.PhaseStartedAt = boundary
+				timer.PausedAt = &boundary
+				timer.PausedRemainingSeconds = &zero
+				timer.Transitioned = true
+				if timer.PauseExpired(now) {
+					if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now(), paused_at = NULL, paused_remaining_seconds = NULL WHERE id = $1`, timer.ID); err != nil {
+						return nil, false, err
+					}
+					timer.Phase = "ended"
+				}
+				continue
+			}
 			if timer.CurrentSession >= timer.TotalSessions {
 				if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID); err != nil {
 					return nil, false, err
@@ -2223,6 +2363,15 @@ func (a *app) normalizeTimer(ctx context.Context, roomID, userID string) (*timer
 				return nil, false, err
 			}
 			timer.Transitioned = true
+		} else if timer.Phase == "break" && timer.Stopwatch && timer.TotalSessions == 0 {
+			// A stopwatch stopped while it was paused at its ceiling: every
+			// stretch is already banked, so there is only the run to close.
+			if _, err = tx.Exec(ctx, `UPDATE timer_runs SET phase = 'ended', ended_at = now() WHERE id = $1`, timer.ID); err != nil {
+				return nil, false, err
+			}
+			timer.Phase = "ended"
+			timer.Transitioned = true
+			break
 		} else if timer.Phase == "break" {
 			// Check-in rooms: the break was the window to claim a seat in the
 			// next session. Drop everyone who didn't; if that empties the run,
@@ -2633,15 +2782,20 @@ func (a *app) creditStopwatchLeaver(ctx context.Context, runID, userID string) e
 	return tx.Commit(ctx)
 }
 
-// stopRoomStopwatch ends a room's running stopwatch by pulling its deadline
-// in to now. It deliberately does nothing else: the next normalizeTimer finds
-// a focus phase that has reached its end and credits and closes it exactly
-// as it would a countdown that ran out.
+// stopRoomStopwatch ends a room's stopwatch -- running, or paused at its
+// ceiling -- by pulling its deadline in to now and marking it stopped by
+// hand (total_sessions = 0). It deliberately does nothing else: the next
+// normalizeTimer finds a phase that has reached its end on a stopped run,
+// credits whatever is still uncredited and closes it. LEAST keeps a deadline
+// that has already passed where it was, so a stop can never stretch the
+// window that gets credited.
 func (a *app) stopRoomStopwatch(ctx context.Context, roomID string) (bool, error) {
 	tag, err := a.db.Exec(ctx, `
-		UPDATE timer_runs SET phase_ends_at = now() - interval '1 second'
-		WHERE room_id = $1 AND stopwatch AND phase = 'focus' AND ended_at IS NULL
-			AND phase_ends_at > now()`, roomID)
+		UPDATE timer_runs
+		SET phase_ends_at = LEAST(phase_ends_at, now() - interval '1 second'),
+			total_sessions = 0, paused_at = NULL, paused_remaining_seconds = NULL
+		WHERE room_id = $1 AND stopwatch AND phase IN ('focus', 'break') AND ended_at IS NULL
+			AND total_sessions > 0`, roomID)
 	if err != nil {
 		return false, err
 	}

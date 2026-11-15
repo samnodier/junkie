@@ -243,9 +243,16 @@ watch(active, async () => {
               length you picked — for when you don't know how long something will take.
             </p>
             <ul>
-              <li>Tap the ring to start; <strong>Stop &amp; save</strong> banks the whole minutes it counted to your work map and offers the usual break.</li>
+              <li>There is no ring — a ring measures progress towards an end, and a stopwatch doesn't have one. Just the clock.</li>
+              <li><strong>Start stopwatch</strong> starts it; <strong>Stop &amp; save</strong> banks the whole minutes it counted to your work map and offers the usual break.</li>
               <li>Unlike ending a countdown early, stopping a stopwatch always keeps the time.</li>
-              <li>It stops itself at <strong>3 hours</strong>, the longest a focus block can be.</li>
+              <li>
+                At <strong>6 hours</strong> it pauses itself and saves what it has counted. From
+                there, <strong>Continue</strong> runs it for up to another 6 hours — the clock
+                carries on from where it held, and pauses again at the next 6 — or
+                <strong>Stop &amp; save</strong> ends it and offers the usual break.
+              </li>
+              <li>A pause left alone for an hour ends the stopwatch on its own. The time is already saved; the screen just goes back to ready.</li>
               <li>The tab you last used is remembered in that browser.</li>
             </ul>
             <p>
@@ -409,7 +416,9 @@ watch(active, async () => {
               <li><strong>Join any time</strong> — each person is credited from the moment they arrived.</li>
               <li><strong>Leaving keeps your time</strong> — walk out early and what you put in still counts.</li>
               <li><strong>Only the creator can stop it for everyone</strong>, which credits whoever is still in, rings the room's chime for them, and closes the room.</li>
-              <li>It stops itself at 3 hours. Ordinary rooms don't have a stopwatch — they are built around the countdown.</li>
+              <li>It shows no ring: there is no end to measure against.</li>
+              <li><strong>It pauses itself at 6 hours</strong>, with everyone's time saved. Anyone in it can <strong>Continue</strong> for up to another 6 hours; the creator can stop it instead. A pause nobody answers for an hour closes the room.</li>
+              <li>Ordinary rooms don't have a stopwatch — they are built around the countdown.</li>
             </ul>
 
             <h3>Changing the session count mid-block</h3>
@@ -619,7 +628,7 @@ watch(active, async () => {
                 <tr><td>todos</td><td><code>space</code></td><td>complete or un-complete</td></tr>
                 <tr><td>todos</td><td><code>a</code> <code>e</code> <code>d</code> <code>u</code></td><td>add · edit · remove · undo the last remove</td></tr>
                 <tr><td>block</td><td><code>f</code> <code>b</code> <code>s</code></td><td>start focus · take the break · skip it</td></tr>
-                <tr><td>block</td><td><code>t</code></td><td>start a stopwatch (signed in); <code>x</code> stops it and banks the time</td></tr>
+                <tr><td>block</td><td><code>t</code></td><td>start a stopwatch (signed in); <code>x</code> stops it and banks the time. It pauses itself at 6 hours: <code>t</code> continues, <code>x</code> stops</td></tr>
                 <tr><td>block</td><td><code>i</code></td><td>I'm in — join a room's block, or check in for the next session</td></tr>
                 <tr><td>block</td><td><code>x</code></td><td>end the block on screen — your own, or leave a room's. Asks first either way</td></tr>
                 <tr><td>desk</td><td><code>A</code></td><td>join a room by code without leaving the desk</td></tr>

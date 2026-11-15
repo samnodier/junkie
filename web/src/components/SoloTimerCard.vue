@@ -13,6 +13,8 @@ import RingCountdown from './RingCountdown.vue';
 import BreakReadyRing from './BreakReadyRing.vue';
 import ModeTabs from './ModeTabs.vue';
 import StopwatchIdle from './StopwatchIdle.vue';
+import StopwatchPaused from './StopwatchPaused.vue';
+import { stretchWords } from '@/lib/elapsed';
 import { askConfirm } from '@/composables/confirm';
 import { useSoloMode } from '@/lib/soloMode';
 
@@ -43,7 +45,8 @@ async function cancel() {
   desk.soloCancel();
 }
 function expired(phase) {
-  onTimerEnd(phase);
+  // A stopwatch reaching its ceiling pauses; it hasn't finished anything.
+  onTimerEnd(phase, { stopwatchPaused: Boolean(timer.value?.stopwatch) });
   expireNudge(() => desk.refresh(), phaseKey);
 }
 </script>
@@ -53,8 +56,15 @@ function expired(phase) {
     <article v-if="timer" class="timer-card panel desk-timer-card solo-timer" :class="timer.phase">
       <template v-if="timer.phase === 'focus' && timer.stopwatch">
         <p class="label label-accent">Private stopwatch</p>
-        <RingCountdown key="solo-stopwatch" count-up :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running" aria-label="Private stopwatch" @expired="expired('focus')" />
+        <RingCountdown key="solo-stopwatch" count-up :base-seconds="timer.stopwatchBaseSeconds || 0" :ends-at="endsAt" :total-seconds="timer.focusMinutes * 60" ring-class="running" aria-label="Private stopwatch" @expired="expired('focus')" />
         <form @submit.prevent="desk.soloStopwatchStop()"><button type="submit" class="btn-primary">Stop &amp; save</button></form>
+      </template>
+      <template v-else-if="timer.stopwatchPaused">
+        <p class="label label-warn">Private stopwatch · paused</p>
+        <StopwatchPaused :seconds="timer.stopwatchBaseSeconds" ring-class="running" />
+        <p class="label stopwatch-paused-note">Saved so far. Continue for up to {{ stretchWords(timer.focusMinutes) }} more, or stop. Left paused for an hour, it ends.</p>
+        <form @submit.prevent="desk.soloStopwatchContinue()"><button type="submit" class="btn-primary">Continue</button></form>
+        <form @submit.prevent="desk.soloStopwatchStop()"><button type="submit" class="btn-ghost timer-cancel">Stop &amp; save</button></form>
       </template>
       <template v-else-if="timer.phase === 'focus'">
         <p class="label label-accent">Private focus</p>
@@ -76,7 +86,7 @@ function expired(phase) {
       <ModeTabs v-model="mode" />
       <template v-if="mode === 'stopwatch'">
         <StopwatchIdle @start="startStopwatch" />
-        <p class="label desk-ring-hint">Counts up until you stop · tap ring to start</p>
+        <p class="label desk-ring-hint">Counts up until you stop it</p>
       </template>
       <template v-else>
         <form class="circle-timer-form" @submit.prevent>

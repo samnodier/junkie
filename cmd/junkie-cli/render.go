@@ -153,6 +153,8 @@ func phaseLabel(t *soloTimer) string {
 	switch {
 	case t == nil:
 		return "no timer running"
+	case t.StopwatchPaused:
+		return "stopwatch paused"
 	case t.BreakPending:
 		return "break ready"
 	case t.Phase == "break":

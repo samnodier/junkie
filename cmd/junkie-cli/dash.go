@@ -658,6 +658,11 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.do("/solo/start", nil, "focus block started")
 	case "t":
+		// A stopwatch paused at its ceiling is continued with the key that
+		// started it.
+		if t != nil && t.StopwatchPaused {
+			return m, m.do("/solo/continue", nil, "stopwatch continued")
+		}
 		if t != nil {
 			m.note("a block is already running")
 			return m, nil
@@ -669,13 +674,20 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.do("/solo/start", url.Values{"mode": {"stopwatch"}}, "stopwatch started")
-	case "b":
-		if t == nil || !t.BreakPending {
-			m.note("no break is waiting")
+	case "b", "s":
+		// A paused stopwatch looks like a pending break on the wire but has
+		// no break to take or skip yet: it is continued or stopped.
+		if t != nil && t.StopwatchPaused {
+			m.note("the stopwatch is paused — t continues it, x stops it")
 			return m, nil
 		}
-		return m, m.do("/solo/break/start", nil, "break started")
-	case "s":
+		if msg.String() == "b" {
+			if t == nil || !t.BreakPending {
+				m.note("no break is waiting")
+				return m, nil
+			}
+			return m, m.do("/solo/break/start", nil, "break started")
+		}
 		if t == nil || t.Phase != "break" {
 			m.note("there is no break to skip")
 			return m, nil
@@ -685,6 +697,11 @@ func (m *dashModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// leaves a room's block over there. c stays as it was, so a hand that
 	// learned it keeps working.
 	case "x", "c":
+		// Paused at its ceiling there is nothing left to bank; stopping
+		// just closes it out into the usual break offer.
+		if t != nil && t.StopwatchPaused {
+			return m, m.do("/solo/stop", nil, "stopwatch stopped — time banked")
+		}
 		if t == nil || t.Phase != "focus" {
 			m.note("no running block to end")
 			return m, nil

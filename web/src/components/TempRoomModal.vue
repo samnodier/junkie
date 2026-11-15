@@ -73,7 +73,7 @@ async function pickSound(event) {
             <li><strong>Counts up from zero.</strong> No length to choose, no breaks, no sessions — it runs until you stop it.</li>
             <li><strong>Everyone's time counts.</strong> Each person is credited for the time they were in, from when they joined.</li>
             <li><strong>Leaving keeps your time.</strong> Anyone can leave early; only you can stop it for the whole room.</li>
-            <li><strong>Stops itself at 3 hours</strong>, the longest a focus block can be.</li>
+            <li><strong>Pauses itself at 6 hours</strong> with the time saved. Continue for up to 6 more, or stop; left paused for an hour, the room closes.</li>
           </ul>
           <template v-else>
           <div class="timer-fields">
