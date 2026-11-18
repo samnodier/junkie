@@ -13,9 +13,11 @@ const router = useRouter();
 let tick;
 onMounted(() => {
   tick = setInterval(() => {
-    seconds.value -= 1;
+    // Show 3, 2, 1 and 0 for a full second each (4s total), then leave.
+    // Never go below 0: a negative offset would wrap the arc's dash back on.
     // replace, not push: Back must not land on this 404 again.
-    if (seconds.value <= 0) router.replace('/');
+    if (seconds.value === 0) router.replace('/');
+    else seconds.value -= 1;
   }, 1000);
 });
 onBeforeUnmount(() => clearInterval(tick));
