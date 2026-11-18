@@ -3257,8 +3257,10 @@ body.menu-drawer-open {
   text-transform: uppercase;
   color: var(--muted);
 }
+/* Fills in, then drops a third per second of NotFoundView's redirect countdown. */
 .notfound-arc {
-  animation: notfound-draw 900ms ease-out;
+  animation: notfound-draw 700ms ease-out;
+  transition: stroke-dashoffset 450ms ease-out;
 }
 @keyframes notfound-draw {
   from {
